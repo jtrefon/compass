@@ -4,8 +4,8 @@ import { BASE_URL, REPO } from "../consts";
 ---
 
 <BaseLayout
-  title="Contributors - Compass"
-  description="Build the future of native macOS AI development. Compass is open source - contribute to Swift, MLX, or tooling."
+  title="Contributors — Compass"
+  description="Build the future of native macOS AI development. Compass is MIT-licensed Swift — contribute to the editor, the MLX pipeline, or the agent harness."
   canonical={`${BASE_URL}/contributors`}
 >
   <section class="page-hero" style="text-align:center">
@@ -13,7 +13,9 @@ import { BASE_URL, REPO } from "../consts";
       <p class="section-kicker reveal">Open source</p>
       <h1 class="reveal">For contributors</h1>
       <p class="reveal" style="font-size:1.05rem;color:var(--text-dim);max-width:560px;margin:0 auto;line-height:1.7">
-        Compass is MIT-licensed and built entirely in Swift. If you want to shape how native AI development works on macOS, this is the place.
+        Compass is MIT-licensed and built entirely in Swift. If you want to shape how native AI
+        development works on macOS — or just want a project that tests its AI with AI — this is the
+        place.
       </p>
       <div class="reveal" style="margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
         <a class="btn btn-primary" href={`${REPO}/blob/main/CONTRIBUTING.md`} target="_blank" rel="noreferrer">Contribution guide</a>
@@ -29,9 +31,10 @@ import { BASE_URL, REPO } from "../consts";
         <div class="card reveal">
           <h3 style="font-size:1rem;margin-bottom:8px;color:var(--cyan)">Codebase</h3>
           <p style="font-size:.88rem;color:var(--text-dim);line-height:1.7">
-            ~40,000 lines of Swift across <code>Compass/</code>, the test harness, and the UI layer.
-            Build with Xcode 26+ and Apple Silicon. The project uses <code>xcodebuild</code> (not SwiftPM) for the main target,
-            with SPM packages for <code>SyntaxHighlighting</code> (tree-sitter) and <code>Terminal</code>.
+            ~40,000 lines of Swift across <code>osx-ide/</code>, the harness tests, and the UI layer.
+            Build with Xcode 26+ on Apple Silicon. The project uses <code>xcodebuild</code> (not
+            SwiftPM) for the main target, with SPM packages for <code>SyntaxHighlighting</code>
+            (tree-sitter) and <code>Terminal</code>.
           </p>
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
             <span class="badge badge-live">SwiftUI</span>
@@ -46,10 +49,10 @@ import { BASE_URL, REPO } from "../consts";
           <h3 style="font-size:1rem;margin-bottom:8px;color:var(--violet)">Get started</h3>
           <pre style="font-family:var(--font-mono);font-size:.82rem;background:var(--bg);padding:16px;border-radius:8px;overflow-x:auto;color:var(--text-dim);line-height:1.8">./run.sh build
 ./run.sh test
-./run.sh harness
-xcodebuild test -scheme Compass</pre>
+./run.sh harness</pre>
           <p style="font-size:.85rem;color:var(--text-faint);margin-top:8px">
-            See <code>AGENTS.md</code> and <code>ARCHITECTURE.md</code> in the repo.
+            See <code>AGENTS.md</code> and <code>ARCHITECTURE.md</code> in the repo. Everything runs
+            from <code>./run.sh</code>.
           </p>
         </div>
       </div>
@@ -63,22 +66,31 @@ xcodebuild test -scheme Compass</pre>
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">Two-pipeline isolation</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">The core architecture: local (4B MLX, no orchestration) and cloud (orchestration graph, 20+ tools). They share zero AI execution code.</p>
-          <code style="margin-top:8px;display:inline-block">Services/LocalPipeline/ · Services/CloudPipeline/</code>
+          <code style="margin-top:8px;display:inline-block">osx-ide/Services/LocalPipeline/ · osx-ide/Services/CloudPipeline/</code>
         </div>
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">Codebase index</h3>
-          <p style="font-size:.85rem;color:var(--text-dim)">SQLite FTS5 engine for symbols, chunks, files, and HNSW-backed embedding retrieval. All in <code>Services/Index/</code>.</p>
-          <code style="margin-top:8px;display:inline-block">Services/Index/DatabaseManager.swift</code>
+          <p style="font-size:.85rem;color:var(--text-dim)">SQLite FTS5 engine for symbols, chunks, files, and HNSW-backed embedding retrieval. All in <code>osx-ide/Services/Index/</code>.</p>
+          <code style="margin-top:8px;display:inline-block">osx-ide/Services/Index/DatabaseManager.swift</code>
         </div>
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">Inline completion engine</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">Local FIM completion with ghost-text rendering, caching, ranking, and sub-100ms latency. The tightest latency loop in the app.</p>
-          <code style="margin-top:8px;display:inline-block">Services/LocalPipeline/InlineCompletionEngine.swift</code>
+          <code style="margin-top:8px;display:inline-block">osx-ide/Services/LocalPipeline/InlineCompletionEngine.swift</code>
         </div>
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">Agent tool system</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">20+ tools implementing the <code>AITool</code> protocol. The tool loop runs in <code>ToolLoopHandler.swift</code> with stall detection.</p>
-          <code style="margin-top:8px;display:inline-block">Services/Tools/ · Services/CloudPipeline/ToolLoopHandler.swift</code>
+          <code style="margin-top:8px;display:inline-block">osx-ide/Services/Tools/ · osx-ide/Services/CloudPipeline/ToolLoopHandler.swift</code>
+        </div>
+        <div class="reveal card">
+          <h3 style="font-size:.95rem;margin-bottom:4px">The harness — our AI tests AI</h3>
+          <p style="font-size:.85rem;color:var(--text-dim)">
+            Compass ships a headless integration harness that runs real agentic tasks through the
+            real pipeline and validates the outcome — no mocks, no stubs. When your PR touches the
+            agent, the agent gets tested by agents. Few projects can say that.
+          </p>
+          <code style="margin-top:8px;display:inline-block">osx-ideHarnessTests/ · ./run.sh harness</code>
         </div>
       </div>
       <div class="reveal" style="margin-top:32px;text-align:center">

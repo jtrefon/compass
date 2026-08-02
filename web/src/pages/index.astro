@@ -1,72 +1,243 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import ProductShot from "../components/ProductShot.astro";
-import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE, ROADMAP, PIPELINE_LOCAL, PIPELINE_CLOUD, SITE_TITLE, SITE_DESCRIPTION } from "../consts";
+import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE, ROADMAP, FAQ, SITE_TITLE, SITE_DESCRIPTION } from "../consts";
 ---
 
 <BaseLayout title={SITE_TITLE} description={SITE_DESCRIPTION} canonical={`${BASE_URL}/`}>
+  <style>
+    .pitch-list {
+      counter-reset: pitch;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 18px;
+      max-width: 760px;
+    }
+    .pitch-list li {
+      counter-increment: pitch;
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .pitch-list li::before {
+      content: counter(pitch);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid rgba(196, 148, 62, 0.4);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1.05rem;
+      font-family: var(--font-mono);
+      background: rgba(196, 148, 62, 0.06);
+    }
+    .pitch-list li strong {
+      color: var(--text);
+    }
+    details.faq {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      padding: 16px 20px;
+    }
+    details.faq summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--text);
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    details.faq summary::after {
+      content: "+";
+      color: var(--accent);
+      font-size: 1.2rem;
+      font-weight: 700;
+      transition: transform 0.15s ease;
+    }
+    details.faq[open] summary::after {
+      transform: rotate(45deg);
+    }
+    details.faq p {
+      margin: 12px 0 0;
+      font-size: 0.92rem;
+      line-height: 1.7;
+      color: var(--text-dim);
+    }
+    .terminal-block {
+      background: #0a0d13;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 16px 20px;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: #9fe8c8;
+      overflow-x: auto;
+      white-space: nowrap;
+      text-align: left;
+    }
+    .payoff {
+      border: 1px solid rgba(196, 148, 62, 0.35);
+      background: linear-gradient(180deg, rgba(196, 148, 62, 0.08), rgba(196, 148, 62, 0.02));
+      border-radius: 16px;
+      padding: 32px;
+      text-align: center;
+    }
+  </style>
+
+  <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <p class="section-kicker reveal">Swift-native · Apple Neural Engine · Real on-device AI</p>
+      <p class="section-kicker reveal">The native AI IDE for macOS</p>
       <h1 class="reveal">
-        Your code. Your Mac.<br />
-        Real AI, nowhere else.
+        AI coding that<br />respects your machine.
       </h1>
-      <p class="hero-tagline reveal">Native speed. On-device intelligence. A 200&nbsp;MB footprint.</p>
-      <p class="hero-lede reveal">
-        Compass is a Swift-native IDE that runs <strong>genuine</strong> AI, completion, retrieval, and
-        agentic coding, entirely on your Apple Silicon. No Electron. No JavaScript bloat. No code shipped to
-        the cloud. The fastest, most private coding assistant ever built for macOS, and years ahead of everything else.
+      <p class="hero-lede reveal" style="max-width:680px">
+        My MacBook Pro M4 has 16GB of RAM. Cursor and Docker were using all of it — YouTube started
+        stuttering, and I was swapping like it was 2009. So I built <strong>Compass</strong>: a Swift-native IDE
+        with agentic coding, on-device intelligence, and zero Electron tax. Same future. Your machine,
+        your rules.
       </p>
       <div class="hero-actions reveal">
-        <a class="btn btn-primary" href={`${BASE_URL}/beta`}>Join closed beta</a>
-        <a class="btn btn-secondary" href={`${BASE_URL}/tech`}>Explore the tech</a>
-        <a class="btn btn-secondary" href={REPO} target="_blank" rel="noreferrer">View source</a>
+        <a class="btn btn-primary" href={`${BASE_URL}/download`}>Download for macOS</a>
+        <a class="btn btn-secondary" href={REPO} target="_blank" rel="noreferrer">Star on GitHub</a>
+        <a class="btn btn-secondary" href={`${BASE_URL}/tech`}>How it works</a>
       </div>
       <div class="hero-stats reveal">
         <div>
           <div class="hero-stat-value">&lt;100ms</div>
-          <div class="hero-stat-label">Local completion latency</div>
+          <div class="hero-stat-label">On-device FIM completion</div>
         </div>
         <div>
           <div class="hero-stat-value">200MB</div>
-          <div class="hero-stat-label">Full app, every AI on</div>
+          <div class="hero-stat-label">Full app, AI included</div>
         </div>
         <div>
-          <div class="hero-stat-value">100%</div>
-          <div class="hero-stat-label">Offline-capable AI</div>
-        </div>
-        <div>
-          <div class="hero-stat-value">ANE</div>
-          <div class="hero-stat-label">On-device embeddings</div>
+          <div class="hero-stat-value">0</div>
+          <div class="hero-stat-label">Bytes egress until you opt in</div>
         </div>
         <div>
           <div class="hero-stat-value">20+</div>
-          <div class="hero-stat-label">Agent tools</div>
+          <div class="hero-stat-label">Agent tools, your provider</div>
+        </div>
+        <div>
+          <div class="hero-stat-value">MIT</div>
+          <div class="hero-stat-label">Open source, auditable</div>
         </div>
       </div>
 
       <div class="container" style="margin-top:56px">
         <ProductShot
           src={`${BASE_URL}/images/shot-ide.webp`}
-          alt="Compass IDE showing the file navigator, native editor, and agentic chat panel running on macOS"
+          alt="Compass IDE running on macOS — file navigator, native editor, and AI chat panel"
           width={1473}
           height={1039}
           eager={true}
-          caption="Compass running natively on macOS, file navigator, editor, and the agentic chat pipeline."
+          caption="Compass running natively on macOS: file navigator, editor, and the AI pipeline."
         />
       </div>
     </div>
   </section>
 
+  <!-- The pitch -->
+  <section id="pitch" class="section section-alt">
+    <div class="container">
+      <p class="section-kicker reveal">Sound familiar?</p>
+      <h2 class="section-title reveal">You didn't switch editors because the old ones were bad.</h2>
+      <p class="section-sub reveal" style="margin-bottom:32px">
+        You switched because AI changed what an editor could be. This is where that story went — and
+        where it goes from here.
+      </p>
+      <ol class="pitch-list reveal" style="margin:0 auto">
+        <li>
+          <div>
+            <strong>You installed Cursor because it felt like the future.</strong>
+            <p style="margin:6px 0 0;color:var(--text-dim);font-size:.92rem;line-height:1.7">
+              It is — and you were right to want that. Agentic coding is the biggest shift since the
+              text editor itself.
+            </p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>But your Mac pays for it.</strong>
+            <p style="margin:6px 0 0;color:var(--text-dim);font-size:.92rem;line-height:1.7">
+              The editor alone eats a gigabyte. Add Docker, Chrome, Slack — a 16GB machine starts
+              swapping, fans spin up, YouTube stutters. You're paying the RAM tax for a text editor.
+            </p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>And every keystroke ships your code to someone else's servers.</strong>
+            <p style="margin:6px 0 0;color:var(--text-dim);font-size:.92rem;line-height:1.7">
+              $20/month per seat, whether you use it or not. The usage page gets less transparent. The
+              roadmap belongs to a board now.
+            </p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>So what if the AI IDE ran native on Apple Silicon?</strong>
+            <p style="margin:6px 0 0;color:var(--text-dim);font-size:.92rem;line-height:1.7">
+              ~200MB. SwiftUI, AppKit, Liquid Glass. Sub-100ms completion from a model that lives on
+              your machine — not in a data center.
+            </p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>What if agentic power ran through your provider, your key, your bill?</strong>
+            <p style="margin:6px 0 0;color:var(--text-dim);font-size:.92rem;line-height:1.7">
+              Planner → Worker → QA orchestration with 20+ tools, routed through OpenRouter, Kilo,
+              DeepSeek — any OpenAI-compatible endpoint. No per-seat tax.
+            </p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>And what if it kept working at 30,000 feet?</strong>
+            <p style="margin:6px 0 0;color:var(--text-dim);font-size:.92rem;line-height:1.7">
+              No network? No problem. RAG over your whole codebase, FIM completion, local chat — the
+              intelligence is on-device too.
+            </p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <strong>What if it was MIT open source?</strong>
+            <p style="margin:6px 0 0;color:var(--text-dim);font-size:.92rem;line-height:1.7">
+              Audit it. Fork it. It can't be sold out from under you. And installing it is one command.
+            </p>
+          </div>
+        </li>
+      </ol>
+      <div class="reveal payoff" style="margin-top:44px">
+        <h3 style="font-size:1.4rem;margin:0 0 8px;color:var(--text)">That's Compass.</h3>
+        <p style="margin:0 0 20px;color:var(--text-dim);line-height:1.7">
+          The future — on your machine, your rules, your cost.
+        </p>
+        <a class="btn btn-primary" href={`${BASE_URL}/download`}>Get Compass</a>
+      </div>
+    </div>
+  </section>
+
   <!-- Two Pipelines -->
-  <section id="architecture" class="section section-alt">
+  <section id="architecture" class="section">
     <div class="container">
       <p class="section-kicker reveal">Architecture</p>
-      <h2 class="section-title reveal">Two pipelines. One editor. Zero compromise.</h2>
+      <h2 class="section-title reveal">Two pipelines. One editor. No compromises.</h2>
       <p class="section-sub reveal">
-        Local and cloud are completely separate AI pipelines that share the same native editor.
-        Each is tuned for what it does best, so you get cloud-scale power without ever paying for it in latency.
+        Local and cloud are completely separate AI pipelines that share the same native editor. Each
+        is tuned for what it does best — and neither pretends to be the other.
       </p>
 
       <div class="pipeline-cards">
@@ -81,8 +252,9 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
             <li>Real FIM completion, <strong>intelligent</strong> ghost text in <strong>&lt;100ms</strong></li>
             <li>Inline AI popover, cursor-anchored Q&amp;A, on your machine</li>
             <li>Semantic search, HNSW ANN, 10–50× faster, powered by the Neural Engine</li>
-            <li>Direct local model chat &amp; agentic work, fully offline</li>
-            <li>Model: on-device LLM via MLX, accelerated by Apple Silicon</li>
+            <li>Private local chat — ask, bounce ideas, get a second opinion</li>
+            <li>Model: 4B on-device LLM via MLX, accelerated by Apple Silicon</li>
+            <li>No orchestration, no tool loop — <strong>by design</strong></li>
           </ul>
         </div>
         <div class="pipeline-card cloud reveal">
@@ -91,39 +263,40 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
             Cloud pipeline
             <span class="latency agent">Agentic</span>
           </h3>
-          <p style="font-size:.9rem;color:var(--text-dim)">On demand. Full reasoning. Opt-in privacy.</p>
+          <p style="font-size:.9rem;color:var(--text-dim)">On demand. Full reasoning. Your keys, your choice.</p>
           <ul>
             <li>Orchestration graph: Planner → Worker → QA → Final</li>
             <li>Tool loop with <strong>stall detection + recovery</strong></li>
             <li>RAG context injection with evidence fusion ranking</li>
             <li><strong>20+ tools</strong>, file I/O, terminal, search, project ops, built-in browser</li>
-            <li>Multi-provider: OpenRouter, DeepSeek, Alibaba, Kilo, local, Anthropic &amp; OpenAI next</li>
+            <li>Any provider: OpenRouter, Kilo, DeepSeek, Alibaba, or any OpenAI-compatible endpoint</li>
+            <li>Opt-in only — nothing leaves your Mac until you say so</li>
           </ul>
         </div>
       </div>
 
       <div class="container" style="margin-top:32px">
         <div class="model-stat reveal">
-          <span class="badge-strong">1.5B</span>
+          <span class="badge-strong">4B</span>
           <p>
-            Our local completion model is <strong>1.5 billion parameters</strong>, roughly
-            <strong>15× larger</strong> than the ~100MB models some competitors ship for the same job.
-            Real intelligence, still running on-device at sub-100ms.
+            Our on-device model is <strong>4 billion parameters</strong>, running via MLX on Apple
+            Silicon. Big enough to be genuinely useful, small enough to stay instant and private —
+            and we never ask it to do cloud work.
           </p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Built for the work you can't talk about -->
-  <section id="private" class="section">
+  <!-- Private by architecture -->
+  <section id="private" class="section section-alt">
     <div class="container container-narrow" style="text-align:center">
       <p class="section-kicker reveal">Privacy by architecture</p>
       <h2 class="section-title reveal">Built for the work you can't talk about</h2>
       <p class="section-sub reveal" style="margin:0 auto">
-        Working on something you're not allowed to utter out loud? Most "AI" editors silently ship your
-        source to someone else's servers before they'll autocomplete a single line. Compass never does.
-        Every suggestion, every retrieval, every agent step runs locally on your Mac.
+        Most "AI" editors silently ship your source to someone else's servers before they'll
+        autocomplete a single line. Compass never does. Completion, retrieval, and chat run locally —
+        and cloud agentic work happens only when you explicitly reach for it.
       </p>
     </div>
     <div class="container" style="margin-top:40px">
@@ -131,19 +304,19 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
         <div class="card reveal">
           <h3 style="margin-bottom:6px;color:var(--accent)">Your IP stays put</h3>
           <ul style="list-style:none;color:var(--text-dim);line-height:1.8">
-            <li style="padding:4px 0">✧ Code on a plane, in a tunnel, inside an air-gapped lab, AI still works</li>
+            <li style="padding:4px 0">✧ Code on a plane, in a tunnel, inside an air-gapped lab — AI still works</li>
             <li style="padding:4px 0">✧ Nothing leaves the endpoint without your explicit say-so</li>
-            <li style="padding:4px 0">✧ Compliance by design, not by a checkbox buried in a policy</li>
-            <li style="padding:4px 0">✧ Built-in local inference for agentic work, maximum security, zero exposure</li>
+            <li style="padding:4px 0">✧ Privacy by architecture, not by a checkbox buried in a policy</li>
+            <li style="padding:4px 0">✧ Your provider, your key, your bill — no vendor in your loop</li>
           </ul>
         </div>
         <div class="card reveal">
-          <h3 style="margin-bottom:6px;color:var(--accent)">The agent never forgets</h3>
+          <h3 style="margin-bottom:6px;color:var(--accent)">The assistant never forgets</h3>
           <ul style="list-style:none;color:var(--text-dim);line-height:1.8">
-            <li style="padding:4px 0">✧ On-device RAG embeds your entire work history</li>
-            <li style="padding:4px 0">✧ Months of context survive, no dropped memory, no re-explaining</li>
-            <li style="padding:4px 0">✧ Retrieval runs on the Apple Neural Engine, silent, private, instant</li>
+            <li style="padding:4px 0">✧ On-device RAG embeds your codebase and work history</li>
             <li style="padding:4px 0">✧ Ask about code you wrote last quarter; it's all still there</li>
+            <li style="padding:4px 0">✧ Retrieval runs on the Apple Neural Engine — silent, private, instant</li>
+            <li style="padding:4px 0">✧ Months of context survive, no dropped memory, no re-explaining</li>
           </ul>
         </div>
       </div>
@@ -151,14 +324,14 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
   </section>
 
   <!-- Native means something here -->
-  <section id="native" class="section section-alt">
+  <section id="native" class="section">
     <div class="container">
       <p class="section-kicker reveal">Why native wins</p>
       <h2 class="section-title reveal">Native means something here</h2>
       <p class="section-sub reveal" style="margin-bottom:32px">
-        Compass is a real macOS binary, compiled in Swift and accelerated by the Metal and Neural Engine
-        frameworks. No Chromium. No Electron event loop burning your CPU. No gigabytes of JavaScript parked
-        in RAM. Just an editor that feels like part of the OS.
+        Compass is a real macOS binary, compiled in Swift and accelerated by the Metal and Neural
+        Engine frameworks. No Chromium. No Electron event loop burning your CPU. No gigabytes of
+        JavaScript parked in RAM. Just an editor that feels like part of the OS.
       </p>
       <div class="grid-3">
         <div class="card reveal">
@@ -171,67 +344,36 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
         </div>
         <div class="card reveal">
           <h3 style="margin-bottom:8px;color:var(--accent)">Liquid Glass &amp; deep OS access</h3>
-          <p style="font-size:.9rem;color:var(--text-dim)">Full access to low-level Apple OS features, including the latest Liquid Glass framework, something a web wrapper can never touch.</p>
+          <p style="font-size:.9rem;color:var(--text-dim)">Full access to low-level Apple OS features, including the latest Liquid Glass framework — something a web wrapper can never touch.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Who it's for -->
-  <section id="audiences" class="section">
+  <!-- Comparison -->
+  <section id="comparison" class="section section-alt">
     <div class="container">
-      <p class="section-kicker reveal">Who Compass is for</p>
-      <h2 class="section-title reveal">One IDE. Every kind of builder.</h2>
-      <p class="section-sub reveal" style="margin-bottom:8px">
-        Same product, same on-device AI, pitched to the people who actually care.
+      <p class="section-kicker reveal">What you tolerate vs. what you get</p>
+      <h2 class="section-title reveal">The status quo vs. Compass</h2>
+      <p class="section-sub reveal" style="margin-bottom:24px">
+        We don't need to name names. If you're using a cloud AI editor, you already know this table
+        from the inside.
       </p>
-      <div class="grid-3" style="margin-top:28px">
-        <div class="card reveal">
-          <h3 style="color:var(--accent);margin-bottom:10px">For developers</h3>
-          <p style="font-size:.9rem;color:var(--text-dim);line-height:1.75">
-            Real AI that runs where you type, <strong>&lt;100ms local FIM</strong> from a 1.5B model, not a fake
-            heuristic. A <strong>200&nbsp;MB native binary</strong>: no Electron, no RAM tax, Liquid Glass and
-            low-level macOS included. Works offline. Built-in browser, built-in inference, your machine, your rules.
-          </p>
-          <a href={`${BASE_URL}/developers`} class="badge badge-live" style="margin-top:12px;text-decoration:none">Learn more →</a>
+      <div class="reveal">
+        <div class="comparison-table" role="table" aria-label="Comparison with cloud AI editors">
+          <div class="comparison-row comparison-head">
+            <div class="comparison-cell">Need</div>
+            <div class="comparison-cell">The cloud-editor status quo</div>
+            <div class="comparison-cell">Compass</div>
+          </div>
+          {COMPETITIVE.map((row) => (
+            <div class="comparison-row">
+              <div class="comparison-cell" style="font-weight:500">{row.need}</div>
+              <div class="comparison-cell" style="color:var(--text-faint)">{row.cloud}</div>
+              <div class="comparison-cell" style="color:var(--accent)">{row.us}</div>
+            </div>
+          ))}
         </div>
-        <div class="card reveal">
-          <h3 style="color:var(--accent);margin-bottom:10px">For teams &amp; companies</h3>
-          <p style="font-size:.9rem;color:var(--text-dim);line-height:1.75">
-            IP never leaves the endpoint without consent, <strong>compliance by design</strong>, not a policy checkbox.
-            Local AI is free; cloud is opt-in and <strong>usage-based, not per-seat</strong>. Apple Silicon efficiency means
-            happier engineers and longer battery. On-device RAG keeps institutional knowledge in-house.
-          </p>
-          <a href={`${BASE_URL}/teams`} class="badge badge-live" style="margin-top:12px;text-decoration:none">Learn more →</a>
-        </div>
-        <div class="card reveal" style="border-color:rgba(196,148,62,.35)">
-          <h3 style="color:var(--accent);margin-bottom:10px">For enterprises</h3>
-          <p style="font-size:.9rem;color:var(--text-dim);line-height:1.75">
-            <strong>Total privacy by architecture.</strong> Compass runs fully air-gapped, inference, RAG, and agentic
-            work all on-device, nothing egresses. Clears the bar for defense, finance, healthcare, and government where
-            data residency is non-negotiable. No third-party model vendor in your supply chain.
-          </p>
-          <a href={`${BASE_URL}/enterprise`} class="badge badge-live" style="margin-top:12px;text-decoration:none">Learn more →</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Enterprise: total privacy -->
-  <section class="section section-alt" style="text-align:center">
-    <div class="container container-narrow">
-      <p class="section-kicker reveal">The enterprise difference</p>
-      <h2 class="section-title reveal">The only AI IDE you can deploy where data cannot leave the building.</h2>
-      <p class="section-sub reveal" style="margin:0 auto 24px">
-        Because it never does. Every suggestion, retrieval, and agent step stays on the endpoint. No telemetry
-        exfiltration, no prompt in someone else's training set, no vendor in your supply chain. Audit the binary:
-        it's open source.
-      </p>
-      <div class="reveal" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <span class="badge badge-live">Air-gapped capable</span>
-        <span class="badge badge-live">Zero network egress</span>
-        <span class="badge badge-live">Open source &amp; auditable</span>
-        <span class="badge badge-live">Clears defense / finance / health bars</span>
       </div>
     </div>
   </section>
@@ -242,7 +384,7 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
       <p class="section-kicker reveal">Capabilities</p>
       <h2 class="section-title reveal">Packed. And shipping.</h2>
       <p class="section-sub reveal" style="margin-bottom:32px">
-        These features ship in the current open-source build. No waitlist needed for local AI.
+        These features are in the current open-source build. No waitlist, no invite, no gate.
       </p>
       <div class="grid-3">
         {FEATURES_SHIPPING.map((f) => (
@@ -253,12 +395,12 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
         ))}
       </div>
       <div style="margin-top:48px">
-        <p class="section-kicker reveal">In development</p>
-        <h2 class="section-title reveal" style="font-size:clamp(1.3rem,2.5vw,1.75rem)">On the roadmap</h2>
+        <p class="section-kicker reveal">On the roadmap</p>
+        <h2 class="section-title reveal" style="font-size:clamp(1.3rem,2.5vw,1.75rem)">What's next — in the open</h2>
         <div class="grid-3" style="margin-top:20px">
           {FEATURES_BETA.map((f) => (
             <article class="capability-card reveal">
-              <h3><span class="badge badge-beta">Beta</span>{f.title}</h3>
+              <h3><span class="badge badge-beta">Next</span>{f.title}</h3>
               <p>{f.desc}</p>
             </article>
           ))}
@@ -275,15 +417,15 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
       <div class="grid-3" style="margin-top:28px">
         <div class="card reveal">
           <h3 style="font-size:.95rem;margin-bottom:4px;font-family:var(--font-mono);color:var(--accent)">Apple Neural Engine</h3>
-          <p style="font-size:.85rem;color:var(--text-dim)">Embeddings and retrieval run on the ANE, indexing and search stay silent and painless, never stealing cycles from your build.</p>
+          <p style="font-size:.85rem;color:var(--text-dim)">Embeddings and retrieval run on the ANE — indexing and search stay silent and painless, never stealing cycles from your build.</p>
         </div>
         <div class="card reveal">
           <h3 style="font-size:.95rem;margin-bottom:4px;font-family:var(--font-mono);color:var(--accent)">On-device LLM</h3>
-          <p style="font-size:.85rem;color:var(--text-dim)">Apple MLX running a quantized 1.5B model on the Neural Engine. <strong>&lt;100ms</strong> end-to-end. Swap models anytime without a website update.</p>
+          <p style="font-size:.85rem;color:var(--text-dim)">Apple MLX running a quantized 4B model. Instant, private, offline. Swap models anytime without a website update.</p>
         </div>
         <div class="card reveal">
           <h3 style="font-size:.95rem;margin-bottom:4px;font-family:var(--font-mono);color:var(--accent)">HNSW - FAISS</h3>
-          <p style="font-size:.85rem;color:var(--text-dim)">Hierarchical Navigable Small World index over FAISS vectors. <strong>10–50× faster</strong> than brute-force with ~95–99% recall.</p>
+          <p style="font-size:.85rem;color:var(--text-dim)">Hierarchical Navigable Small World index over FAISS vectors. 10–50× faster than brute-force with ~95–99% recall.</p>
         </div>
         <div class="card reveal">
           <h3 style="font-size:.95rem;margin-bottom:4px;font-family:var(--font-mono);color:var(--accent)">SQLite FTS5</h3>
@@ -301,95 +443,57 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
     </div>
   </section>
 
-  <!-- In action -->
-  <section id="gallery" class="section">
-    <div class="container">
-      <p class="section-kicker reveal">In action</p>
-      <h2 class="section-title reveal">The real Compass</h2>
-      <p class="section-sub reveal" style="margin-bottom:8px">
-        Captured from the shipping app, no mockups, no stock UI.
+  <!-- FAQ -->
+  <section id="faq" class="section">
+    <div class="container container-narrow">
+      <p class="section-kicker reveal">Fair questions</p>
+      <h2 class="section-title reveal">Asked and answered — in the open</h2>
+      <p class="section-sub reveal" style="margin-bottom:28px">
+        The questions everyone asks before switching. The answers are the same ones we give on
+        GitHub, HN, and Reddit.
       </p>
-      <div class="showcase">
-        <ProductShot
-          src={`${BASE_URL}/images/shot-completion.webp`}
-          alt="Inline ghost-text completion appearing as you type"
-          width={856}
-          height={336}
-          caption="Sub-100ms ghost-text completion from the on-device model."
-        />
-        <ProductShot
-          src={`${BASE_URL}/images/shot-systemprompt.webp`}
-          alt="Per-project system-prompt override editor"
-          width={671}
-          height={227}
-          caption="Override the system prompt per project."
-        />
-        <ProductShot
-          src={`${BASE_URL}/images/shot-providers.webp`}
-          alt="Supported model providers in settings"
-          width={967}
-          height={715}
-          caption="Bring your own provider, or stay fully local. Anthropic &amp; OpenAI support lands in the next iteration."
-        />
-      </div>
-    </div>
-  </section>
-
-  <!-- Comparison -->
-  <section id="comparison" class="section section-alt">
-    <div class="container">
-      <p class="section-kicker reveal">Positioning</p>
-      <h2 class="section-title reveal">A Mac-first answer to cloud-only AI editors</h2>
-      <p class="section-sub reveal" style="margin-bottom:24px">
-        Every other AI IDE is a browser wrapper that ships your code to a cloud server for every keystroke.
-        Compass is built from the ground up on a different premise, and it shows.
-      </p>
-      <div class="reveal">
-        <div class="comparison-table" role="table" aria-label="Comparison with cloud-only editors">
-          <div class="comparison-row comparison-head">
-            <div class="comparison-cell">Need</div>
-            <div class="comparison-cell">Cloud-only workflow</div>
-            <div class="comparison-cell">Compass</div>
-          </div>
-          {COMPETITIVE.map((row) => (
-            <div class="comparison-row">
-              <div class="comparison-cell" style="font-weight:500">{row.need}</div>
-              <div class="comparison-cell" style="color:var(--text-faint)">{row.cloud}</div>
-              <div class="comparison-cell" style="color:var(--accent)">{row.us}</div>
-            </div>
-          ))}
-        </div>
+      <div class="reveal" style="display:grid;gap:12px">
+        {FAQ.map((item) => (
+          <details class="faq">
+            <summary>{item.q}</summary>
+            <p>{item.a}</p>
+          </details>
+        ))}
       </div>
     </div>
   </section>
 
   <!-- Download -->
-  <section id="download" class="section">
+  <section id="download" class="section section-alt">
     <div class="container">
-      <p class="section-kicker reveal">Download</p>
-      <h2 class="section-title reveal">Install Compass today</h2>
+      <p class="section-kicker reveal">Install</p>
+      <h2 class="section-title reveal">Get Compass</h2>
       <p class="section-sub reveal" style="margin-bottom:28px">
-        Open source and free. Roughly 200&nbsp;MB. Requires Apple Silicon and macOS 26+.
+        Open source, MIT, free — no account, no trial, no credit card. Requires Apple Silicon and
+        macOS 26+.
       </p>
       <div class="grid-2" style="margin-top:20px">
         <div class="card reveal" style="text-align:center">
-          <h3 style="font-size:1rem;margin-bottom:8px">GitHub Releases</h3>
-          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">Download the latest DMG or ZIP directly from GitHub.</p>
-          <a class="btn btn-primary" href={`${RELEASES}`} target="_blank" rel="noreferrer">Download latest</a>
-          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">Ad-hoc signed. See README for Gatekeeper instructions.</p>
+          <h3 style="font-size:1rem;margin-bottom:8px">Homebrew <span class="badge badge-beta" style="margin-left:4px">{BREW_AVAILABLE}</span></h3>
+          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">One command, easy updates. Ships with the v0.7 release.</p>
+          <div class="terminal-block">brew install --cask {INSTALL_BREW}</div>
+          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">Until v0.7 lands, use the DMG below — the whole ritual is one right-click → Open.</p>
         </div>
         <div class="card reveal" style="text-align:center">
-          <h3 style="font-size:1rem;margin-bottom:8px">Homebrew</h3>
-          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">Install via the community cask for easy updates.</p>
-          <pre style="font-family:var(--font-mono);font-size:.82rem;background:var(--bg);padding:12px;border-radius:8px;text-align:left;overflow-x:auto;color:var(--text-dim);line-height:1.7">brew install --cask https://raw.githubusercontent.com/jtrefon/ai-ide/main/Casks/compass.rb</pre>
-          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">Homebrew does not bypass macOS Gatekeeper checks on unsigned builds.</p>
+          <h3 style="font-size:1rem;margin-bottom:8px">GitHub Releases</h3>
+          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">Grab the latest DMG or ZIP directly from GitHub.</p>
+          <a class="btn btn-primary" href={`${RELEASES}`} target="_blank" rel="noreferrer">Download latest</a>
+          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">
+            Not notarized — free and open source means no $99/year Apple fee until sponsors fund it.
+            Your Mac will warn you once.
+          </p>
         </div>
       </div>
     </div>
   </section>
 
   <!-- Roadmap -->
-  <section id="roadmap" class="section section-alt">
+  <section id="roadmap" class="section">
     <div class="container">
       <p class="section-kicker reveal">Roadmap</p>
       <h2 class="section-title reveal">Ambitious, grounded in shipping architecture</h2>
@@ -407,18 +511,18 @@ import { BASE_URL, REPO, RELEASES, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE
   </section>
 
   <!-- CTA -->
-  <section id="beta-cta" class="section" style="text-align:center">
+  <section id="cta" class="section section-alt" style="text-align:center">
     <div class="container container-narrow">
-      <p class="section-kicker reveal">The generation after</p>
-      <h2 class="section-title reveal">Join the closed beta</h2>
+      <p class="section-kicker reveal">Built because it had to be</p>
+      <h2 class="section-title reveal">Your machine deserves better. It's ready when you are.</h2>
       <p class="section-sub reveal" style="margin:0 auto 28px">
-        Compass isn't the next AI editor. It's the one after, native, private, and years ahead of the
-        competition. The closed beta gives you early access to the commercial hosted tier with bundled
-        inference, priority support, and enterprise features.
+        Download Compass, star the repo, open an issue, or tell us what's missing. This project is
+        built in the open — and the community decides where it goes.
       </p>
       <div class="reveal" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-        <a class="btn btn-primary" href={`${BASE_URL}/beta`}>Get beta access</a>
+        <a class="btn btn-primary" href={`${BASE_URL}/download`}>Download Compass</a>
         <a class="btn btn-secondary" href={REPO} target="_blank" rel="noreferrer">Star on GitHub</a>
+        <a class="btn btn-secondary" href={`${BASE_URL}/contributors`}>Contribute</a>
       </div>
     </div>
   </section>

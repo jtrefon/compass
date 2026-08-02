@@ -1,0 +1,106 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, LATEST_MACOS } from "../consts";
+---
+
+<BaseLayout
+  title="Download — Compass"
+  description="Install Compass: the native AI IDE for macOS. Homebrew or DMG. Free, MIT, no account, no trial. Requires Apple Silicon and macOS 26+."
+  canonical={`${BASE_URL}/download`}
+>
+  <section class="page-hero" style="text-align:center">
+    <div class="container container-narrow">
+      <p class="section-kicker reveal">Install</p>
+      <h1 class="reveal">Get Compass</h1>
+      <p class="reveal" style="font-size:1.05rem;color:var(--text-dim);max-width:560px;margin:0 auto;line-height:1.7">
+        Open source, MIT, free. No account. No trial. No credit card. No data leaving your machine
+        until you opt in.
+      </p>
+    </div>
+  </section>
+
+  <section class="section section-alt" style="padding-top:0">
+    <div class="container container-narrow">
+      <div class="grid-2" style="gap:24px">
+        <div class="card reveal" style="text-align:center;padding:32px">
+          <h3 style="font-size:1rem;margin-bottom:6px">Homebrew <span class="badge badge-beta" style="margin-left:4px">{BREW_AVAILABLE}</span></h3>
+          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">
+            The developer way: one command, easy updates. The cask ships with the v0.7 release.
+          </p>
+          <div style="background:#0a0d13;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px 18px;font-family:var(--font-mono);font-size:.8rem;color:#9fe8c8;overflow-x:auto;white-space:nowrap;text-align:left">
+            brew install --cask {INSTALL_BREW}
+          </div>
+          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">
+            Until v0.7 lands, the DMG is the fastest path — one right-click → Open, and you're in.
+          </p>
+        </div>
+        <div class="card reveal" style="text-align:center;padding:32px">
+          <h3 style="font-size:1rem;margin-bottom:6px">GitHub Releases</h3>
+          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">
+            DMG or ZIP, straight from the repo. Works today.
+          </p>
+          <a class="btn btn-primary" href={`${RELEASES}`} target="_blank" rel="noreferrer">Download latest release</a>
+          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">
+            Latest build: v0.6 — the current open-source build, with the agentic pipeline and local
+            AI.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container container-narrow">
+      <p class="section-kicker reveal">The honest part</p>
+      <h2 class="section-title reveal">About that Gatekeeper warning</h2>
+      <p style="color:var(--text-dim);line-height:1.8;font-size:.95rem">
+        Compass isn't notarized yet. That's not an oversight — it's arithmetic: Apple charges $99/year
+        for notarization, and Compass currently makes $0. The moment sponsors cover it, every future
+        build is signed and your Mac trusts it out of the box. It's on the roadmap, in the open.
+      </p>
+      <p style="color:var(--text-dim);line-height:1.8;font-size:.95rem;margin-top:12px">
+        Until then, the first launch is a two-second ritual: <strong>right-click the app → Open →
+        Open</strong>. You've done this before — it's the standard open-source Mac experience, and
+        the source is right there if you'd rather verify first and build it yourself.
+      </p>
+      <div class="grid-3" style="margin-top:28px">
+        <div class="card reveal">
+          <h3 style="font-size:.95rem;margin-bottom:6px;color:var(--accent)">Requirements</h3>
+          <p style="font-size:.85rem;color:var(--text-dim);line-height:1.7">
+            Apple Silicon Mac<br />{LATEST_MACOS}<br />~200MB of disk for the app, plus the on-device
+            model on first launch.
+          </p>
+        </div>
+        <div class="card reveal">
+          <h3 style="font-size:.95rem;margin-bottom:6px;color:var(--accent)">First launch</h3>
+          <p style="font-size:.85rem;color:var(--text-dim);line-height:1.7">
+            Compass indexes your project and downloads the local model. Local completion, chat, and
+            search work immediately — offline, no keys needed.
+          </p>
+        </div>
+        <div class="card reveal">
+          <h3 style="font-size:.95rem;margin-bottom:6px;color:var(--accent)">Agentic coding</h3>
+          <p style="font-size:.85rem;color:var(--text-dim);line-height:1.7">
+            Add your own API key (OpenRouter, Kilo, DeepSeek, any OpenAI-compatible endpoint) and the
+            full agentic pipeline lights up. Your key, your bill.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" style="text-align:center">
+    <div class="container container-narrow">
+      <h2 class="section-title reveal" style="font-size:1.4rem">Keep it alive</h2>
+      <p class="section-sub reveal" style="margin:0 auto 24px">
+        Compass is free because it's open source. If it saves you a gigabyte of RAM, star the repo —
+        it costs nothing and tells the world this project matters.
+      </p>
+      <div class="reveal" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a class="btn btn-primary" href={REPO} target="_blank" rel="noreferrer">Star on GitHub</a>
+        <a class="btn btn-secondary" href={`${REPO}/issues`} target="_blank" rel="noreferrer">Report an issue</a>
+        <a class="btn btn-secondary" href={`${BASE_URL}/contributors`}>Contribute</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

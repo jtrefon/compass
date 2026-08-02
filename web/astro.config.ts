@@ -2,8 +2,8 @@ import { defineConfig } from "astro/config";
 import sitemap from "@astrojs/sitemap";
 
 export default defineConfig({
-  site: "https://jtrefon.github.io/ai-ide/",
-  base: "/ai-ide",
+  site: "https://jtrefon.github.io/compass/",
+  base: "/compass",
   outDir: "../docs",
   publicDir: "public",
   integrations: [sitemap()],

@@ -108,11 +108,12 @@ import { BASE_URL, REPO, PIPELINE_LOCAL, PIPELINE_CLOUD, REMOTE_PROVIDERS } from
           </p>
         </div>
         <div class="card reveal">
-          <h3 style="font-size:1rem;margin-bottom:6px;font-family:var(--font-mono);color:var(--accent)">RAG Engine</h3>
+          <h3 style="font-size:1rem;margin-bottom:6px;font-family:var(--font-mono);color:var(--accent)">Agent Context Retrieval</h3>
           <p style="font-size:.85rem;color:var(--text-dim);line-height:1.6">
-            Cloud-only retrieval pipeline with <strong>intent classification</strong>, evidence fusion ranking,
+            The cloud pipeline's retrieval layer with <strong>intent classification</strong>, evidence fusion ranking,
             code segment retrieval (HNSW-backed), symbol search, and project overview. Designed to inject
-            relevant context without overloading the model.
+            relevant context without overloading the model. The local pipeline has its own on-device
+            retrieval — same philosophy, different hardware.
           </p>
         </div>
         <div class="card reveal">
@@ -163,8 +164,8 @@ import { BASE_URL, REPO, PIPELINE_LOCAL, PIPELINE_CLOUD, REMOTE_PROVIDERS } from
         <p class="section-kicker">Read the source</p>
         <h2 class="section-title" style="font-size:1.5rem">The full architecture is documented in the repo</h2>
         <div style="margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-          <a class="btn btn-primary" href={`${REPO}/blob/main/ARCHITECTURE.md`} target="_blank" rel="noreferrer">ARCHITECTURE.md</a>
-          <a class="btn btn-secondary" href={`${REPO}/blob/main/VISION.md`} target="_blank" rel="noreferrer">VISION.md</a>
+          <a class="btn btn-primary" href={`${BASE_URL}/download`}>Download Compass</a>
+          <a class="btn btn-secondary" href={`${REPO}/blob/main/ARCHITECTURE.md`} target="_blank" rel="noreferrer">ARCHITECTURE.md</a>
           <a class="btn btn-secondary" href={REPO} target="_blank" rel="noreferrer">GitHub</a>
         </div>
       </div>
