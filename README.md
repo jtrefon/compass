@@ -1,183 +1,145 @@
-# osx-ide
+# Compass
 
-![CI](https://github.com/jtrefon/ai-ide/actions/workflows/ci.yml/badge.svg)
-![Release](https://github.com/jtrefon/ai-ide/actions/workflows/release.yml/badge.svg)
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/db02c680a7e24b90b6340b027b6ebc93)](https://app.codacy.com/gh/jtrefon/ai-ide/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=bugs)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
+> AI coding that respects your machine.
+
+**Compass is a native AI IDE for macOS** — agentic coding with your own provider and keys, plus
+on-device RAG, FIM completion, and local chat that work fully offline. ~200MB, MIT licensed,
+no Electron, no lock-in.
+
+[![CI](https://github.com/jtrefon/compass/actions/workflows/ci.yml/badge.svg)](https://github.com/jtrefon/compass/actions/workflows/ci.yml)
+[![Release](https://github.com/jtrefon/compass/actions/workflows/release.yml/badge.svg)](https://github.com/jtrefon/compass/actions/workflows/release.yml)
+[![Codacy Grade](https://app.codacy.com/project/badge/Grade/db02c680a7e24b90b6340b027b6ebc93)](https://app.codacy.com/gh/jtrefon/ai-ide/dashboard)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Technical Debt](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=sqale_index)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
 
-**osx-ide** is a cutting-edge, AI-powered Integrated Development Environment (IDE) designed exclusively for macOS. It harmonizes hardware and software to deliver exceptional performance, providing developers with maximum support through embedded AI capabilities and an unparalleled user experience.
+---
 
-Built with SwiftUI and AppKit, osx-ide leverages native macOS technologies to offer seamless integration, lightning-fast responsiveness, and intuitive workflows. Whether you're coding, debugging, or collaborating with AI, osx-ide empowers you to achieve more with less effort.
+## Why Compass exists
 
-## Architecture Overview
+My MacBook Pro M4 has 16GB of RAM. Cursor and Docker were using all of it — YouTube started
+stuttering, and I was swapping like it was 2009. So I built my own IDE.
 
-osx-ide follows a **layered architecture** with clear separation of concerns:
+Compass is the editor I use every day to build itself: a real macOS binary (SwiftUI + AppKit,
+Liquid Glass, Apple Neural Engine) with two deliberately separate AI pipelines:
 
+| | **Local pipeline** | **Cloud pipeline** |
+|---|---|---|
+| What it does | FIM completion (<100ms), inline Q&A, semantic search, local chat | Agentic coding: Planner → Worker → QA, 20+ tools, stall detection |
+| Model | 4B on-device LLM via MLX | Your choice — OpenRouter, Kilo, DeepSeek, Alibaba, any OpenAI-compatible endpoint |
+| Privacy | 100% offline, nothing leaves your machine | Opt-in only, your key, your bill |
+| Network | None required. Ever. | Required for agentic work |
+
+The local model never orchestrates. The cloud model never runs inline completion. Each does what
+it's best at — that's the whole architecture in one sentence.
+
+**Vibe code at full speed.** Bring the best model in the world, run the full agentic pipeline at
+native speed, pay your provider's rate — not a per-seat tax.
+
+**And keep working at 30,000 feet.** No network? RAG over your codebase, FIM completion, and
+local chat all still work. The intelligence is on-device too.
+
+**Nobody can sell it out from under you.** MIT, auditable, forkable, and your data stays yours.
+
+## Quick start
+
+Requirements: **Apple Silicon Mac, macOS 26+**, Xcode 26+ for building from source.
+
+```sh
+# Install via Homebrew (cask ships with v0.7)
+brew install --cask https://raw.githubusercontent.com/jtrefon/compass/main/Casks/compass.rb
+
+# Or grab the latest DMG/ZIP from Releases
+# https://github.com/jtrefon/compass/releases
 ```
-┌─────────────────────────────────────────┐
-│              UI Layer                    │
-│  SwiftUI Views + AppKit Components      │
-├─────────────────────────────────────────┤
-│            Service Layer                 │
-│  Business Logic + State Management      │
-├─────────────────────────────────────────┤
-│            Core Layer                   │
-│  Utilities + Protocols + Models        │
-├─────────────────────────────────────────┤
-│           Data Layer                    │
-│  File System + Database + Persistence   │
-└─────────────────────────────────────────┘
-```
 
-### Key Architectural Principles
+First launch: Compass indexes your project and pulls the on-device model. Local completion, chat,
+and search work immediately — no keys, no account, no network.
 
-- **SOLID Principles**: Single responsibility, dependency inversion, and interface segregation
-- **Dependency Injection**: Centralized service registration and management
-- **Event-Driven Communication**: Loose coupling via EventBus pattern
-- **Actor-Based Concurrency**: Thread-safe state management with Swift Concurrency
-- **Modular Design**: Extensible plugin system for tools and language support
+For agentic coding, add your own API key (OpenRouter, Kilo, DeepSeek, any OpenAI-compatible
+endpoint) in Settings → Providers. Your key, your bill, your choice.
 
-### Core Components
+> **The honest part:** builds are not notarized yet — Apple charges $99/year for that, and
+> Compass makes $0 until sponsors fund it (roadmap item, in the open). Your Mac will warn you
+> once: right-click → Open. The source is right here if you'd rather verify first.
 
-- **UI Layer**: SwiftUI views with AppKit integration for complex components
-- **Service Layer**: Business logic, state management, and AI coordination
-- **Core Layer**: Protocols, utilities, and shared infrastructure
-- **Data Layer**: SQLite database, file system abstraction, and indexing
+## What's shipping
 
-For detailed architecture documentation, see [ARCHITECTURE.md](./ARCHITECTURE.md).
+- **Real FIM completion** — ghost text in <100ms from a 4B on-device model, not a remote
+  round-trip, not a fake heuristic
+- **Private local chat** — ask questions, bounce ideas, get a second pair of eyes, entirely on-device
+- **ANE-accelerated RAG** — SQLite FTS5 + HNSW/FAISS retrieval, embeddings on the Apple Neural Engine
+- **Agentic coding, your provider** — Planner → Worker → QA orchestration, 20+ tools, harness-tested
+- **Built-in terminal & browser**, tree-sitter highlighting across 20+ languages, per-project
+  system prompts, command palette, project state persistence
 
-## Key Features
-
-- **AI-Enhanced Development**: Integrated AI agent for intelligent code assistance, refactoring, and problem-solving with multi-role orchestration (Architect, Planner, Worker, QA).
-- **High-Performance Code Editor**: Advanced syntax highlighting, multi-cursor editing, code folding, minimap, and real-time diagnostics with clickable build errors.
-- **Intelligent Codebase Indexing**: Fast symbol extraction, search, and navigation across large projects with memory-based context retention.
-- **Native Terminal Integration**: Embedded terminal with build error parsing and clickable links to editor locations.
-- **Project Session Persistence**: Saves window layout, open tabs, and editor state for uninterrupted workflows.
-- **Command-Driven UX**: Comprehensive command palette and menu system for efficient navigation and actions.
-- **Extensible Language Support**: Plugin-based architecture for multiple programming languages with best-effort fallbacks.
-- **Near-Future Embedded AI**: Planned deep integration of AI for code generation, review loops, and autonomous development tasks.
-
-osx-ide is engineered for the future of software development, where AI and human creativity converge to produce high-quality code faster than ever before.
-
-## Requirements
-
-- macOS 26+ (Apple Silicon only)
-- Xcode 26+
+Full detail: [FEATURES.md](FEATURES.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · website:
+https://jtrefon.github.io/compass/
 
 ## Development
 
-The project includes a unified `run.sh` script for common development tasks.
-
 ```sh
-# Build and launch the application
-./run.sh app
-
-# Build only
-./run.sh build
-
-# Run unit tests
-./run.sh test
-
-# Run UI (E2E) tests
-./run.sh e2e
-
-# Clean build artifacts
-./run.sh clean
+./run.sh app               # Build and launch
+./run.sh build             # Full Xcode build
+./run.sh test              # Unit tests (skips UI-heavy suites)
+./run.sh test SuiteName    # Single suite filter
+./run.sh harness           # Headless integration tests
+./run.sh harness-online    # Live-provider suites (needs API keys, serial)
+./run.sh harness-offline   # Offline suites
+./run.sh benchmark-offline # Embedding model benchmarks
+./run.sh e2e               # XCUITest suites
+./run.sh clean             # Remove build artifacts
 ```
 
-## Build
+The project builds with `xcodebuild` (scheme `osx-ide` — the codebase rename to `Compass` lands
+with v0.7), not `swift build`. Derived data: `.build/` for the app, `.build-tests/` for tests.
 
-Open `osx-ide.xcodeproj` in Xcode and run the `osx-ide` scheme.
-
-Command line build:
-
-```sh
-xcodebuild -project osx-ide.xcodeproj -scheme osx-ide -configuration Debug build
-```
-
-## Install
-
-Free distribution options:
-
-- GitHub Releases:
-  download the latest DMG or ZIP from the releases page
-- Homebrew repo-hosted cask:
-  `brew install --cask https://raw.githubusercontent.com/jtrefon/ai-ide/main/Casks/osx-ide.rb`
-
-Homebrew is only a convenience channel. It does not make unsigned macOS apps trusted by Gatekeeper.
-
-## Test
+If package resolution fails on the first attempt (a known SwiftJinja/OrderedCollections quirk):
 
 ```sh
-xcodebuild -project osx-ide.xcodeproj -scheme osx-ide -configuration Debug test -destination 'platform=macOS'
+xcodebuild -resolvePackageDependencies -project osx-ide.xcodeproj
 ```
 
-## Release Signing
+> **Note for AI agents:** this repo has an `AGENTS.md` — read it before touching code. It
+> documents the architecture, the harness system, and the conventions the project lives by.
 
-macOS distribution has two modes in this repository:
+## The harness — the agent is tested by agents
 
-- Free mode: the release workflow publishes ad-hoc-signed artifacts. This does not avoid Gatekeeper warnings for internet downloads.
-- Developer ID mode: if signing secrets are configured, the workflow signs and notarizes the app for smoother download-and-open behavior.
+Compass ships a headless integration harness (`osx-ideHarnessTests/`) that instantiates the real
+app, injects a prompt, and validates the full pipeline via telemetry. No mocks, no stubs — it runs
+the actual production code paths. If you touch the agent loop, `./run.sh harness` is part of the
+deal. See [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Configure these GitHub Actions secrets only if you want the paid `Developer ID Application` path:
+## Contributing
 
-- `BUILD_CERTIFICATE_BASE64`: base64-encoded `.p12` certificate export for your Developer ID Application certificate
-- `P12_PASSWORD`: password used when exporting the `.p12`
-- `BUILD_KEYCHAIN_PASSWORD`: temporary keychain password used during CI import
-- `APPLE_SIGNING_IDENTITY`: full signing identity, for example `Developer ID Application: Your Name (TEAMID)`
-- `APPLE_TEAM_ID`: Apple Developer Team ID
-- `APPLE_ID`: Apple ID used for notarization
-- `APPLE_APP_SPECIFIC_PASSWORD`: app-specific password for notarization
+Contributions are what make this project real. Start here:
 
-When those secrets are present, the release workflow will:
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test, and submit changes
+- [Discussions](https://github.com/jtrefon/compass/discussions) — ideas, questions, roadmaps
+- [Issues](https://github.com/jtrefon/compass/issues) — bugs and feature requests
 
-- sign the `.app` with hardened runtime and project entitlements
-- notarize the app bundle archive
-- staple the notarization ticket to the `.app`
-- build and sign the `.dmg`
-- notarize and staple the `.dmg`
-
-If these secrets are missing, tagged release builds fall back to ad-hoc signing and still publish release artifacts.
-
-For free distribution, set user expectations clearly:
-
-- GitHub Releases can host unsigned or ad-hoc-signed `.zip` and `.dmg` files for free.
-- Homebrew can make installation more convenient, but it does not remove macOS Gatekeeper checks for unsigned downloads.
-- Users may still need to right-click the app and choose `Open`, or remove quarantine manually with `xattr -dr com.apple.quarantine /Applications/osx-ide.app`.
+The roadmap (v1.0 → v1.5 → v2.0) is published on the website, in the open.
 
 ## Troubleshooting
 
 ### Xcode/SourceKit "false compile errors"
 
-Sometimes Xcode/SourceKit can show red errors (missing types, failed imports, etc.) while `xcodebuild build` and `xcodebuild test` are green.
-
-Recovery steps (in order):
+Sometimes Xcode/SourceKit shows red errors (missing types, failed imports) while
+`xcodebuild build` and `xcodebuild test` are green. Recovery steps, in order:
 
 1. Quit Xcode.
-2. Run `./run.sh clean`.
-3. Delete DerivedData for this project:
-   - In Finder: `~/Library/Developer/Xcode/DerivedData/` (remove the `osx-ide-*` folder)
-4. Re-open `osx-ide.xcodeproj`.
-5. In Xcode: `File > Packages > Reset Package Caches` (if needed).
-6. Build once from Xcode.
+2. `./run.sh clean`
+3. Delete DerivedData for this project: `~/Library/Developer/Xcode/DerivedData/` (the `osx-ide-*` folder)
+4. Re-open `osx-ide.xcodeproj`
+5. If needed: `File > Packages > Reset Package Caches`
 
-If the issue persists but `xcodebuild` is still green, treat `xcodebuild` output as the source of truth and file an issue with:
+If it persists but `xcodebuild` is green, treat `xcodebuild` as the source of truth and file an
+issue with your Xcode version, repro steps, and a screenshot.
 
-- Xcode version
-- Steps that reproduce
-- A screenshot of the SourceKit error
-- Relevant `xcodebuild` output
+### Terminal / shell
 
-## Notes
+The embedded terminal uses the system shell (`/bin/zsh` or `/bin/bash`). If spawning a shell
+fails, grant the app Full Disk Access in System Settings.
 
-- The embedded terminal uses the system shell (`/bin/zsh` or `/bin/bash`).
-- If spawning a shell fails, grant the app Full Disk Access in System Settings.
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright © 2025–2026 Jacek Trefon.
