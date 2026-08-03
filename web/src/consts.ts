@@ -15,6 +15,7 @@ export const BREW_AVAILABLE = "v0.7";
 export const NAV = [
   { label: "Features", href: "/features" },
   { label: "Tech", href: "/tech" },
+  { label: "Benchmarks", href: "/benchmarks" },
   { label: "Download", href: "/download" },
   { label: "Contributors", href: "/contributors" },
 ] as const;
@@ -193,7 +194,7 @@ export const FAQ = [
   },
   {
     q: "Where are the benchmarks?",
-    a: "Coming with v1.5, published in the open: latency p50/p95, RAM, index time. We publish numbers we measured, not numbers we hope for.",
+    a: "Live. Semantic search p95 is 0.46ms on a 2,000-vector index, 2,000 entries add in 158ms, embeddings run at 3–15ms on-device. Full table, methodology, and regression gates on the Benchmarks page — and you can run ./run.sh benchmark yourself. FIM latency with the 4B model is next, and we won't publish it until we've measured it.",
   },
   {
     q: "I have years of muscle memory in Cursor.",
