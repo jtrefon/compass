@@ -11,13 +11,13 @@
 ./run.sh clean            # rm -rf .build .build-tests + xcodebuild clean
 ```
 
-Build runs via `xcodebuild`, not `swift build`. Scheme = `osx-ide`. Derived data: `.build/` for app, `.build-tests/` for tests.
+Build runs via `xcodebuild`, not `swift build`. Scheme = `Compass`. Derived data: `.build/` for app, `.build-tests/` for tests.
 
-Package resolution: `xcodebuild -resolvePackageDependencies -project osx-ide.xcodeproj`.
+Package resolution: `xcodebuild -resolvePackageDependencies -project Compass.xcodeproj`.
 
 ## Architecture
 
-- **Entrypoint**: `osx_ideApp.swift:32` — `OSXIDEApp` with `@NSApplicationDelegateAdaptor AppDelegate`.
+- **Entrypoint**: `CompassApp.swift:32` — `OSXIDEApp` with `@NSApplicationDelegateAdaptor AppDelegate`.
 - **DI container**: `DependencyContainer.swift` — `@MainActor` class, creates all services, wires EventBus.
 - **EventBus**: `Core/EventBus.swift` — central pub/sub via Combine `PassthroughSubject`. Typed events, dispatched by type name. Subscribers receive on `DispatchQueue.main`.
 - **Two AI pipelines**: local (MLX 4B model for inline completion) + cloud (OpenRouter via `ConversationOrchestrator` for agentic work).

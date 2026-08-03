@@ -88,3 +88,11 @@ venv*/
 /web/node_modules
 /web/dist
 /site
+
+# Runtime state — never commit
+.ide/
+xcuserdata/
+*.xcuserdatad/
+.DS_Store
+.run_test_log.txt
+/build/

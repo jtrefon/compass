@@ -29,18 +29,18 @@ Requirements: Apple Silicon Mac, macOS 26+, Xcode 26+.
 ./run.sh e2e            # XCUITest suites
 ```
 
-The project builds with `xcodebuild` (scheme `osx-ide`), not `swift build`. Derived data lives
+The project builds with `xcodebuild` (scheme `Compass`), not `swift build`. Derived data lives
 in `.build/` (app) and `.build-tests/` (tests).
 
 If package resolution fails on the first attempt (SwiftJinja/OrderedCollections quirk), run:
 
 ```sh
-xcodebuild -resolvePackageDependencies -project osx-ide.xcodeproj
+xcodebuild -resolvePackageDependencies -project Compass.xcodeproj
 ```
 
 ## The harness — read this before touching the agent
 
-Compass ships a headless integration harness (`osx-ideHarnessTests/`) that instantiates the real
+Compass ships a headless integration harness (`CompassHarnessTests/`) that instantiates the real
 app container, injects a prompt, and validates the full pipeline execution via telemetry. It does
 **not** mock or stub — it runs the real production code paths.
 

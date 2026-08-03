@@ -2,7 +2,7 @@
 
 ## Overview
 
-osx-ide is a native macOS IDE with dual AI pipelines — a local pipeline powered by a 4B MLX model for instant, private daily coding, and a cloud pipeline powered by OpenRouter for agentic, multi-file work at scale. The two pipelines share an editor and infrastructure but are architecturally independent.
+Compass is a native macOS IDE with dual AI pipelines — a local pipeline powered by a 4B MLX model for instant, private daily coding, and a cloud pipeline powered by OpenRouter for agentic, multi-file work at scale. The two pipelines share an editor and infrastructure but are architecturally independent.
 
 ## Core Architecture
 
@@ -328,7 +328,7 @@ The codebase index uses an in-memory HNSW (Hierarchical Navigable Small World) g
 ## Directory Structure (Target)
 
 ```
-osx-ide/
+Compass/
 ├── Core/                     # Shared infrastructure
 │   ├── EventBus/
 │   ├── CommandRegistry/

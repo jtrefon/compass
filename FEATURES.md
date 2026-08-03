@@ -13,26 +13,26 @@ This is a living backlog for our AI-enabled macOS IDE. Checked items are shipped
 
 ## Architecture map (where changes go)
 - **Commands**
-  - Define `CommandID` constants in `osx-ide/Core/StandardCommands.swift` (or a new `*Commands.swift` grouped by area).
-  - Register handlers in `osx-ide/Core/CorePlugin.swift` (or a future plugin module).
+  - Define `CommandID` constants in `Compass/Core/StandardCommands.swift` (or a new `*Commands.swift` grouped by area).
+  - Register handlers in `Compass/Core/CorePlugin.swift` (or a future plugin module).
   - UI triggers call `CommandRegistry.shared.execute(...)` (no “inline” one-off handlers in views).
 - **Sidebar / File Tree**
-  - Main entry: `osx-ide/Components/FileExplorerView.swift` → `osx-ide/Components/ModernFileTreeView.swift`.
-  - File system actions belong in workspace services (`osx-ide/Services/WorkspaceService.swift`).
+  - Main entry: `Compass/Components/FileExplorerView.swift` → `Compass/Components/ModernFileTreeView.swift`.
+  - File system actions belong in workspace services (`Compass/Services/WorkspaceService.swift`).
 - **Editor**
-  - Main layout: `osx-ide/ContentView.swift`.
-  - Text component: `osx-ide/Components/CodeEditorView.swift` (selection context already available).
-  - File IO/state: `osx-ide/Services/FileEditorService.swift`.
+  - Main layout: `Compass/ContentView.swift`.
+  - Text component: `Compass/Components/CodeEditorView.swift` (selection context already available).
+  - File IO/state: `Compass/Services/FileEditorService.swift`.
 - **Right panel**
   - Currently `ContentView` shows a single `.panelRight` view. If adding Inspector/Tasks/etc, prefer a single “RightPanelContainer” that hosts internal tabs (AI/Inspector/Tasks) to avoid competing plugins.
 - **Agent + tools**
-  - Tools live under `osx-ide/Services/Tools/` and conform to `AITool`.
-  - Tool calls are executed by `osx-ide/Services/AIToolExecutor.swift`; keep it deterministic and UI-friendly.
+  - Tools live under `Compass/Services/Tools/` and conform to `AITool`.
+  - Tool calls are executed by `Compass/Services/AIToolExecutor.swift`; keep it deterministic and UI-friendly.
 - **Project persistence**
-  - Chat: `.ide/chat/` (see `osx-ide/Services/ChatHistoryManager.swift`)
-  - Plans: `.ide/plans/` (see `osx-ide/Services/Planning/ConversationPlanStore.swift`)
-  - Logs: `.ide/logs/` + App Support logs (see `osx-ide/Services/Logging/*`)
-  - Session UI state: `.ide/session.json` (see `osx-ide/Services/Session/*`)
+  - Chat: `.ide/chat/` (see `Compass/Services/ChatHistoryManager.swift`)
+  - Plans: `.ide/plans/` (see `Compass/Services/Planning/ConversationPlanStore.swift`)
+  - Logs: `.ide/logs/` + App Support logs (see `Compass/Services/Logging/*`)
+  - Session UI state: `.ide/session.json` (see `Compass/Services/Session/*`)
 
 ## Language support framework (plugin-based; no single-language exceptions)
 
@@ -747,11 +747,11 @@ This tracker is the authoritative execution plan for building the full agent eco
   - File selection in tree must be stable (already: `selectedRelativePath`).
   - Right panel must support multiple tabs/panels (AI + Inspector) without “dead” toggles.
 - **Implementation map**
-  - `osx-ide/Components/ModernFileTreeView.swift`: capture Space when outline view is first responder; resolve selected file URL.
-  - `osx-ide/Components/FileExplorerView.swift`: forward selection + focused state if needed.
-  - `osx-ide/ContentView.swift`: replace “single right panel view” with a container that can show AI and Inspector.
-  - New: `osx-ide/Components/QuickLookPreviewView.swift` (NSViewRepresentable wrapping `QuickLookUI` preview view).
-  - New: `osx-ide/Services/QuickLookService.swift` (shared controller + selection binding).
+  - `Compass/Components/ModernFileTreeView.swift`: capture Space when outline view is first responder; resolve selected file URL.
+  - `Compass/Components/FileExplorerView.swift`: forward selection + focused state if needed.
+  - `Compass/ContentView.swift`: replace “single right panel view” with a container that can show AI and Inspector.
+  - New: `Compass/Components/QuickLookPreviewView.swift` (NSViewRepresentable wrapping `QuickLookUI` preview view).
+  - New: `Compass/Services/QuickLookService.swift` (shared controller + selection binding).
 - **Acceptance criteria**
   - Space on a file shows a Quick Look preview; Space again or Esc closes.
   - Preview never opens for directories.
@@ -772,10 +772,10 @@ This tracker is the authoritative execution plan for building the full agent eco
   - Shell commands default to single-flight unless explicitly marked safe-to-parallel.
   - UI progress order must be deterministic (stable ordering by tool-call index).
 - **Implementation map**
-  - `osx-ide/Services/AIToolExecutor.swift`: introduce a scheduler (actor) that can run safe tool calls concurrently with per-path locks and a max concurrency limit.
-  - `osx-ide/Services/ConversationManager.swift`: propagate cancellations; surface tool lanes/progress events.
-  - New: `osx-ide/Services/ToolScheduler.swift`, `osx-ide/Services/AsyncLockMap.swift`.
-  - New UI: `osx-ide/Components/TaskLanesView.swift` + status bar affordance.
+  - `Compass/Services/AIToolExecutor.swift`: introduce a scheduler (actor) that can run safe tool calls concurrently with per-path locks and a max concurrency limit.
+  - `Compass/Services/ConversationManager.swift`: propagate cancellations; surface tool lanes/progress events.
+  - New: `Compass/Services/ToolScheduler.swift`, `Compass/Services/AsyncLockMap.swift`.
+  - New UI: `Compass/Components/TaskLanesView.swift` + status bar affordance.
 - **Acceptance criteria**
   - Multiple read/index tools can run in parallel without UI freezes.
   - Two write tools targeting same file are never concurrent.
@@ -794,10 +794,10 @@ This tracker is the authoritative execution plan for building the full agent eco
   - “Apply” writes to disk only after user approval (or after explicit “Auto-apply” toggle).
   - Patch set stores provenance: toolCallId, command, timestamps, and a short rationale string.
 - **Implementation map**
-  - `osx-ide/Services/Tools/FileTools.swift`: add a `mode` argument (`propose|apply`) or introduce parallel “propose_*” tools.
-  - `osx-ide/Services/AIToolExecutor.swift`: treat proposed edits as first-class results with preview UI.
-  - New: `osx-ide/Services/PatchSetStore.swift` (manifest + file blobs).
-  - New: `osx-ide/Components/DiffViewer.swift` (MVP: unified diff + per-file accept/reject).
+  - `Compass/Services/Tools/FileTools.swift`: add a `mode` argument (`propose|apply`) or introduce parallel “propose_*” tools.
+  - `Compass/Services/AIToolExecutor.swift`: treat proposed edits as first-class results with preview UI.
+  - New: `Compass/Services/PatchSetStore.swift` (manifest + file blobs).
+  - New: `Compass/Components/DiffViewer.swift` (MVP: unified diff + per-file accept/reject).
 - **Acceptance criteria**
   - Agent can propose multi-file edits; user can apply/reject per file (MVP) before disk writes.
   - Applying writes exactly what was proposed; rejecting leaves disk untouched.
@@ -815,8 +815,8 @@ This tracker is the authoritative execution plan for building the full agent eco
   - This is **file-level** checkpointing (fast APFS clones when available), not full volume snapshots.
   - Store checkpoints under `.ide/checkpoints/<checkpointId>/...` + `manifest.json`.
 - **Implementation map**
-  - New: `osx-ide/Services/CheckpointManager.swift` (create/restore/list/delete).
-  - `osx-ide/Services/Tools/FileTools.swift`: before apply, create checkpoint of touched files.
+  - New: `Compass/Services/CheckpointManager.swift` (create/restore/list/delete).
+  - `Compass/Services/Tools/FileTools.swift`: before apply, create checkpoint of touched files.
   - Optional: use `copyfile(…, COPYFILE_CLONE)` when supported; fall back to normal copy.
 - **Acceptance criteria**
   - Applying a patch set auto-creates a checkpoint of all touched files.
@@ -832,8 +832,8 @@ This tracker is the authoritative execution plan for building the full agent eco
 - **Goal**: faster + higher-quality agent answers via local retrieval and context packing.
 - **Primary surface**: Quick Open, AI “Context” picker, and “Used Context” disclosure per response.
 - **Implementation map**
-  - Extend `osx-ide/Services/Index` to support: semantic search, cached summaries, and “related files”.
-  - New: `osx-ide/Services/ContextPackBuilder.swift` (budgeting + selection rules).
+  - Extend `Compass/Services/Index` to support: semantic search, cached summaries, and “related files”.
+  - New: `Compass/Services/ContextPackBuilder.swift` (budgeting + selection rules).
   - UI: show what files/snippets were included; allow pin/unpin sources.
 - **Acceptance criteria**
   - User can add/remove context sources explicitly.
