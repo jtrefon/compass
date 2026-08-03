@@ -12,9 +12,9 @@ jobs:
   build-release:
     runs-on: macos-26
     env:
-      APP_PATH: build/Build/Products/Release/osx-ide.app
-      APP_ZIP: osx-ide.app.zip
-      DMG_NAME: osx-ide.dmg
+      APP_PATH: build/Build/Products/Release/Compass.app
+      APP_ZIP: compass.app.zip
+      DMG_NAME: compass.dmg
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -96,8 +96,8 @@ jobs:
       - name: Build Release App
         run: >
           xcodebuild
-          -project osx-ide.xcodeproj
-          -scheme osx-ide
+          -project Compass.xcodeproj
+          -scheme Compass
           -configuration Release
           -derivedDataPath build
           build
@@ -106,9 +106,9 @@ jobs:
 
       - name: Copy Embedding Models
         run: |
-          dest="build/Build/Products/Release/osx-ide.app/Contents/Resources/EmbeddingModels"
+          dest="build/Build/Products/Release/Compass.app/Contents/Resources/EmbeddingModels"
           mkdir -p "$dest"
-          rsync -aq --delete osx-ide/Resources/EmbeddingModels/ "$dest/"
+          rsync -aq --delete Compass/Resources/EmbeddingModels/ "$dest/"
 
       - name: Sign Release App
         if: steps.signing.outputs.enabled == 'true'
@@ -120,7 +120,7 @@ jobs:
             --force \
             --deep \
             --options runtime \
-            --entitlements osx-ide/osx_ide.entitlements \
+            --entitlements Compass/Compass.entitlements \
             --sign "$APPLE_SIGNING_IDENTITY" \
             "$APP_PATH"
           echo "Verifying signature..."
@@ -163,14 +163,14 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          hdiutil create -volname "osx-ide" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
+          hdiutil create -volname "Compass" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
           codesign --force --sign "$APPLE_SIGNING_IDENTITY" "$DMG_NAME"
           codesign --verify --verbose=2 "$DMG_NAME"
 
       - name: Build DMG
         if: steps.signing.outputs.enabled != 'true'
         run: |
-          hdiutil create -volname "osx-ide" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
+          hdiutil create -volname "Compass" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
 
       - name: Notarize And Staple DMG
         if: steps.signing.outputs.enabled == 'true'
@@ -192,24 +192,24 @@ jobs:
           cat > RELEASE_NOTES.md <<'EOF'
           ## Install
 
-          - Download the DMG from this release, open it, and drag `osx-ide.app` into `Applications`.
+          - Download the DMG from this release, open it, and drag `Compass.app` into `Applications`.
           - Homebrew convenience install:
-            `brew install --cask https://raw.githubusercontent.com/jtrefon/ai-ide/main/Casks/osx-ide.rb`
+            `brew install --cask https://raw.githubusercontent.com/jtrefon/ai-ide/main/Casks/compass.rb`
 
           ## macOS Security Note
 
-          - This release is ad-hoc signed. Right-click `osx-ide.app`, choose **Open**, then confirm again to launch.
+          - This release is ad-hoc signed. Right-click `Compass.app`, choose **Open**, then confirm again to launch.
           - If you see the "cannot verify" message:
             1.  Right-click the app in Finder
             2.  Select "Open" from the context menu
             3.  Click "Open" in the confirmation dialog
           - To bypass completely (advanced):
-            `xattr -dr com.apple.quarantine /Applications/osx-ide.app`
+            `xattr -dr com.apple.quarantine /Applications/Compass.app`
 
           ## Assets
 
-          - `osx-ide.dmg`: recommended for most users
-          - `osx-ide.app.zip`: direct app bundle archive
+          - `compass.dmg`: recommended for most users
+          - `compass.app.zip`: direct app bundle archive
           EOF
 
       - name: Upload Release Asset
