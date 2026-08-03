@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - Unreleased
+
+### Changed
+- Full codebase rename: project (`Compass.xcodeproj`), targets, scheme, and source
+  directories are now `Compass` (was `osx-ide`)
+
+## [0.6.1] - 2026-08-01
+
+### Changed
+- Rebranded to **Compass** (product name, cask, release artifacts)
+- Provider API keys now stored in the macOS Keychain (migrated from UserDefaults)
+- Tool execution: real timeouts, write serialization, circuit breaker,
+  ai-trace logging restored on the live path
+- Index exclusions: hybrid predefined + dynamic (LLM-maintained) list
+
+### Bug Fixes
+- Assistant answers could silently never reach conversation history
+- Review-path sends crashed with "missing node id=architect"
+- Tool-call markup parsing was order-nondeterministic; HTML entities and
+  MiniMax aliases not handled
+- Absolute-path escape attempts were silently re-rooted instead of rejected
+- Indexer duplicated symbol rows on every reindex; SQLite transient-bind
+  use-after-free
+- Local model: KV cache per conversation no longer unbounded; first streamed
+  chunks were dropped; downloads could resume a continuation twice
+- A locked paired iPhone no longer blocks `./run.sh test`
+- Context display used the provider's real token window
+
 ## [0.6.0] - 2026-04-10
 
 ### Added

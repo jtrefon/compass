@@ -90,13 +90,13 @@ https://jtrefon.github.io/compass/
 ./run.sh clean             # Remove build artifacts
 ```
 
-The project builds with `xcodebuild` (scheme `osx-ide` — the codebase rename to `Compass` lands
-with v0.7), not `swift build`. Derived data: `.build/` for the app, `.build-tests/` for tests.
+The project builds with `xcodebuild` (scheme `Compass`), not `swift build`. Derived data:
+`.build/` for the app, `.build-tests/` for tests.
 
 If package resolution fails on the first attempt (a known SwiftJinja/OrderedCollections quirk):
 
 ```sh
-xcodebuild -resolvePackageDependencies -project osx-ide.xcodeproj
+xcodebuild -resolvePackageDependencies -project Compass.xcodeproj
 ```
 
 > **Note for AI agents:** this repo has an `AGENTS.md` — read it before touching code. It
@@ -104,7 +104,7 @@ xcodebuild -resolvePackageDependencies -project osx-ide.xcodeproj
 
 ## The harness — the agent is tested by agents
 
-Compass ships a headless integration harness (`osx-ideHarnessTests/`) that instantiates the real
+Compass ships a headless integration harness (`CompassHarnessTests/`) that instantiates the real
 app, injects a prompt, and validates the full pipeline via telemetry. No mocks, no stubs — it runs
 the actual production code paths. If you touch the agent loop, `./run.sh harness` is part of the
 deal. See [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -128,8 +128,8 @@ Sometimes Xcode/SourceKit shows red errors (missing types, failed imports) while
 
 1. Quit Xcode.
 2. `./run.sh clean`
-3. Delete DerivedData for this project: `~/Library/Developer/Xcode/DerivedData/` (the `osx-ide-*` folder)
-4. Re-open `osx-ide.xcodeproj`
+3. Delete DerivedData for this project: `~/Library/Developer/Xcode/DerivedData/` (the `Compass-*` folder)
+4. Re-open `Compass.xcodeproj`
 5. If needed: `File > Packages > Reset Package Caches`
 
 If it persists but `xcodebuild` is green, treat `xcodebuild` as the source of truth and file an

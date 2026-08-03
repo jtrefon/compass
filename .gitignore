@@ -17,8 +17,10 @@ old_*.swift
 .build-tests*/
 .build*/
 
-.ide/index/
-.ide/index/**
+# Project runtime state (.ide/) — never commit. App-generated: logs, sessions,
+# chat history, index DB, vector store, plans, checkpoints, staging.
+# index_exclude is auto-created by IndexExcludePatternManager at runtime.
+.ide/
 .build/
 .build-tests/
 .build-tests/**
@@ -88,9 +90,6 @@ venv*/
 /web/node_modules
 /web/dist
 /site
-
-# Runtime state — never commit
-.ide/
 xcuserdata/
 *.xcuserdatad/
 .DS_Store
