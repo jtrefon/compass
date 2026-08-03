@@ -71,6 +71,10 @@ jobs:
           key: derived-${{ github.sha }}
 
   unit-tests:
+    # Skip on Dependabot branches: dependency bumps get the required build
+    # check only. Keeps the macOS runner queue short and avoids flaky
+    # runner-service failures blocking the auto-merge cascade.
+    if: "!startsWith(github.ref_name, 'dependabot/')"
     needs: build
     runs-on: macos-26
     steps:
@@ -104,9 +108,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
   ui-tests:
-    # Skip for Dependabot: version bumps don't need the UI suite, and it keeps
-    # the macOS runner queue short (free-plan concurrency is limited).
-    if: github.actor != 'dependabot[bot]'
+    # Skip on Dependabot branches (build-only CI for dependency bumps).
+    if: "!startsWith(github.ref_name, 'dependabot/')"
     needs: build
     runs-on: macos-26
     steps:

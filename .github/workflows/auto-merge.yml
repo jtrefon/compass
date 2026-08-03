@@ -5,60 +5,47 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Serialized: one update+enable pass at a time. The cascade is emergent:
-# after each merge (push to main) this runs again, updates the next PR's
-# branch, CI re-runs on the fresh head, GitHub auto-merges when green and
-# up-to-date (strict branch protection). No parallel merges, no stale bases.
-#
-# Push-only on purpose: workflow runs triggered by Dependabot PRs require
-# manual approval for write permissions; push-triggered runs never do.
+# Why this is minimal on purpose:
+# - GITHUB_TOKEN pushes NEVER trigger workflow runs (GitHub's anti-loop rule),
+#   and server-side merges don't fire events — so any branch-update logic in
+#   this workflow is dead weight. Dependabot rebases its own PRs when main
+#   moves, and its pushes are real pushes: they trigger CI and post check
+#   suites that ARE visible to the PR merge gate.
+# - This workflow's only job: make sure qualifying PRs have auto-merge on.
+#   GitHub merges them when CI is green + up-to-date (strict protection).
+# - Push-only trigger on purpose: workflow runs triggered by Dependabot PRs
+#   require manual approval for write permissions (see AGENTS.md gotchas).
 concurrency:
   group: auto-merge-queue
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
-  actions: write
 
 jobs:
-  update-and-enable:
+  enable-auto-merge:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Update branches and enable auto-merge
+      - name: Enable auto-merge on qualifying PRs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Only PRs we own or explicitly mark for automation.
           qualify() {
             local branch="$1" labels="$2"
             [[ "$branch" == dependabot/* || "$branch" == ai-fix/* || "$labels" == *"auto-merge"* ]]
           }
 
-          # Every qualifying open PR: refresh its branch, then make sure
-          # auto-merge is on. GitHub merges when CI is green + up-to-date.
           gh pr list --repo "$GITHUB_REPOSITORY" --state open \
             --json number,headRefName,labels \
             --jq '.[] | [.number, .headRefName, ([.labels[].name] | join(","))] | @tsv' |
           while IFS=$'\t' read -r num branch labels; do
             if qualify "$branch" "$labels"; then
               echo "== PR #$num ($branch)"
-              gh pr update-branch "$num" --repo "$GITHUB_REPOSITORY" || echo "  update skipped (conflict or already current)"
               gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --auto --squash 2>/dev/null \
                 || echo "  auto-merge already enabled or unavailable"
-              # Explicitly launch CI on the branch head: push events alone
-              # proved unreliable for these branches. Skip if a run is active.
-              ACTIVE=$(gh run list --workflow=ci.yml --branch "$branch" \
-                --repo "$GITHUB_REPOSITORY" --limit 10 --json status \
-                --jq '[.[].status] | any(. == "in_progress" or . == "queued")')
-              if [ "$ACTIVE" != "true" ]; then
-                gh workflow run ci.yml --ref "$branch" --repo "$GITHUB_REPOSITORY" \
-                  && echo "  CI triggered on $branch" || echo "  CI trigger failed"
-              else
-                echo "  CI already active on $branch"
-              fi
             fi
           done
           echo "auto-merge pass complete"
