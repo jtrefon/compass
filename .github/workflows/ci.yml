@@ -6,7 +6,10 @@ on:
   # pipeline. Push events on the same branches run ungated and post the same
   # commit checks — the PR shows those. Fork-PR CI can return when the project
   # adds a contributor flow (first-time approval there is normal OSS behavior).
+  # workflow_dispatch: the auto-merge cascade triggers CI explicitly per branch
+  # after updating it — push events alone proved unreliable for these branches.
   push:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,7 +35,7 @@ jobs:
 
       - name: Resolve + Build for Testing
         run: |
-          PROJECT="$(ls *.xcodeproj | head -1)"
+          PROJECT="$(ls -d *.xcodeproj | head -1)"
           SCHEME="$(basename "$PROJECT" .xcodeproj)"
           echo "Building $PROJECT (scheme $SCHEME)"
           xcodebuild \
@@ -84,7 +87,7 @@ jobs:
 
       - name: Run Unit Tests
         run: |
-          PROJECT="$(ls *.xcodeproj | head -1)"
+          PROJECT="$(ls -d *.xcodeproj | head -1)"
           SCHEME="$(basename "$PROJECT" .xcodeproj)"
           TEST_MODULE="${SCHEME}Tests"
           xcodebuild \
@@ -120,7 +123,7 @@ jobs:
 
       - name: Run UI Tests
         run: |
-          PROJECT="$(ls *.xcodeproj | head -1)"
+          PROJECT="$(ls -d *.xcodeproj | head -1)"
           SCHEME="$(basename "$PROJECT" .xcodeproj)"
           UI_MODULE="${SCHEME}UITests"
           xcodebuild \
