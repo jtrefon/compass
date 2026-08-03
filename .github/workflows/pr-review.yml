@@ -1,8 +1,11 @@
 name: AI PR Review
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  # Manual only (workflow_dispatch). A pull_request trigger would request
+  # write permissions on Dependabot PRs and hit the manual-approval gate
+  # (see AGENTS.md gotchas). Run it from the Actions tab when a review is
+  # wanted; the auto-merge cascade never depends on it.
+  workflow_dispatch:
 
 permissions:
   contents: read
