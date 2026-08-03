@@ -3,14 +3,15 @@ name: Auto-merge automated PRs
 on:
   push:
     branches: [main]
-  pull_request:
-    types: [opened, synchronize, ready_for_review, labeled]
   workflow_dispatch:
 
 # Serialized: one update+enable pass at a time. The cascade is emergent:
 # after each merge (push to main) this runs again, updates the next PR's
 # branch, CI re-runs on the fresh head, GitHub auto-merges when green and
 # up-to-date (strict branch protection). No parallel merges, no stale bases.
+#
+# Push-only on purpose: workflow runs triggered by Dependabot PRs require
+# manual approval for write permissions; push-triggered runs never do.
 concurrency:
   group: auto-merge-queue
   cancel-in-progress: false
@@ -28,9 +29,6 @@ jobs:
       - name: Update branches and enable auto-merge
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-          EVENT: ${{ github.event_name }}
         run: |
           # Only PRs we own or explicitly mark for automation.
           qualify() {
@@ -38,18 +36,8 @@ jobs:
             [[ "$branch" == dependabot/* || "$branch" == ai-fix/* || "$labels" == *"auto-merge"* ]]
           }
 
-          if [ "$EVENT" = "pull_request" ]; then
-            labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
-            if qualify "$PR_BRANCH" "$labels"; then
-              echo "== PR #$PR ($PR_BRANCH)"
-              gh pr update-branch "$PR" --repo "$GITHUB_REPOSITORY" || echo "  update skipped (conflict or already current)"
-              gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --auto --squash 2>/dev/null \
-                || echo "  auto-merge already enabled or unavailable"
-            fi
-            exit 0
-          fi
-
-          # push to main / manual dispatch: process every qualifying open PR
+          # Every qualifying open PR: refresh its branch, then make sure
+          # auto-merge is on. GitHub merges when CI is green + up-to-date.
           gh pr list --repo "$GITHUB_REPOSITORY" --state open \
             --json number,headRefName,labels \
             --jq '.[] | [.number, .headRefName, ([.labels[].name] | join(","))] | @tsv' |
