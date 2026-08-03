@@ -35,7 +35,7 @@ jobs:
 
       - name: Resolve + Build for Testing
         run: |
-          PROJECT="$(ls *.xcodeproj | head -1)"
+          PROJECT="$(ls -d *.xcodeproj | head -1)"
           SCHEME="$(basename "$PROJECT" .xcodeproj)"
           echo "Building $PROJECT (scheme $SCHEME)"
           xcodebuild \
@@ -87,7 +87,7 @@ jobs:
 
       - name: Run Unit Tests
         run: |
-          PROJECT="$(ls *.xcodeproj | head -1)"
+          PROJECT="$(ls -d *.xcodeproj | head -1)"
           SCHEME="$(basename "$PROJECT" .xcodeproj)"
           TEST_MODULE="${SCHEME}Tests"
           xcodebuild \
@@ -123,7 +123,7 @@ jobs:
 
       - name: Run UI Tests
         run: |
-          PROJECT="$(ls *.xcodeproj | head -1)"
+          PROJECT="$(ls -d *.xcodeproj | head -1)"
           SCHEME="$(basename "$PROJECT" .xcodeproj)"
           UI_MODULE="${SCHEME}UITests"
           xcodebuild \
