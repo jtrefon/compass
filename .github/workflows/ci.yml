@@ -1,8 +1,12 @@
 name: CI
 
 on:
+  # Push-only on purpose. Pull_request-triggered runs from Dependabot PRs are
+  # gated behind manual approval (see AGENTS.md gotchas), which blocks the
+  # pipeline. Push events on the same branches run ungated and post the same
+  # commit checks — the PR shows those. Fork-PR CI can return when the project
+  # adds a contributor flow (first-time approval there is normal OSS behavior).
   push:
-  pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -85,6 +89,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
   ui-tests:
+    # Skip for Dependabot: version bumps don't need the UI suite, and it keeps
+    # the macOS runner queue short (free-plan concurrency is limited).
+    if: github.actor != 'dependabot[bot]'
     needs: build
     runs-on: macos-26
     steps:
