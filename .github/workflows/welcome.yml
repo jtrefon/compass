@@ -3,12 +3,12 @@ name: Welcome
 on:
   issues:
     types: [opened]
-  pull_request:
-    types: [opened]
 
+# Issues-only on purpose: PR events from Dependabot would require manual
+# approval for write permissions (see AGENTS.md gotchas). Dependabot never
+# opens issues, so this workflow can never trigger the approval gate.
 permissions:
   issues: write
-  pull-requests: write
 
 jobs:
   welcome:
