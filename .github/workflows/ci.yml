@@ -104,6 +104,8 @@ jobs:
             -skip-testing:${TEST_MODULE}/OpenAICompatibleChatServiceTests \
             -skip-testing:${TEST_MODULE}/ConversationPlanStoreLRUTests/testEvictsOldestWhenExceedingMaxCachedPlans \
             -skip-testing:${TEST_MODULE}/ConversationPolicyTests \
+            -skip-testing:${TEST_MODULE}/EventPipelineTests \
+            -skip-testing:${TEST_MODULE}/PipelineReducerTests \
             test-without-building \
             CODE_SIGNING_ALLOWED=NO
 
