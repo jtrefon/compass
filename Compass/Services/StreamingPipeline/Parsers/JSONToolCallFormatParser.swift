@@ -6,7 +6,9 @@ import Foundation
 public struct JSONToolCallFormatParser: ToolCallFormatParser {
     public let formatIdentifier = "json"
 
-    public init() {}
+    public init() {
+        // Empty by design — stateless parser; all state lives in parse().
+    }
 
     public func parse(_ text: String) -> (toolCalls: [RawToolCall], remaining: String) {
         var remaining = text

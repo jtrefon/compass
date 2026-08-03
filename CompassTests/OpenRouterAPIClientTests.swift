@@ -182,7 +182,8 @@ final class OpenRouterAPIClientTests: XCTestCase {
             absolute: .seconds(2),
             granularity: .milliseconds(100)
         )
-        // A source that yields nothing and never completes.
+        // A source that yields nothing and never completes — intentional:
+        // exercises the liveness-watcher timeout path.
         let stalled = AsyncStream<String> { _ in }
 
         let start = ContinuousClock.now

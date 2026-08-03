@@ -14,7 +14,9 @@ public final class ParserRegistry: @unchecked Sendable {
     private var orderedIdentifiers: [String] = []
     private let lock = NSLock()
 
-    public init() {}
+    public init() {
+        // Empty by design — parsers are registered explicitly via register().
+    }
 
     /// Register a parser for a specific format.
     public func register(_ parser: ToolCallFormatParser) {

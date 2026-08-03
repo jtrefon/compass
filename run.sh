@@ -326,7 +326,7 @@ clear_test_profile_defaults() {
 }
 
 restore_quarantined_ios_devices() {
-    [ "${COMPASS_QUARANTINE_DEVICES:-1}" = "1" ] || return 0
+    [[ "${COMPASS_QUARANTINE_DEVICES:-1}" == "1" ]] || return 0
     command -v xcrun >/dev/null 2>&1 || return 0
     echo "[devices] Re-pairing quarantined iOS devices (best-effort; auto-pairs on next unlock)..."
     python3 - <<'PYEOF2'
@@ -434,7 +434,7 @@ run_harness() {
     write_test_profile_defaults "$test_profile_dir"
     echo "Harness test profile dir: $test_profile_dir"
     local online_harness_marker="$test_profile_dir/online-harness-enabled"
-    if [ -n "$COMPASS_RUN_ONLINE_HARNESS" ]; then
+    if [[ -n "$COMPASS_RUN_ONLINE_HARNESS" ]]; then
         : > "$online_harness_marker"
     else
         rm -f "$online_harness_marker"
@@ -497,7 +497,7 @@ run_harness() {
         fi
     done
     env_args+=("TEST_RUNNER_ENV_COMPASS_TEST_PROFILE_DIR=$test_profile_dir")
-    if [ -n "$COMPASS_RUN_ONLINE_HARNESS" ]; then
+    if [[ -n "$COMPASS_RUN_ONLINE_HARNESS" ]]; then
         env_args+=("TEST_RUNNER_ENV_COMPASS_RUN_ONLINE_HARNESS=$COMPASS_RUN_ONLINE_HARNESS")
         runtime_env_args+=("COMPASS_RUN_ONLINE_HARNESS=$COMPASS_RUN_ONLINE_HARNESS")
         echo "Online harness runtime enabled"
