@@ -5,13 +5,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Serialized: one update+enable pass at a time. The cascade is emergent:
-# after each merge (push to main) this runs again, updates the next PR's
-# branch, CI re-runs on the fresh head, GitHub auto-merges when green and
-# up-to-date (strict branch protection). No parallel merges, no stale bases.
+# Serialized: one pass at a time. The cascade is emergent:
+# after each merge (push to main) this runs again, pushes a real refresh
+# commit to each open automated PR (git push → push event → CI runs with a
+# check suite ASSOCIATED with the PR — server-side merges don't trigger
+# events and workflow_dispatch suites are invisible to the merge gate),
+# CI runs, GitHub auto-merges when green + up-to-date, repeat.
 #
-# Push-only on purpose: workflow runs triggered by Dependabot PRs require
-# manual approval for write permissions; push-triggered runs never do.
+# Push-only trigger on purpose: workflow runs triggered by Dependabot PRs
+# require manual approval for write permissions (see AGENTS.md gotchas);
+# push-triggered runs never do.
 concurrency:
   group: auto-merge-queue
   cancel-in-progress: false
@@ -19,15 +22,21 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
-  actions: write
 
 jobs:
-  update-and-enable:
+  refresh-and-enable:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Update branches and enable auto-merge
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Refresh branches and enable auto-merge
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -37,28 +46,27 @@ jobs:
             [[ "$branch" == dependabot/* || "$branch" == ai-fix/* || "$labels" == *"auto-merge"* ]]
           }
 
-          # Every qualifying open PR: refresh its branch, then make sure
-          # auto-merge is on. GitHub merges when CI is green + up-to-date.
+          git fetch origin main
+
           gh pr list --repo "$GITHUB_REPOSITORY" --state open \
             --json number,headRefName,labels \
             --jq '.[] | [.number, .headRefName, ([.labels[].name] | join(","))] | @tsv' |
           while IFS=$'\t' read -r num branch labels; do
             if qualify "$branch" "$labels"; then
               echo "== PR #$num ($branch)"
-              gh pr update-branch "$num" --repo "$GITHUB_REPOSITORY" || echo "  update skipped (conflict or already current)"
+              git fetch origin "$branch"
+              git checkout -B "$branch" "origin/$branch"
+              # Merge latest main (no-op when current) — keeps the PR fresh.
+              git merge origin/main --no-edit 2>&1 | tail -1 || echo "  merge conflict — leaving branch; PR will show it"
+              if git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
+                # Branch is current: still push a refresh commit so a push
+                # event fires and CI posts a PR-visible check suite.
+                git commit --allow-empty -m "ci: refresh checks" 2>/dev/null \
+                  || echo "  nothing to commit"
+              fi
+              git push origin "$branch" 2>&1 | tail -1
               gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --auto --squash 2>/dev/null \
                 || echo "  auto-merge already enabled or unavailable"
-              # Explicitly launch CI on the branch head: push events alone
-              # proved unreliable for these branches. Skip if a run is active.
-              ACTIVE=$(gh run list --workflow=ci.yml --branch "$branch" \
-                --repo "$GITHUB_REPOSITORY" --limit 10 --json status \
-                --jq '[.[].status] | any(. == "in_progress" or . == "queued")')
-              if [ "$ACTIVE" != "true" ]; then
-                gh workflow run ci.yml --ref "$branch" --repo "$GITHUB_REPOSITORY" \
-                  && echo "  CI triggered on $branch" || echo "  CI trigger failed"
-              else
-                echo "  CI already active on $branch"
-              fi
             fi
           done
           echo "auto-merge pass complete"
