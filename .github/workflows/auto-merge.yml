@@ -5,48 +5,38 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Serialized: one pass at a time. The cascade is emergent:
-# after each merge (push to main) this runs again, pushes a real refresh
-# commit to each open automated PR (git push → push event → CI runs with a
-# check suite ASSOCIATED with the PR — server-side merges don't trigger
-# events and workflow_dispatch suites are invisible to the merge gate),
-# CI runs, GitHub auto-merges when green + up-to-date, repeat.
-#
-# Push-only trigger on purpose: workflow runs triggered by Dependabot PRs
-# require manual approval for write permissions (see AGENTS.md gotchas);
-# push-triggered runs never do.
+# Why this is minimal on purpose:
+# - GITHUB_TOKEN pushes NEVER trigger workflow runs (GitHub's anti-loop rule),
+#   and server-side merges don't fire events — so any branch-update logic in
+#   this workflow is dead weight. Dependabot rebases its own PRs when main
+#   moves, and its pushes are real pushes: they trigger CI and post check
+#   suites that ARE visible to the PR merge gate.
+# - This workflow's only job: make sure qualifying PRs have auto-merge on.
+#   GitHub merges them when CI is green + up-to-date (strict protection).
+# - Push-only trigger on purpose: workflow runs triggered by Dependabot PRs
+#   require manual approval for write permissions (see AGENTS.md gotchas).
 concurrency:
   group: auto-merge-queue
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 jobs:
-  refresh-and-enable:
+  enable-auto-merge:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Refresh branches and enable auto-merge
+      - name: Enable auto-merge on qualifying PRs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Only PRs we own or explicitly mark for automation.
           qualify() {
             local branch="$1" labels="$2"
             [[ "$branch" == dependabot/* || "$branch" == ai-fix/* || "$labels" == *"auto-merge"* ]]
           }
-
-          git fetch origin main
 
           gh pr list --repo "$GITHUB_REPOSITORY" --state open \
             --json number,headRefName,labels \
@@ -54,17 +44,6 @@ jobs:
           while IFS=$'\t' read -r num branch labels; do
             if qualify "$branch" "$labels"; then
               echo "== PR #$num ($branch)"
-              git fetch origin "$branch"
-              git checkout -B "$branch" "origin/$branch"
-              # Merge latest main (no-op when current) — keeps the PR fresh.
-              git merge origin/main --no-edit 2>&1 | tail -1 || echo "  merge conflict — leaving branch; PR will show it"
-              if git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
-                # Branch is current: still push a refresh commit so a push
-                # event fires and CI posts a PR-visible check suite.
-                git commit --allow-empty -m "ci: refresh checks" 2>/dev/null \
-                  || echo "  nothing to commit"
-              fi
-              git push origin "$branch" 2>&1 | tail -1
               gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --auto --squash 2>/dev/null \
                 || echo "  auto-merge already enabled or unavailable"
             fi
