@@ -40,7 +40,9 @@ jobs:
         env:
           DIFF: ${{ steps.diff.outputs.diff }}
           TITLE: ${{ github.event.pull_request.title }}
-          MODEL: ${{ vars.OPENROUTER_MODEL || 'deepseek/deepseek-chat' }}
+          # Free models only — Compass is open source and pays nothing for infra.
+          # Override via repo variable OPENROUTER_MODEL when the project can afford it.
+          MODEL: ${{ vars.OPENROUTER_MODEL || 'google/gemma-4-26b-a4b-it:free' }}
         run: |
           jq -n \
             --arg model "$MODEL" \
