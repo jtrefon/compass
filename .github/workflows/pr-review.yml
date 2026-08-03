@@ -1,0 +1,76 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: secrets.OPENROUTER_API_KEY != ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gather diff
+        id: diff
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo,
+              pull_number: pr.number,
+              per_page: 100
+            });
+            const diff = files
+              .map(f => `### ${f.filename}\n${f.patch ?? '(binary or too large)'}`)
+              .join('\n\n')
+              .slice(0, 30000);
+            core.setOutput('diff', diff);
+            core.setOutput('title', pr.title);
+
+      - name: Ask the reviewer
+        id: ai
+        env:
+          DIFF: ${{ steps.diff.outputs.diff }}
+          TITLE: ${{ github.event.pull_request.title }}
+          MODEL: ${{ vars.OPENROUTER_MODEL || 'deepseek/deepseek-chat' }}
+        run: |
+          jq -n \
+            --arg model "$MODEL" \
+            --arg title "$TITLE" \
+            --arg diff "$DIFF" \
+            '{
+              model: $model,
+              messages: [
+                { role: "system", content: "You are a senior Swift/macOS reviewer for Compass, a native AI IDE. Review this PR for: real bugs and logic errors, crash/force-unwrap risks, concurrency violations (actors, MainActor), resource leaks, and anything that would break the agent harness. Be concrete: file:line, what is wrong, why it matters, suggested fix. If the change touches the agent loop, prompts, or tools, explicitly say the harness (./run.sh harness) must pass. Keep it under 300 words. Skip style nits. If the diff is clean, say so in one line." },
+                { role: "user", content: "PR title: \($title)\n\nDiff:\n\($diff)" }
+              ],
+              temperature: 0.2
+            }' > /tmp/review_payload.json
+          curl -sS -X POST https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer ${{ secrets.OPENROUTER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @/tmp/review_payload.json \
+            | jq -r '.choices[0].message.content // "Review failed: \(.error // .)"' \
+            > /tmp/review.md
+          echo "review saved ($(wc -c < /tmp/review.md) bytes)"
+
+      - name: Post review comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('/tmp/review.md', 'utf8');
+            const body = `## 🤖 Compass AI Review\n\n${review}\n\n---\n_Automated review via OpenRouter. Maintainer's eyes are the final word._`;
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body
+            });

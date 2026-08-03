@@ -6,6 +6,10 @@
 on-device RAG, FIM completion, and local chat that work fully offline. ~200MB, MIT licensed,
 no Electron, no lock-in.
 
+**Status: pre-alpha → alpha** (single maintainer, daily-driving the editor). We're honest about
+maturity — nothing gets pitched until it's earned. See [ROADMAP.md](ROADMAP.md) for where we are
+and where we're going, and [BENCHMARKS.md](BENCHMARKS.md) for the numbers we've measured.
+
 [![CI](https://github.com/jtrefon/compass/actions/workflows/ci.yml/badge.svg)](https://github.com/jtrefon/compass/actions/workflows/ci.yml)
 [![Release](https://github.com/jtrefon/compass/actions/workflows/release.yml/badge.svg)](https://github.com/jtrefon/compass/actions/workflows/release.yml)
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/db02c680a7e24b90b6340b027b6ebc93)](https://app.codacy.com/gh/jtrefon/ai-ide/dashboard)
