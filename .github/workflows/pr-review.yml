@@ -19,7 +19,7 @@ jobs:
 
       - name: Gather diff
         id: diff
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const pr = context.payload.pull_request;
@@ -63,7 +63,7 @@ jobs:
           echo "review saved ($(wc -c < /tmp/review.md) bytes)"
 
       - name: Post review comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
