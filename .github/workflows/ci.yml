@@ -8,6 +8,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Explicit read-only: CI must never request write permissions.
+# Dependabot-triggered runs with write permissions require manual approval
+# (see AGENTS.md gotchas) — read-only runs never do.
+permissions:
+  contents: read
+
 env:
   DERIVED_DATA: .build-ci
 
@@ -24,12 +30,12 @@ jobs:
         run: |
           xcodebuild \
             -resolvePackageDependencies \
-            -project osx-ide.xcodeproj \
-            -scheme osx-ide \
+            -project Compass.xcodeproj \
+            -scheme Compass \
             -derivedDataPath "$DERIVED_DATA"
           xcodebuild \
-            -project osx-ide.xcodeproj \
-            -scheme osx-ide \
+            -project Compass.xcodeproj \
+            -scheme Compass \
             -configuration Debug \
             -derivedDataPath "$DERIVED_DATA" \
             -destination 'platform=macOS' \
@@ -38,9 +44,9 @@ jobs:
 
       - name: Copy Embedding Models
         run: |
-          dest="$DERIVED_DATA/Build/Products/Debug/osx-ide.app/Contents/Resources/EmbeddingModels"
+          dest="$DERIVED_DATA/Build/Products/Debug/Compass.app/Contents/Resources/EmbeddingModels"
           mkdir -p "$dest"
-          rsync -aq --delete osx-ide/Resources/EmbeddingModels/ "$dest/"
+          rsync -aq --delete Compass/Resources/EmbeddingModels/ "$dest/"
 
       - name: Cache Derived Data
         uses: actions/cache@v4
@@ -66,15 +72,15 @@ jobs:
       - name: Run Unit Tests
         run: |
           xcodebuild \
-            -project osx-ide.xcodeproj \
-            -scheme osx-ide \
+            -project Compass.xcodeproj \
+            -scheme Compass \
             -configuration Debug \
             -derivedDataPath "$DERIVED_DATA" \
             -destination 'platform=macOS' \
-            -only-testing:osx-ideTests \
-            -skip-testing:osx-ideTests/OpenAICompatibleChatServiceTests \
-            -skip-testing:osx-ideTests/ConversationPlanStoreLRUTests/testEvictsOldestWhenExceedingMaxCachedPlans \
-            -skip-testing:osx-ideTests/ConversationPolicyTests \
+            -only-testing:CompassTests \
+            -skip-testing:CompassTests/OpenAICompatibleChatServiceTests \
+            -skip-testing:CompassTests/ConversationPlanStoreLRUTests/testEvictsOldestWhenExceedingMaxCachedPlans \
+            -skip-testing:CompassTests/ConversationPolicyTests \
             test-without-building \
             CODE_SIGNING_ALLOWED=NO
 
@@ -96,12 +102,12 @@ jobs:
       - name: Run UI Tests
         run: |
           xcodebuild \
-            -project osx-ide.xcodeproj \
-            -scheme osx-ide \
+            -project Compass.xcodeproj \
+            -scheme Compass \
             -configuration Debug \
             -derivedDataPath "$DERIVED_DATA" \
             -destination 'platform=macOS' \
-            -only-testing:osx-ideUITests \
+            -only-testing:CompassUITests \
             test-without-building \
             CODE_SIGNING_ALLOWED=NO
 
@@ -119,6 +125,6 @@ jobs:
       - name: Upload App Bundle
         uses: actions/upload-artifact@v4
         with:
-          name: osx-ide-app
-          path: .build-ci/Build/Products/Debug/osx-ide.app
+          name: Compass-app
+          path: .build-ci/Build/Products/Debug/Compass.app
           retention-days: 7
