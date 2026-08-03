@@ -1,0 +1,67 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve packages
+        run: |
+          xcodebuild -resolvePackageDependencies -project Compass.xcodeproj -scheme Compass \
+            -derivedDataPath .build-tests || true
+
+      - name: Run core benchmarks
+        run: |
+          # Retry resolution once — SPM submodule fetch is flaky
+          for i in 1 2 3; do
+            xcodebuild -project Compass.xcodeproj -scheme Compass \
+              -configuration Debug \
+              -derivedDataPath .build-tests \
+              -destination 'platform=macOS' \
+              -parallel-testing-enabled NO \
+              ENABLE_PREVIEWS=NO \
+              SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+              test \
+              -only-testing:CompassHarnessTests/EmbeddingBenchmarkHarnessTests \
+              -only-testing:CompassHarnessTests/BenchmarkMetricsTests \
+              -skip-testing:CompassUITests \
+              -skip-testing:CompassTests && break
+            echo "attempt $i failed — retrying"
+            sleep 5
+          done
+
+      - name: Upload benchmark JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-latest
+          path: .build-tests/benchmarks/latest.json
+          if-no-files-found: error
+
+      - name: Summarize
+        run: |
+          if [ -f .build-tests/benchmarks/latest.json ]; then
+            python3 - <<'EOF'
+            import json
+            with open(".build-tests/benchmarks/latest.json") as f:
+                d = json.load(f)
+            print("## Compass benchmark results")
+            print("")
+            print(f"- Host: {d.get('host')}")
+            print(f"- Time: {d.get('timestamp')}")
+            print("")
+            print("| Metric | Value |")
+            print("|---|---|")
+            for k, v in sorted(d.get("metrics", {}).items()):
+                print(f"| {k} | {v:.2f} |")
+            EOF
+          fi
