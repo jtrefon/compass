@@ -148,7 +148,10 @@ export const ROADMAP = [
   {
     phase: "v1.5 — next",
     items: [
-      "Published benchmarks (latency, RAM, index time)",
+      "FIM benchmarks published (TTFT, tokens/sec, p50/p95)",
+      "MCP support — with sane defaults, not a config maze",
+      "Agent permission model: approval gates, read-only mode, sandboxed actions",
+      "Harness expansion — tool-loop regression tests for every agent fix",
       "Remote sessions (SSH/SFTP)",
       "Project memory — learns your conventions",
       "Native Anthropic & OpenAI providers",
@@ -160,6 +163,7 @@ export const ROADMAP = [
     phase: "v2.0 — the standard",
     items: [
       "Plugin SDK & extensions",
+      "Parallel specialized agents with context handoff",
       "Benchmark reports in every release",
       "Custom model fine-tuning pipeline",
       "Team features — usage-based, not per-seat",
