@@ -47,6 +47,16 @@ jobs:
               gh pr update-branch "$num" --repo "$GITHUB_REPOSITORY" || echo "  update skipped (conflict or already current)"
               gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --auto --squash 2>/dev/null \
                 || echo "  auto-merge already enabled or unavailable"
+              # Explicitly launch CI on the branch head: push events alone
+              # proved unreliable for these branches. Skip if a run is active.
+              ACTIVE=$(gh run list --workflow=ci.yml --branch "$branch" --status in_progress,queued \
+                --repo "$GITHUB_REPOSITORY" --limit 1 --json databaseId --jq 'length')
+              if [ "$ACTIVE" = "0" ]; then
+                gh workflow run ci.yml --ref "$branch" --repo "$GITHUB_REPOSITORY" \
+                  && echo "  CI triggered on $branch" || echo "  CI trigger failed"
+              else
+                echo "  CI already active on $branch"
+              fi
             fi
           done
           echo "auto-merge pass complete"

@@ -6,7 +6,10 @@ on:
   # pipeline. Push events on the same branches run ungated and post the same
   # commit checks — the PR shows those. Fork-PR CI can return when the project
   # adds a contributor flow (first-time approval there is normal OSS behavior).
+  # workflow_dispatch: the auto-merge cascade triggers CI explicitly per branch
+  # after updating it — push events alone proved unreliable for these branches.
   push:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
