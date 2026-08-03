@@ -95,3 +95,6 @@ xcuserdata/
 .DS_Store
 .run_test_log.txt
 /build/
+
+# Internal working docs — local only
+TECH_DEBT.md
