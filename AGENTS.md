@@ -244,6 +244,7 @@ Button(onActivate)                          ← single button, fills entire pill
 
 - **LSP false positives**: sourcekit-lsp frequently reports "Cannot find type 'X' in scope" for cross-module types. The actual build (`./run.sh build`) is the source of truth.
 - **FAISS**: linked as a static library (`libfaiss_full.a`). The C bridge (`CFAISSWrapper.c`) wraps `faiss_c.h`. No Swift Package Manager dependency.
+- **Workflow permissions + Dependabot**: GitHub requires MANUAL APPROVAL for any workflow run triggered by a Dependabot PR that requests write permissions (hard security gate, cannot be disabled). Rule: write-permission workflows must be push-triggered or manual (`workflow_dispatch`) — never `pull_request`-triggered for dependabot-covered events. See `.github/workflows/auto-merge.yml` for the working pattern.
 
 ### Design Standards (UI consistency)
 
