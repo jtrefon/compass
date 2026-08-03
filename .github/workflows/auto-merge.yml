@@ -49,9 +49,10 @@ jobs:
                 || echo "  auto-merge already enabled or unavailable"
               # Explicitly launch CI on the branch head: push events alone
               # proved unreliable for these branches. Skip if a run is active.
-              ACTIVE=$(gh run list --workflow=ci.yml --branch "$branch" --status in_progress,queued \
-                --repo "$GITHUB_REPOSITORY" --limit 1 --json databaseId --jq 'length')
-              if [ "$ACTIVE" = "0" ]; then
+              ACTIVE=$(gh run list --workflow=ci.yml --branch "$branch" \
+                --repo "$GITHUB_REPOSITORY" --limit 10 --json status \
+                --jq '[.[].status] | any(. == "in_progress" or . == "queued")')
+              if [ "$ACTIVE" != "true" ]; then
                 gh workflow run ci.yml --ref "$branch" --repo "$GITHUB_REPOSITORY" \
                   && echo "  CI triggered on $branch" || echo "  CI trigger failed"
               else
