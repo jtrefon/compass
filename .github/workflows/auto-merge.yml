@@ -1,14 +1,16 @@
 name: Auto-merge automated PRs
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    types: [opened, synchronize, ready_for_review]
+    types: [opened, synchronize, ready_for_review, labeled]
   workflow_dispatch:
 
-# Cascade: only ONE auto-merge operation in flight at a time.
-# Combined with branch protection (strict, required CI) this means:
-# update branch -> re-run CI on the updated head -> merge -> next PR's turn.
-# No parallel merges, no stale branches, no conflicts.
+# Serialized: one update+enable pass at a time. The cascade is emergent:
+# after each merge (push to main) this runs again, updates the next PR's
+# branch, CI re-runs on the fresh head, GitHub auto-merges when green and
+# up-to-date (strict branch protection). No parallel merges, no stale bases.
 concurrency:
   group: auto-merge-queue
   cancel-in-progress: false
@@ -18,48 +20,45 @@ permissions:
   pull-requests: write
 
 jobs:
-  cascade-merge:
+  update-and-enable:
     runs-on: ubuntu-latest
-    # ai-fix/* PRs only: our AI-generated fixes merge themselves.
-    # Dependabot PRs run with GitHub's hard read-only token (no write permission
-    # for workflows triggered by dependabot) — those need a manual merge or a
-    # PAT-based flow once the project adds one.
-    if: startsWith(github.head_ref, 'ai-fix/')
     steps:
       - uses: actions/checkout@v4
 
-      - name: Update branch to latest main (avoid conflicts)
-        run: |
-          gh pr update-branch --repo "$GITHUB_REPOSITORY" "$PR" || echo "branch already up to date or update unavailable"
-          echo "HEAD=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)" >> "$GITHUB_ENV"
+      - name: Update branches and enable auto-merge
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-
-      - name: Wait for CI to pass on the updated head
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          EVENT: ${{ github.event_name }}
         run: |
-          for i in $(seq 1 60); do
-            state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD/status" --jq '.state')
-            echo "attempt $i: CI state = $state"
-            if [ "$state" = "success" ]; then
-              echo "CI green on $HEAD"
-              exit 0
+          # Only PRs we own or explicitly mark for automation.
+          qualify() {
+            local branch="$1" labels="$2"
+            [[ "$branch" == dependabot/* || "$branch" == ai-fix/* || "$labels" == *"auto-merge"* ]]
+          }
+
+          if [ "$EVENT" = "pull_request" ]; then
+            labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
+            if qualify "$PR_BRANCH" "$labels"; then
+              echo "== PR #$PR ($PR_BRANCH)"
+              gh pr update-branch "$PR" --repo "$GITHUB_REPOSITORY" || echo "  update skipped (conflict or already current)"
+              gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --auto --squash 2>/dev/null \
+                || echo "  auto-merge already enabled or unavailable"
             fi
-            if [ "$state" = "failure" ] || [ "$state" = "error" ]; then
-              echo "CI failed on $HEAD — not merging"
-              exit 1
+            exit 0
+          fi
+
+          # push to main / manual dispatch: process every qualifying open PR
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --json number,headRefName,labels \
+            --jq '.[] | [.number, .headRefName, ([.labels[].name] | join(","))] | @tsv' |
+          while IFS=$'\t' read -r num branch labels; do
+            if qualify "$branch" "$labels"; then
+              echo "== PR #$num ($branch)"
+              gh pr update-branch "$num" --repo "$GITHUB_REPOSITORY" || echo "  update skipped (conflict or already current)"
+              gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --auto --squash 2>/dev/null \
+                || echo "  auto-merge already enabled or unavailable"
             fi
-            sleep 10
           done
-          echo "timed out waiting for CI"
-          exit 1
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Merge (cascade, squash)
-        run: |
-          gh pr merge --repo "$GITHUB_REPOSITORY" --squash --delete-branch "$PR"
-          echo "Merged #$PR"
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          echo "auto-merge pass complete"
