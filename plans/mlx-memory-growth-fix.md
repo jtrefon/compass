@@ -69,11 +69,11 @@ The MLX inference system exhibited two symptoms during extended use:
   - Memory snapshots logged per turn for observability
 
 ## Files Modified
-- `osx-ide/Services/LocalModels/LocalModelProcessAIService.swift` - MLX memory fixes
-- `osx-ide/Services/ConversationFlow/ToolLoopHandler.swift` - Message truncation integration
-- `osx-ide/Services/ConversationFlow/MessageTruncationPolicy.swift` - NEW: truncation policy
-- `osx-ide/Services/Planning/ConversationPlanStore.swift` - LRU eviction
-- `osx-ide.xcodeproj/project.pbxproj` - MLX package dependency
-- `osx-ideHarnessTests/AgenticHarnessTests.swift` - Memory stability test
-- `osx-ideTests/MessageTruncationPolicyTests.swift` - NEW: unit tests
-- `osx-ideTests/ConversationPlanStoreLRUTests.swift` - NEW: unit tests
+- `compass/Services/LocalModels/LocalModelProcessAIService.swift` - MLX memory fixes
+- `compass/Services/ConversationFlow/ToolLoopHandler.swift` - Message truncation integration
+- `compass/Services/ConversationFlow/MessageTruncationPolicy.swift` - NEW: truncation policy
+- `compass/Services/Planning/ConversationPlanStore.swift` - LRU eviction
+- `compass.xcodeproj/project.pbxproj` - MLX package dependency
+- `compassHarnessTests/AgenticHarnessTests.swift` - Memory stability test
+- `compassTests/MessageTruncationPolicyTests.swift` - NEW: unit tests
+- `compassTests/ConversationPlanStoreLRUTests.swift` - NEW: unit tests

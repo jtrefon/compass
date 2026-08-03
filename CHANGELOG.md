@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Full codebase rename: project (`Compass.xcodeproj`), targets, scheme, and source
-  directories are now `Compass` (was `osx-ide`)
+  directories are now `Compass` (was `compass`)
 
 ## [0.6.1] - 2026-08-01
 

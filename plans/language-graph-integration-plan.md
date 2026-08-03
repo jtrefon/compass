@@ -24,7 +24,7 @@ The goal is to merge the advanced features (RAG, orchestration graph, enhanced r
 
 ### 2. Root Cause of Dead Loop
 
-The MLX model (Qwen3-4B-Instruct) fails in the [`ToolLoopHandler`](osx-ide/Services/ConversationFlow/ToolLoopHandler.swift:76) because:
+The MLX model (Qwen3-4B-Instruct) fails in the [`ToolLoopHandler`](compass/Services/ConversationFlow/ToolLoopHandler.swift:76) because:
 
 1. **Line 154-162**: Model emits "textual tool call pattern" but no structured calls
 2. **Lines 191-300**: Recovery mechanism tries to parse JSON from text
@@ -77,7 +77,7 @@ User Message → LocalModelProcessAIService → Tool Loop → STUCK IN LOOP
 
 ### Phase 1: Create Model Capability Interface
 
-**New File**: `osx-ide/Services/ModelCapability.swift`
+**New File**: `compass/Services/ModelCapability.swift`
 
 ```swift
 protocol ModelCapability {
@@ -104,7 +104,7 @@ struct MLXCapability: ModelCapability {
 
 ### Phase 2: Modify ModelRoutingAIService
 
-**File**: `osx-ide/Services/ModelRoutingAIService.swift`
+**File**: `compass/Services/ModelRoutingAIService.swift`
 
 Add capability-aware routing:
 
@@ -159,7 +159,7 @@ actor ModelRoutingAIService: AIService {
 
 ### Phase 3: Simplify MLX System Prompts
 
-**File**: `osx-ide/Services/LocalModels/LocalModelProcessAIService.swift`
+**File**: `compass/Services/LocalModels/LocalModelProcessAIService.swift`
 
 When in fallback mode (MLX), use simpler prompts:
 
@@ -183,7 +183,7 @@ private func buildSystemContent(tools: [AITool]?, mode: AIMode?, stage: AIReques
 
 ### Phase 4: Adjust Tool Loop Constants for MLX
 
-**File**: `osx-ide/Services/ConversationFlow/ToolLoopConstants.swift`
+**File**: `compass/Services/ConversationFlow/ToolLoopConstants.swift`
 
 ```swift
 enum ToolLoopConstants {
@@ -205,7 +205,7 @@ enum ToolLoopConstants {
 
 ### Phase 5: Pass Capability Through Orchestration
 
-**File**: `osx-ide/Services/Orchestration/Graph/OrchestrationState.swift`
+**File**: `compass/Services/Orchestration/Graph/OrchestrationState.swift`
 
 Add capability to state:
 
@@ -222,7 +222,7 @@ struct OrchestrationState: Sendable {
 }
 ```
 
-**File**: `osx-ide/Services/ConversationSendCoordinator.swift`
+**File**: `compass/Services/ConversationSendCoordinator.swift`
 
 ```swift
 private func executeConversationFlow(_ request: SendRequest) async throws -> AIServiceResponse {
@@ -248,7 +248,7 @@ private func executeConversationFlow(_ request: SendRequest) async throws -> AIS
 }
 ```
 
-**File**: `osx-ide/Services/Orchestration/Graph/OrchestrationGraphRunner.swift`
+**File**: `compass/Services/Orchestration/Graph/OrchestrationGraphRunner.swift`
 
 ```swift
 func run(initialState: OrchestrationState) async throws -> OrchestrationState {
@@ -273,11 +273,11 @@ These files work fine and should be left alone:
 
 | File | Reason |
 |------|--------|
-| `osx-ide/Services/OpenRouterAIService.swift` | Works perfectly |
-| `osx-ide/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift` | Works perfectly |
-| `osx-ide/Services/DependencyContainer.swift` | DI setup is fine |
-| `osx-ide/Services/ConversationToolProvider.swift` | Tools work for both |
-| `osx-ide/Services/Index/CodebaseIndex.swift` | RAG works for both |
+| `compass/Services/OpenRouterAIService.swift` | Works perfectly |
+| `compass/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift` | Works perfectly |
+| `compass/Services/DependencyContainer.swift` | DI setup is fine |
+| `compass/Services/ConversationToolProvider.swift` | Tools work for both |
+| `compass/Services/Index/CodebaseIndex.swift` | RAG works for both |
 
 ---
 

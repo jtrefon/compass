@@ -6,7 +6,7 @@ The embedding upgrade that was never connected has been implemented!
 
 ### Changes Made
 
-**File: `osx-ide/Services/ProjectCoordinator.swift`**
+**File: `compass/Services/ProjectCoordinator.swift`**
 
 Added upgrade logic in two places:
 
@@ -68,9 +68,9 @@ When no model is found:
 
 For this to work, embedding models must be downloaded to:
 - Project: `.ide/models/embeddings/{model-id}/`
-- Global: `~/Library/Application Support/osx-ide/models/embeddings/{model-id}/`
+- Global: `~/Library/Application Support/compass/models/embeddings/{model-id}/`
 
-Available models in [`EmbeddingModelCatalog`](osx-ide/Services/LocalModels/EmbeddingModelCatalog.swift):
+Available models in [`EmbeddingModelCatalog`](compass/Services/LocalModels/EmbeddingModelCatalog.swift):
 - `all-minilm-l6-v2` (384 dimensions)
 - `text-embedding-3-small` (1536 dimensions, default)
 

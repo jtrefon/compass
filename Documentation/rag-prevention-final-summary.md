@@ -40,12 +40,12 @@ Successfully implemented comprehensive RAG enrichment and pre-write prevention s
 - ✅ **Budget Enforcement** - Automatic context size management
 
 **Key Files:**
-- `osx-ide/Services/RAG/RAGModels.swift`
-- `osx-ide/Services/RAG/RetrievalIntentClassifier.swift`
-- `osx-ide/Services/RAG/RAGEvidenceFusionRanker.swift`
-- `osx-ide/Services/RAG/CodebaseIndexRAGRetriever.swift`
-- `osx-ide/Services/RAG/RAGContextBuilder.swift`
-- `osx-ide/Services/Index/CodebaseIndex+Segments.swift`
+- `compass/Services/RAG/RAGModels.swift`
+- `compass/Services/RAG/RetrievalIntentClassifier.swift`
+- `compass/Services/RAG/RAGEvidenceFusionRanker.swift`
+- `compass/Services/RAG/CodebaseIndexRAGRetriever.swift`
+- `compass/Services/RAG/RAGContextBuilder.swift`
+- `compass/Services/Index/CodebaseIndex+Segments.swift`
 
 ---
 
@@ -65,10 +65,10 @@ Successfully implemented comprehensive RAG enrichment and pre-write prevention s
 - ✅ **RAGPreventionHarnessTests** (12 tests) - End-to-end prevention scenarios
 
 **Key Files:**
-- `osx-ide/Services/Prevention/PreWritePreventionEngine.swift`
-- `osx-ide/Services/AIToolExecutor+Execution.swift`
-- `osx-ideTests/Services/Prevention/PreWritePreventionEngineTests.swift`
-- `osx-ideHarnessTests/RAGPreventionHarnessTests.swift`
+- `compass/Services/Prevention/PreWritePreventionEngine.swift`
+- `compass/Services/AIToolExecutor+Execution.swift`
+- `compassTests/Services/Prevention/PreWritePreventionEngineTests.swift`
+- `compassHarnessTests/RAGPreventionHarnessTests.swift`
 
 ---
 
@@ -99,8 +99,8 @@ Successfully implemented comprehensive RAG enrichment and pre-write prevention s
 10. ✅ **Retry Rate** - Per task category
 
 **Key Files:**
-- `osx-ide/Components/RAGStatusGauge.swift`
-- `osx-ide/Services/Telemetry/RAGTelemetryAggregator.swift`
+- `compass/Components/RAGStatusGauge.swift`
+- `compass/Services/Telemetry/RAGTelemetryAggregator.swift`
 
 ---
 

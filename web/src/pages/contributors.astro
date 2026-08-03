@@ -31,7 +31,7 @@ import { BASE_URL, REPO } from "../consts";
         <div class="card reveal">
           <h3 style="font-size:1rem;margin-bottom:8px;color:var(--cyan)">Codebase</h3>
           <p style="font-size:.88rem;color:var(--text-dim);line-height:1.7">
-            ~40,000 lines of Swift across <code>osx-ide/</code>, the harness tests, and the UI layer.
+            ~40,000 lines of Swift across <code>compass/</code>, the harness tests, and the UI layer.
             Build with Xcode 26+ on Apple Silicon. The project uses <code>xcodebuild</code> (not
             SwiftPM) for the main target, with SPM packages for <code>SyntaxHighlighting</code>
             (tree-sitter) and <code>Terminal</code>.
@@ -66,22 +66,22 @@ import { BASE_URL, REPO } from "../consts";
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">Two-pipeline isolation</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">The core architecture: local (4B MLX, no orchestration) and cloud (orchestration graph, 20+ tools). They share zero AI execution code.</p>
-          <code style="margin-top:8px;display:inline-block">osx-ide/Services/LocalPipeline/ · osx-ide/Services/CloudPipeline/</code>
+          <code style="margin-top:8px;display:inline-block">compass/Services/LocalPipeline/ · compass/Services/CloudPipeline/</code>
         </div>
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">Codebase index</h3>
-          <p style="font-size:.85rem;color:var(--text-dim)">SQLite FTS5 engine for symbols, chunks, files, and HNSW-backed embedding retrieval. All in <code>osx-ide/Services/Index/</code>.</p>
-          <code style="margin-top:8px;display:inline-block">osx-ide/Services/Index/DatabaseManager.swift</code>
+          <p style="font-size:.85rem;color:var(--text-dim)">SQLite FTS5 engine for symbols, chunks, files, and HNSW-backed embedding retrieval. All in <code>compass/Services/Index/</code>.</p>
+          <code style="margin-top:8px;display:inline-block">compass/Services/Index/DatabaseManager.swift</code>
         </div>
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">Inline completion engine</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">Local FIM completion with ghost-text rendering, caching, ranking, and sub-100ms latency. The tightest latency loop in the app.</p>
-          <code style="margin-top:8px;display:inline-block">osx-ide/Services/LocalPipeline/InlineCompletionEngine.swift</code>
+          <code style="margin-top:8px;display:inline-block">compass/Services/LocalPipeline/InlineCompletionEngine.swift</code>
         </div>
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">Agent tool system</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">20+ tools implementing the <code>AITool</code> protocol. The tool loop runs in <code>ToolLoopHandler.swift</code> with stall detection.</p>
-          <code style="margin-top:8px;display:inline-block">osx-ide/Services/Tools/ · osx-ide/Services/CloudPipeline/ToolLoopHandler.swift</code>
+          <code style="margin-top:8px;display:inline-block">compass/Services/Tools/ · compass/Services/CloudPipeline/ToolLoopHandler.swift</code>
         </div>
         <div class="reveal card">
           <h3 style="font-size:.95rem;margin-bottom:4px">The harness — our AI tests AI</h3>
@@ -90,7 +90,7 @@ import { BASE_URL, REPO } from "../consts";
             real pipeline and validates the outcome — no mocks, no stubs. When your PR touches the
             agent, the agent gets tested by agents. Few projects can say that.
           </p>
-          <code style="margin-top:8px;display:inline-block">osx-ideHarnessTests/ · ./run.sh harness</code>
+          <code style="margin-top:8px;display:inline-block">compassHarnessTests/ · ./run.sh harness</code>
         </div>
       </div>
       <div class="reveal" style="margin-top:32px;text-align:center">

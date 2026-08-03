@@ -62,7 +62,7 @@ The MLX framework's public API (`MLXLMCommon.generate()`) handles KV cache inter
 #### Phase 1: Prompt Prefix Caching (Feasible Now)
 
 ```swift
-// New file: osx-ide/Services/LocalModels/PromptPrefixCache.swift
+// New file: compass/Services/LocalModels/PromptPrefixCache.swift
 
 actor PromptPrefixCache {
     private var cachedPrefixes: [String: CachedPrefix] = [:]
@@ -151,9 +151,9 @@ actor ConversationKVCache {
    - Track conversation turn count
 
 ### Files to Create/Modify
-1. Create `osx-ide/Services/LocalModels/PromptPrefixCache.swift`
-2. Modify `osx-ide/Services/LocalModels/LocalModelProcessAIService.swift`
-3. Future: Create `osx-ide/Services/LocalModels/ConversationKVCache.swift`
+1. Create `compass/Services/LocalModels/PromptPrefixCache.swift`
+2. Modify `compass/Services/LocalModels/LocalModelProcessAIService.swift`
+3. Future: Create `compass/Services/LocalModels/ConversationKVCache.swift`
 
 ---
 

@@ -1,4 +1,4 @@
-# Agentic Architecture Spec (osx-ide)
+# Agentic Architecture Spec (compass)
 
 ## 1) Mission
 
@@ -308,7 +308,7 @@ CI must run `./run.sh test` only. The harness runner is intentionally separate b
 ## 5) Prompts (externalized to Markdown)
 
 ### 5.1 Prompt inventory
-All prompts live under `osx-ide/Prompts/` (exact structure can be adjusted):
+All prompts live under `compass/Prompts/` (exact structure can be adjusted):
 
 - `Prompts/base/system.md`
 - `Prompts/base/project_root_context.md`

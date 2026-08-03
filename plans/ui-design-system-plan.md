@@ -29,7 +29,7 @@ enum AppConstantsLayout {
 ```
 
 **Files to modify:**
-- `osx-ide/Services/AppConstantsLayout.swift` — Add spacing scale
+- `compass/Services/AppConstantsLayout.swift` — Add spacing scale
 - All component files — Replace hardcoded spacing values (80+ files)
 
 **Migration strategy:** Add the tokens first. Migrate files incrementally by priority: Overlays → Settings → Chat → Editor → Shared.
@@ -48,7 +48,7 @@ static let cornerXL:  CGFloat = 16  // settings cards, prominent surfaces
 ```
 
 **Files to modify:**
-- `osx-ide/Services/AppConstantsLayout.swift` — Add scale
+- `compass/Services/AppConstantsLayout.swift` — Add scale
 - All component files using `.cornerRadius()` or `RoundedRectangle(cornerRadius:...)`
 
 ### 1.3 Create a Shadow Elevation Scale
@@ -77,12 +77,12 @@ extension View {
 ```
 
 **Files to modify:**
-- New: `osx-ide/Services/ShadowElevation.swift` (or inline in AppConstantsLayout)
-- `osx-ide/Components/OverlayCard.swift`
-- `osx-ide/Components/OverlayScaffold.swift`
-- `osx-ide/Components/SettingsComponents.swift`
-- `osx-ide/Components/InlineAIPopoverView.swift`
-- `osx-ide/osx_ideApp.swift` (LoadingOverlayView)
+- New: `compass/Services/ShadowElevation.swift` (or inline in AppConstantsLayout)
+- `compass/Components/OverlayCard.swift`
+- `compass/Components/OverlayScaffold.swift`
+- `compass/Components/SettingsComponents.swift`
+- `compass/Components/InlineAIPopoverView.swift`
+- `compass/compassApp.swift` (LoadingOverlayView)
 
 ### 1.4 Create Semantic Color Tokens
 
@@ -114,9 +114,9 @@ enum AppConstantsColor {
 ```
 
 **Files to modify:**
-- New: `osx-ide/Services/AppConstantsColor.swift`
-- `osx-ide/Services/AppConstants.swift` — Add typealias
-- `osx-ide/Services/UIStateManager.swift` — Update terminal default colors
+- New: `compass/Services/AppConstantsColor.swift`
+- `compass/Services/AppConstants.swift` — Add typealias
+- `compass/Services/UIStateManager.swift` — Update terminal default colors
 - All component files — Replace `Color(nsColor: .xxx)` with semantic tokens
 
 ---
@@ -160,7 +160,7 @@ extension View {
 ```
 
 **Files to modify:**
-- `osx-ide/Components/GlassStyle.swift` — Remove `liquidGlassCard`, simplify
+- `compass/Components/GlassStyle.swift` — Remove `liquidGlassCard`, simplify
 
 ### 2.2 Migrate Ad-hoc Glass to `NativeGlassSurface`
 
@@ -208,9 +208,9 @@ extension NativeGlassSurface {
 **Action:** Delete lines 565-626 from `ContentView.swift`.
 
 **Files to modify:**
-- `osx-ide/ContentView.swift:565-626` — Remove `OverlayHostView` struct
-- `osx-ide/Components/OverlayContainer.swift` — Remove entire file (dead)
-- `osx-ide/Components/OverlayCard.swift` — Review if needed elsewhere, else keep
+- `compass/ContentView.swift:565-626` — Remove `OverlayHostView` struct
+- `compass/Components/OverlayContainer.swift` — Remove entire file (dead)
+- `compass/Components/OverlayCard.swift` — Review if needed elsewhere, else keep
 
 ### 3.2 Remove Dead Code: `liquidGlassCard()`
 
@@ -219,7 +219,7 @@ extension NativeGlassSurface {
 **Action:** Remove the `liquidGlassCard()` extension method.
 
 **Files to modify:**
-- `osx-ide/Components/GlassStyle.swift:56-64`
+- `compass/Components/GlassStyle.swift:56-64`
 
 ### 3.3 Fix Bottom Panel Glass Mismatch
 
@@ -237,7 +237,7 @@ extension NativeGlassSurface {
 ```
 
 **Files to modify:**
-- `osx-ide/ContentView.swift:313-318` — Unify corner radii
+- `compass/ContentView.swift:313-318` — Unify corner radii
 
 ### 3.4 Conslidate Bottom Panel Bars
 
@@ -253,7 +253,7 @@ Options:
 **Recommendation:** Option A — use `.safeAreaInset(edge: .bottom)` for a single combined footer.
 
 **Files to modify:**
-- `osx-ide/ContentView.swift` — Restructure `mainLayout` and `terminalPanel`
+- `compass/ContentView.swift` — Restructure `mainLayout` and `terminalPanel`
 
 ### 3.5 Consolidate File Tree Coordinators
 
@@ -288,10 +288,10 @@ Form {
 ```
 
 **Files to modify:**
-- `osx-ide/Components/SettingsComponents.swift` — Make `Form`-compatible
-- `osx-ide/Components/AISettingsTab.swift` — Replace card wrappers
-- `osx-ide/Components/GeneralSettingsTab.swift` — Replace card wrappers
-- `osx-ide/Components/AgentSettingsTab.swift` — Replace card wrappers
+- `compass/Components/SettingsComponents.swift` — Make `Form`-compatible
+- `compass/Components/AISettingsTab.swift` — Replace card wrappers
+- `compass/Components/GeneralSettingsTab.swift` — Replace card wrappers
+- `compass/Components/AgentSettingsTab.swift` — Replace card wrappers
 
 ### 4.2 Fix Overlay Card to Use Design System
 
@@ -311,7 +311,7 @@ struct OverlayCard<Content: View>: View {
 ```
 
 **Files to modify:**
-- `osx-ide/Components/OverlayCard.swift`
+- `compass/Components/OverlayCard.swift`
 
 ### 4.3 Add macOS Toolbar Content
 
@@ -320,7 +320,7 @@ struct OverlayCard<Content: View>: View {
 **Proposed solution:** Add primary window-level toolbar items. At minimum, a leading navigation control and trailing AI mode indicator.
 
 ```swift
-Window("osx-ide", id: "main") {
+Window("compass", id: "main") {
     AppRootView(...)
 }
 .windowToolbarStyle(.unifiedCompact)
@@ -335,7 +335,7 @@ Window("osx-ide", id: "main") {
 ```
 
 **Files to modify:**
-- `osx-ide/osx_ideApp.swift`
+- `compass/compassApp.swift`
 
 ### 4.4 Evaluate `.hiddenTitleBar`
 
@@ -344,15 +344,15 @@ Window("osx-ide", id: "main") {
 **Proposed solution:** Test with `.windowStyle(.hiddenTitleBar)`. This requires moving window title handling to the toolbar or custom title view. Impact on `WindowSetupView` needs verification.
 
 ```swift
-Window("osx-ide", id: "main") { ... }
+Window("compass", id: "main") { ... }
     .windowStyle(.hiddenTitleBar)
     .windowToolbarStyle(.unifiedCompact)
 ```
 
 **Files to modify:**
-- `osx-ide/osx_ideApp.swift` — Add `.windowStyle(.hiddenTitleBar)`
-- `osx-ide/ContentView.swift` — Verify `WindowSetupView` still works
-- `osx-ide/Components/WindowSetupView.swift` — May need to set window title via toolbar
+- `compass/compassApp.swift` — Add `.windowStyle(.hiddenTitleBar)`
+- `compass/ContentView.swift` — Verify `WindowSetupView` still works
+- `compass/Components/WindowSetupView.swift` — May need to set window title via toolbar
 
 ---
 
@@ -365,8 +365,8 @@ Window("osx-ide", id: "main") { ... }
 **Decision:** Use native `.sheet()` for all overlays. Remove `OverlayContainer` entirely.
 
 **Files to modify:**
-- `osx-ide/Components/OverlayContainer.swift` — Delete
-- `osx-ide/ContentView.swift` — Already uses sheets; remove unused import/ref if any
+- `compass/Components/OverlayContainer.swift` — Delete
+- `compass/ContentView.swift` — Already uses sheets; remove unused import/ref if any
 
 ### 5.2 Fix Hardcoded Plugin Name String
 
@@ -382,7 +382,7 @@ protocol PluginView: Identifiable {
 ```
 
 **Files to modify:**
-- `osx-ide/ContentView.swift:295` — Use `view.displayName`
+- `compass/ContentView.swift:295` — Use `view.displayName`
 - Plugin protocol/conformance files
 
 ---
@@ -402,8 +402,8 @@ protocol PluginView: Identifiable {
 ```
 
 **Files to modify:**
-- `osx-ide/Services/UIStateManager.swift:88-89`
-- `osx-ide/Services/AppConstantsColor.swift` (new, from Phase 1.4)
+- `compass/Services/UIStateManager.swift:88-89`
+- `compass/Services/AppConstantsColor.swift` (new, from Phase 1.4)
 
 ### 6.2 Verify Theme Adaptation Completeness
 
@@ -459,28 +459,28 @@ Phase 6 (Terminal & Theme)
 ## Files Summary
 
 ### Files to Create (3)
-1. `osx-ide/Services/AppConstantsColor.swift` — Semantic color tokens
-2. `osx-ide/Services/ShadowElevation.swift` — (or inline in AppConstantsLayout)
+1. `compass/Services/AppConstantsColor.swift` — Semantic color tokens
+2. `compass/Services/ShadowElevation.swift` — (or inline in AppConstantsLayout)
 
 ### Files to Delete (2)
-1. `osx-ide/Components/OverlayContainer.swift` — Dead code
-2. `osx-ide/OverlayHostView` block in ContentView — Dead code
+1. `compass/Components/OverlayContainer.swift` — Dead code
+2. `compass/OverlayHostView` block in ContentView — Dead code
 
 ### Files to Modify (5 high-impact, ~30 total across all phases)
 
 | File | Phase | Change |
 |---|---|---|
-| `osx-ide/Services/AppConstantsLayout.swift` | 1.1, 1.2, 1.3 | Add spacing, corner, shadow tokens |
-| `osx-ide/Components/GlassStyle.swift` | 2.1, 2.3 | Simplify, remove liquidGlassCard, add surface mapping |
-| `osx-ide/ContentView.swift` | 2.2, 3.1, 3.3, 3.4, 5.2 | Migrate glass, remove dead code, fix bottom panel, fix plugin name |
-| `osx-ide/Services/UIStateManager.swift` | 6.1 | Update terminal defaults |
-| `osx-ide/Components/OverlayCard.swift` | 4.2 | Use design system |
-| `osx-ide/Components/SettingsComponents.swift` | 4.1 | Form compatibility |
-| `osx-ide/Components/AIChatPanel.swift` | 2.2 | Migrate glass |
-| `osx-ide/Components/ChatInputView.swift` | 2.2 | Migrate glass |
-| `osx-ide/Components/EditorTabBar.swift` | 2.2 (review) | Verify glass pattern |
-| `osx-ide/Components/SettingsRow.swift` | 4.1 | Ensure Form compatibility |
-| `osx-ide/osx_ideApp.swift` | 4.3, 4.4 | Add toolbar items, hiddenTitleBar |
+| `compass/Services/AppConstantsLayout.swift` | 1.1, 1.2, 1.3 | Add spacing, corner, shadow tokens |
+| `compass/Components/GlassStyle.swift` | 2.1, 2.3 | Simplify, remove liquidGlassCard, add surface mapping |
+| `compass/ContentView.swift` | 2.2, 3.1, 3.3, 3.4, 5.2 | Migrate glass, remove dead code, fix bottom panel, fix plugin name |
+| `compass/Services/UIStateManager.swift` | 6.1 | Update terminal defaults |
+| `compass/Components/OverlayCard.swift` | 4.2 | Use design system |
+| `compass/Components/SettingsComponents.swift` | 4.1 | Form compatibility |
+| `compass/Components/AIChatPanel.swift` | 2.2 | Migrate glass |
+| `compass/Components/ChatInputView.swift` | 2.2 | Migrate glass |
+| `compass/Components/EditorTabBar.swift` | 2.2 (review) | Verify glass pattern |
+| `compass/Components/SettingsRow.swift` | 4.1 | Ensure Form compatibility |
+| `compass/compassApp.swift` | 4.3, 4.4 | Add toolbar items, hiddenTitleBar |
 | ~20 other component files | 2.2 | Replace magic spacing/radius values |
 
 ---
@@ -539,8 +539,8 @@ Keep AppKit where it provides **necessary performance or system integration** (N
 | 7.1 | Middle-click tab close | `EditorTabBar.swift:114-133` | `MiddleClickView` NSViewRepresentable + `MiddleClickNSView` | SwiftUI `.overlay()` with `onTapGesture` or `.onLongPressGesture` — or keep; middle-click is genuinely hard in SwiftUI | Low |
 | 7.2 | Focus forwarding | `FocusForwardingContainerView.swift` | `NSView` subclass intercepting `mouseDown` | `@FocusState` + `.onTapGesture` in SwiftUI | Low |
 | 7.3 | Window reference capture | `ContentView.swift:543-561` (`WindowResolver`) | `NSViewRepresentable` to get `NSWindow` | `@Environment(\.window)` or access via `NSApplication.shared.keyWindow` in `onAppear` | Low |
-| 7.4 | Cmd+W event monitor | `osx_ideApp.swift:471-476` | `NSEvent.addLocalMonitorForEvents` | SwiftUI `.onCommand()` or `.keyboardShortcut("w", modifiers: .command)` (already exists in `commands` block, making this monitor redundant) | Low |
-| 7.5 | NSAlert for rename | `osx_ideApp.swift:357-375` | `NSAlert.runModal()` | SwiftUI `.alert()` modifier with `TextField` | Medium |
+| 7.4 | Cmd+W event monitor | `compassApp.swift:471-476` | `NSEvent.addLocalMonitorForEvents` | SwiftUI `.onCommand()` or `.keyboardShortcut("w", modifiers: .command)` (already exists in `commands` block, making this monitor redundant) | Low |
+| 7.5 | NSAlert for rename | `compassApp.swift:357-375` | `NSAlert.runModal()` | SwiftUI `.alert()` modifier with `TextField` | Medium |
 | 7.6 | Theme detection (NSApp.effectiveAppearance) | `UIStateManager.swift:330-336` | `NSApp.effectiveAppearance.bestMatch(from:)` | `@Environment(\.colorScheme)` in SwiftUI views — system theme is already propagated | Low |
 | 7.7 | Window chrome setup | `ContentView.swift:506-541` (`WindowSetupView`) | Direct `NSWindow` mutation: `styleMask`, `backgroundColor`, `setFrame` | SwiftUI scene modifiers: `.windowResizability()`, `.defaultPosition()`, `.windowStyle()` | Medium |
 | 7.8 | `NSCursor` on dividers | `ContentView.swift:418-468` | `NSCursor.resizeLeftRight.push()`/`.pop()` | SwiftUI `.onHover {}` + `NSCursor` (this is already the standard pattern; keep as-is) | **Skip** |
@@ -589,11 +589,11 @@ Then set it once in `AppRootView` or the root Window scene.
 
 #### 7.4 — Cmd+W Event Monitor → Redundant (already handled by keyboard shortcut)
 **Current**: `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` captures Cmd+W to close tabs.
-**Problem**: `osx_ideApp.swift:245` already has `.keyboardShortcut("w", modifiers: [.command])` for `editor.close_tab`. The event monitor duplicates this and intercepts the event before SwiftUI's command system processes it.
+**Problem**: `compassApp.swift:245` already has `.keyboardShortcut("w", modifiers: [.command])` for `editor.close_tab`. The event monitor duplicates this and intercepts the event before SwiftUI's command system processes it.
 **Replacement**: Remove the event monitor. The `.commands {}` block already handles Cmd+W for close tab.
 
 **Files**:
-- `osx_ideApp.swift:471-483` — Remove event monitor logic in `AppRootView.onAppear`/`.onDisappear`
+- `compassApp.swift:471-483` — Remove event monitor logic in `AppRootView.onAppear`/`.onDisappear`
 
 #### 7.5 — NSAlert → SwiftUI .alert()
 **Current**: `NSAlert` with `runModal()` for rename dialog (blocking, AppKit-modal).
@@ -609,8 +609,8 @@ Then set it once in `AppRootView` or the root Window scene.
 }
 ```
 **Files**:
-- `osx_ideApp.swift:357-375` — Replace NSAlert rename with `.alert()` modifier
-- `osx_ideApp.swift` — Add `@State` for rename flow
+- `compassApp.swift:357-375` — Replace NSAlert rename with `.alert()` modifier
+- `compassApp.swift` — Add `@State` for rename flow
 - `AppRootView` — Add `.alert()` modifier
 
 #### 7.6 — Theme Detection → @Environment(\.colorScheme)
@@ -627,7 +627,7 @@ Then set it once in `AppRootView` or the root Window scene.
 **Current**: `WindowSetupView` mutates `NSWindow` directly: `styleMask`, `backgroundColor`, `minSize`, `setFrame`.
 **Replacement**: Use SwiftUI scene modifiers on the `Window` scene:
 ```swift
-Window("osx-ide", id: "main") { ... }
+Window("compass", id: "main") { ... }
     .windowStyle(.hiddenTitleBar)        // Already done
     .windowToolbarStyle(.unifiedCompact) // Already done
     .windowResizability(.contentSize)    // Instead of manual frame
@@ -648,7 +648,7 @@ Already follows the standard SwiftUI pattern (NSCursor is pushed/popped inside `
 **Migration targets**:
 | NSColor Used | Replace With | Files Affected |
 |---|---|---|
-| `.windowBackgroundColor` | `.Color.surfaceBackground` | `SettingsView.swift:76`, `osx_ideApp.swift:505` |
+| `.windowBackgroundColor` | `.Color.surfaceBackground` | `SettingsView.swift:76`, `compassApp.swift:505` |
 | `.controlBackgroundColor` | `.Color.surfaceSidebar` or `.surfaceCard` | `ChatInputView.swift:47`, `AIChatPanel.swift:116,121`, `EditorTabBar.swift:90,97`, `ModelSuggestionList.swift:37`, `NewProjectDialog.swift:45`, `ReasoningOutcomeMessageView.swift:37`, `InlineAIPopoverView.swift:108` |
 | `.textBackgroundColor` | `.Color.terminalBackground` | `LogsPanelView.swift:44,61`, `ToolExecutionMessageView.swift:345`, `MinimapView.swift:12`, `EditorPaneView.swift:63,111`, `TextViewRepresentable.swift:42`, `MarkdownView.swift:250` |
 | `.secondarySystemFill` | `.Color.surfaceCard` | `MessageListView.swift:32`, `MessageContentCoordinator.swift:97` |
@@ -697,7 +697,7 @@ Phase 7.1 (Middle-click) ────── Low priority, evaluate-only
 **Delete (3)**: `FocusForwardingContainerView.swift`, `WindowResolver` block in ContentView, redundant event monitor code
 
 **Modify (~25)**:
-- Low touch: `EditorTabBar.swift` (documentation only), `UIStateManager.swift`, `osx_ideApp.swift`
+- Low touch: `EditorTabBar.swift` (documentation only), `UIStateManager.swift`, `compassApp.swift`
 - Medium touch: `ContentView.swift`, `EditorPaneView.swift`, `SettingsView.swift`
 - Token migration: `ChatInputView.swift`, `AIChatPanel.swift`, `EditorTabBar.swift`, `ModelSuggestionList.swift`, `NewProjectDialog.swift`, `ReasoningOutcomeMessageView.swift`, `InlineAIPopoverView.swift`, `LogsPanelView.swift`, `ToolExecutionMessageView.swift`, `MinimapView.swift`, `EditorPaneView.swift`, `TextViewRepresentable.swift`, `MarkdownView.swift`, `MessageListView.swift`, `MessageContentCoordinator.swift`, `LineNumberRulerView.swift`, `CodeEditorTextView.swift`
 
@@ -706,6 +706,6 @@ Phase 7.1 (Middle-click) ────── Low priority, evaluate-only
 ## Build Verification
 
 After each phase:
-1. `xcodebuild -scheme osx-ide build` — Must compile
+1. `xcodebuild -scheme compass build` — Must compile
 2. Visual inspection of affected views in both light and dark mode
 3. Check accessibility identifiers are preserved

@@ -133,29 +133,29 @@
 ## 📦 Files Created/Modified
 
 ### New Implementation Files
-- `osx-ide/Services/RAG/RAGModels.swift` - Evidence card domain models
-- `osx-ide/Services/RAG/RetrievalIntentClassifier.swift` - Intent classification
-- `osx-ide/Services/RAG/RAGEvidenceFusionRanker.swift` - Fusion ranking
-- `osx-ide/Services/RAG/CodebaseIndexRAGRetriever.swift` - Multi-source retrieval
-- `osx-ide/Services/RAG/RAGContextBuilder.swift` - Enhanced context building
-- `osx-ide/Services/RAG/Events/RAGRetrievalEvents.swift` - Extended telemetry events
-- `osx-ide/Services/Prevention/PreWritePreventionEngine.swift` - Prevention engine
+- `compass/Services/RAG/RAGModels.swift` - Evidence card domain models
+- `compass/Services/RAG/RetrievalIntentClassifier.swift` - Intent classification
+- `compass/Services/RAG/RAGEvidenceFusionRanker.swift` - Fusion ranking
+- `compass/Services/RAG/CodebaseIndexRAGRetriever.swift` - Multi-source retrieval
+- `compass/Services/RAG/RAGContextBuilder.swift` - Enhanced context building
+- `compass/Services/RAG/Events/RAGRetrievalEvents.swift` - Extended telemetry events
+- `compass/Services/Prevention/PreWritePreventionEngine.swift` - Prevention engine
 
 ### Modified Integration Files
-- `osx-ide/Services/AIToolExecutor.swift` - Prevention engine integration
-- `osx-ide/Services/AIToolExecutor+Execution.swift` - Pre-write checks
-- `osx-ide/Services/AIInteractionCoordinator.swift` - Stage/conversation propagation
-- `osx-ide/Services/ConversationManager.swift` - Event bus wiring
-- `osx-ide/Services/ConversationFlow/InitialResponseHandler.swift` - ConversationId threading
-- `osx-ide/Services/Orchestration/Nodes/InitialResponseNode.swift` - Metadata passing
-- `osx-ide/Services/Orchestration/Nodes/DispatcherNode.swift` - Flow continuation
+- `compass/Services/AIToolExecutor.swift` - Prevention engine integration
+- `compass/Services/AIToolExecutor+Execution.swift` - Pre-write checks
+- `compass/Services/AIInteractionCoordinator.swift` - Stage/conversation propagation
+- `compass/Services/ConversationManager.swift` - Event bus wiring
+- `compass/Services/ConversationFlow/InitialResponseHandler.swift` - ConversationId threading
+- `compass/Services/Orchestration/Nodes/InitialResponseNode.swift` - Metadata passing
+- `compass/Services/Orchestration/Nodes/DispatcherNode.swift` - Flow continuation
 
 ### New Test Files
-- `osx-ideTests/Services/RAG/RAGEvidenceFusionRankerTests.swift`
-- `osx-ideTests/Services/RAG/RetrievalIntentClassifierTests.swift`
-- `osx-ideTests/Services/RAG/RAGContextBuilderTests.swift`
-- `osx-ideTests/Services/Prevention/PreWritePreventionEngineTests.swift`
-- `osx-ideHarnessTests/RAGPreventionHarnessTests.swift`
+- `compassTests/Services/RAG/RAGEvidenceFusionRankerTests.swift`
+- `compassTests/Services/RAG/RetrievalIntentClassifierTests.swift`
+- `compassTests/Services/RAG/RAGContextBuilderTests.swift`
+- `compassTests/Services/Prevention/PreWritePreventionEngineTests.swift`
+- `compassHarnessTests/RAGPreventionHarnessTests.swift`
 
 ### Documentation Files
 - `docs/rag-prevention-implementation-status.md` - Detailed status tracking

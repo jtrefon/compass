@@ -1,4 +1,4 @@
-# osx-ide: Mission, Vision & Principles
+# Compass: Mission, Vision & Principles
 
 ## Mission
 
@@ -6,7 +6,7 @@ Build the world's most responsive and private code editor by leveraging Apple Si
 
 ## Vision
 
-osx-ide is the editor where AI adapts to the task — instant and invisible for daily coding, deeply capable when you need it. A 4B model on your Mac handles every keystroke, every quick question, every completion in <100ms. When you need to refactor across 50 files or build a feature from scratch, cloud models take over with best-in-class orchestration. All in one editor. All seamless. Your code never leaves your machine until you choose to reach for the cloud.
+Compass is the editor where AI adapts to the task — instant and invisible for daily coding, deeply capable when you need it. A 4B model on your Mac handles every keystroke, every quick question, every completion in <100ms. When you need to refactor across 50 files or build a feature from scratch, cloud models take over with best-in-class orchestration. All in one editor. All seamless. Your code never leaves your machine until you choose to reach for the cloud.
 
 ## Core Principles
 
@@ -31,7 +31,7 @@ The professional macOS developer who wants AI that's always available, always fa
 
 ## Competitive Positioning
 
-| Dimension | Cursor | Windsurf | Codium/CodeLLM | osx-ide |
+| Dimension | Cursor | Windsurf | Codium/CodeLLM | Compass |
 |---|---|---|---|---|
 | Inline completion latency | ~500-2000ms (cloud) | ~500-2000ms (cloud) | ~500-2000ms (cloud) | **<100ms (local)** |
 | Daily AI (completion, Q&A, explain) | Cloud, requires internet | Cloud, requires internet | Cloud, requires internet | **100% offline, instant** |
@@ -85,4 +85,4 @@ The professional macOS developer who wants AI that's always available, always fa
 
 **v1.5** — Experience engine learns from your patterns. Deeper Mac integration. Cloud pipeline exceeds Cursor in orchestration quality and reliability.
 
-**v2.0** — The standard for what a native AI IDE should be. Local pipeline is indispensable. Cloud pipeline is best-in-class. Users choose osx-ide not despite it being Mac-only, but because of it.
+**v2.0** — The standard for what a native AI IDE should be. Local pipeline is indispensable. Cloud pipeline is best-in-class. Users choose Compass not despite it being Mac-only, but because of it.

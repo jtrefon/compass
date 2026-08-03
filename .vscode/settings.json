@@ -2,5 +2,6 @@
     "sonarlint.connectedMode.project": {
         "connectionId": "jtrefon",
         "projectKey": "jeremy-rifkin_cpptrace"
-    }
+    },
+    "kiroAgent.configureMCP": "Disabled"
 }
