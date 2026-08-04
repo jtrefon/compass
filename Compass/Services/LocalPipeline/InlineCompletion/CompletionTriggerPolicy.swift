@@ -1,9 +1,5 @@
 import Foundation
 
-struct CompletionTriggerPolicyDecision: Equatable {
-    let shouldRequest: Bool
-}
-
 @MainActor
 struct CompletionTriggerPolicy {
     private let supportedLanguages: Set<String> = [

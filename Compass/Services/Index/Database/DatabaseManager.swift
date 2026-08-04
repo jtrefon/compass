@@ -258,15 +258,6 @@ public class DatabaseManager {
         }
     }
 
-    internal func scalarDouble(sql: String, parameters: [Any] = []) throws -> Double {
-        try withPreparedStatement(sql: sql, parameters: parameters) { statement in
-            guard sqlite3_step(statement) == SQLITE_ROW else {
-                throw DatabaseError.stepFailed
-            }
-            return sqlite3_column_double(statement, 0)
-        }
-    }
-
     /// Execute work on the database queue asynchronously.
     /// Since DatabaseStore is an actor, it already provides isolation, so we use async to avoid blocking.
     internal func asyncOnQueue<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {

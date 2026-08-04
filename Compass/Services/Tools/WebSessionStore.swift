@@ -33,8 +33,4 @@ final class WebSessionStore {
         }
         sessions.removeAll()
     }
-
-    func activeCount() -> Int {
-        sessions.count
-    }
 }

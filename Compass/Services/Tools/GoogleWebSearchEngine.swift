@@ -57,7 +57,6 @@ final class GoogleWebSearchEngine {
                 throw error
             }
         }
-        let navMs = Int(searchStart.duration(to: ContinuousClock.now).components.seconds * 1000)
 
         if await engine.isGoogleCAPTCHA() {
             return """
@@ -73,9 +72,7 @@ final class GoogleWebSearchEngine {
 
         // Supplement: try JS extraction for richer results (gracefully ignored if it fails)
         if results.isEmpty {
-            let jsStart = ContinuousClock.now
             results = parseJSONLines(try await tryAwaitingSearchExtraction(engine, maxResults), max: maxResults)
-            let jsMs = Int(jsStart.duration(to: ContinuousClock.now).components.seconds * 1000)
         }
 
         if results.isEmpty {

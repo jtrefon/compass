@@ -158,16 +158,6 @@ class WorkspaceStateManager: ObservableObject {
         }
     }
 
-    /// Remove file from recently opened list
-    func removeFromRecentlyOpened(_ url: URL) {
-        recentlyOpenedFiles.removeAll { $0 == url }
-    }
-
-    /// Clear recently opened files
-    func clearRecentlyOpened() {
-        recentlyOpenedFiles.removeAll()
-    }
-
     // MARK: - Open Files Management
 
     /// Add file to open files list
@@ -180,27 +170,7 @@ class WorkspaceStateManager: ObservableObject {
         openFiles.removeValue(forKey: url.lastPathComponent)
     }
 
-    /// Check if file is currently open
-    func isFileOpen(_ url: URL) -> Bool {
-        return openFiles[url.lastPathComponent] != nil
-    }
-
-    /// Get all open files
-    func getOpenFiles() -> [URL] {
-        return Array(openFiles.values)
-    }
-
     // MARK: - Workspace Information
-
-    /// Get workspace display name
-    var workspaceDisplayName: String {
-        return currentDirectory?.lastPathComponent ?? "No Workspace"
-    }
-
-    /// Check if workspace is empty (no current directory)
-    var isWorkspaceEmpty: Bool {
-        return currentDirectory == nil
-    }
 
     /// Validate file/folder name for security and correctness
     private func validateFileName(_ name: String) -> Bool {

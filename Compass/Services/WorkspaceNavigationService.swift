@@ -47,10 +47,6 @@ public final class WorkspaceNavigationService {
         self.settingsStore = SettingsStore(userDefaults: AppRuntimeEnvironment.userDefaults)
     }
 
-    public func identifierUnderCursor(text: String, cursor: Int) -> String? {
-        Self.identifierAtCursor(in: text, cursor: cursor)
-    }
-
     public func findDefinitionLocations(_ request: FindDefinitionRequest) async -> [WorkspaceCodeLocation] {
         let needle = request.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return [] }

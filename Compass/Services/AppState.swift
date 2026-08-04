@@ -346,10 +346,6 @@ class AppState: ObservableObject, IDEContext {
         ui.setSidebarVisible(visible)
     }
 
-    func resetSettings() {
-        ui.resetToDefaults()
-    }
-
     // Conversation Operations
     func sendMessage() {
         conversationManager.sendMessage()

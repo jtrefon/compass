@@ -20,13 +20,6 @@ public extension VectorStoreService {
         }
     }
 
-    struct ConversationHistoryResult: Sendable {
-        public let query: String
-        public let response: String
-        public let score: Float
-        public let timestamp: Date
-    }
-
     func storeConversationTurn(
         turn: ConversationTurn,
         queryVector: [Float],
@@ -47,21 +40,5 @@ public extension VectorStoreService {
             category: turn.category,
             id: "resp_\(queryId)"
         )
-    }
-
-    func retrieveRelevantHistory(
-        queryVector: [Float],
-        limit: Int = 5
-    ) throws -> [ConversationHistoryResult] {
-        let results = try search(queryVector: queryVector, limit: limit)
-        return results.compactMap { result in
-            guard let meta = result.metadata, let text = meta.text else { return nil }
-            return ConversationHistoryResult(
-                query: text,
-                response: text,
-                score: result.score,
-                timestamp: meta.timestamp
-            )
-        }
     }
 }

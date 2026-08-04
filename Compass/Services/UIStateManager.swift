@@ -160,18 +160,6 @@ class UIStateManager: ObservableObject {
         isSidebarVisible = visible
     }
 
-    func setTerminalVisible(_ visible: Bool) {
-        isTerminalVisible = visible
-    }
-
-    func setAIChatVisible(_ visible: Bool) {
-        isAIChatVisible = visible
-    }
-
-    func setCodePanelVisible(_ visible: Bool) {
-        isCodePanelVisible = visible
-    }
-
     func updateSidebarWidth(_ width: Double) {
         sidebarWidth = max(AppConstants.Layout.minSidebarWidth, width)
         uiService.setSidebarWidth(sidebarWidth)
@@ -189,19 +177,9 @@ class UIStateManager: ObservableObject {
 
     // MARK: - Editor Settings
 
-    func toggleLineNumbers() {
-        showLineNumbers.toggle()
-        uiService.setShowLineNumbers(showLineNumbers)
-    }
-
     func setShowLineNumbers(_ show: Bool) {
         showLineNumbers = show
         uiService.setShowLineNumbers(show)
-    }
-
-    func toggleWordWrap() {
-        wordWrap.toggle()
-        uiService.setWordWrap(wordWrap)
     }
 
     func setWordWrap(_ wrap: Bool) {
@@ -273,34 +251,6 @@ class UIStateManager: ObservableObject {
     func setIndentationStyle(_ style: IndentationStyle) {
         indentationStyle = style
         uiService.setIndentationStyle(style)
-    }
-
-    // MARK: - Terminal Settings
-
-    func updateTerminalFontSize(_ size: Double) {
-        guard size >= 8 && size <= 72 else { return }
-        terminalFontSize = size
-        uiService.setTerminalFontSize(size)
-    }
-
-    func updateTerminalFontFamily(_ family: String) {
-        terminalFontFamily = family
-        uiService.setTerminalFontFamily(family)
-    }
-
-    func updateTerminalForegroundColor(_ color: String) {
-        terminalForegroundColor = color
-        uiService.setTerminalForegroundColor(color)
-    }
-
-    func updateTerminalBackgroundColor(_ color: String) {
-        terminalBackgroundColor = color
-        uiService.setTerminalBackgroundColor(color)
-    }
-
-    func updateTerminalShell(_ shell: String) {
-        terminalShell = shell
-        uiService.setTerminalShell(shell)
     }
 
     // MARK: - Theme Management

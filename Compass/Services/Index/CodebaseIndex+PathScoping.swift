@@ -16,11 +16,4 @@ extension CodebaseIndex {
         }
         return String(normalized.dropFirst(rootPath.count + 1))
     }
-
-    func pathFromResourceId(_ resourceId: String) -> String? {
-        if let url = URL(string: resourceId), url.isFileURL {
-            return url.standardizedFileURL.path
-        }
-        return nil
-    }
 }

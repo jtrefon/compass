@@ -121,7 +121,6 @@ public class CodebaseIndex: CodebaseIndexProtocol, @unchecked Sendable {
         aiService: AIService,
         config: IndexConfiguration = .default
     ) async throws -> CodebaseIndex {
-        let createStart = Date()
 
         // Use createAsync which creates the index synchronously but without blocking
         // This avoids the actor isolation contention that occurred with Task.detached + .value
@@ -198,17 +197,14 @@ public class CodebaseIndex: CodebaseIndexProtocol, @unchecked Sendable {
 
         self.database = database
 
-        let indexerStart = Date()
         self.indexer = IndexerActor(
             database: database,
             config: config.configuration,
             projectRoot: projectRoot
         )
 
-        let queryStart = Date()
         self.queryService = QueryService(database: database)
 
-        let coordStart = Date()
         self.coordinator = IndexCoordinator(
             eventBus: eventBus,
             indexer: indexer,

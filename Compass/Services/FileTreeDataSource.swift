@@ -51,12 +51,6 @@ class FileTreeDataSource: NSObject, NSOutlineViewDataSource {
         if itemCache.count > cacheLimit { itemCache.removeAll() }
     }
 
-    func resetCache(for url: URL) {
-        let std = url.standardized
-        childrenCache.removeValue(forKey: std)
-        isDirectoryCache.removeValue(forKey: std)
-    }
-
     // Stable sentinels to avoid creating new objects in transition states
     private lazy var fallbackItem = FileTreeItem(url: NSURL(fileURLWithPath: "/dev/null"))
 

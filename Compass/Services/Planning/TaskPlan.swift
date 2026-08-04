@@ -45,12 +45,6 @@ struct TaskPlan: Codable, Sendable {
     var completedAt: Date?
     var currentIndex: Int            // Which item the model is working on
 
-    /// The currently active item, if any.
-    var activeItem: PlanItem? {
-        guard currentIndex < items.count else { return nil }
-        return items[currentIndex]
-    }
-
     /// Progress as a fraction (0.0 - 1.0).
     var progress: Double {
         guard !items.isEmpty else { return 0 }

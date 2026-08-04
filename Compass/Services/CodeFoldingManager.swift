@@ -4,10 +4,6 @@ import Foundation
 public final class CodeFoldingManager: NSObject, @unchecked Sendable {
     private(set) var foldedRanges: [NSRange] = []
 
-    public func isFolded(_ range: NSRange) -> Bool {
-        foldedRanges.contains(where: { NSEqualRanges($0, range) })
-    }
-
     public func isIndexFolded(_ index: Int) -> Bool {
         for range in foldedRanges {
             if index >= range.location && index < NSMaxRange(range) {

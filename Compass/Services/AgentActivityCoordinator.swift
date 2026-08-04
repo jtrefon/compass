@@ -220,23 +220,6 @@ public final class AgentActivityCoordinator: AgentActivityCoordinating, @uncheck
 // MARK: - Convenience Extensions
 
 extension AgentActivityCoordinator {
-    /// Get a summary of active activities for debugging/display
-    public var activitySummary: String {
-        lock.lock()
-        defer { lock.unlock() }
-        
-        guard hasActiveActivities else {
-            return "No active agent activities"
-        }
-        
-        let parts = activitiesByType.compactMap { type, ids -> String? in
-            guard !ids.isEmpty else { return nil }
-            return "\(type.rawValue): \(ids.count)"
-        }
-        
-        return "Active: " + parts.joined(separator: ", ")
-    }
-    
     /// Check if a specific activity type is active
     public func isActivityTypeActive(_ type: AgentActivityType) -> Bool {
         lock.lock()

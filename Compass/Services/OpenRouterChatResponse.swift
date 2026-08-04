@@ -112,4 +112,3 @@ internal struct OpenRouterChatUsage: Decodable {
 }
 
 typealias OpenRouterDecodableJSON = DecodableJSON
-typealias OpenRouterDynamicCodingKey = DynamicCodingKey

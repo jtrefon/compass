@@ -25,9 +25,6 @@ final class PowerManagementService: PowerManagementServiceProtocol, @unchecked S
     /// Name used for the assertion in system logs and Activity Monitor
     private let assertionName = "com.Compass.agent-active" as CFString
     
-    /// Reason shown in Activity Monitor Energy tab
-    private let assertionReason = "AI Agent is actively processing" as CFString
-    
     /// Lock for thread safety
     private let lock = NSLock()
     

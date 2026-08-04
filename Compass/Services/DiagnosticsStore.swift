@@ -67,11 +67,6 @@ final class DiagnosticsStore: ObservableObject {
         }
     }
 
-    func selectedDiagnostic() -> Diagnostic? {
-        guard let id = selectedDiagnosticID else { return diagnostics.first }
-        return diagnostics.first(where: { $0.id == id }) ?? diagnostics.first
-    }
-
     func selectNext() -> Diagnostic? {
         guard !diagnostics.isEmpty else { return nil }
         let currentIndex: Int

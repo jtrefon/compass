@@ -59,12 +59,6 @@ final class WorkspaceService: ObservableObject, WorkspaceServiceProtocol {
         errorManager.handle(error)
     }
 
-    enum WorkspaceError: Error {
-        case alreadyExists(String)
-        case invalidPath(String)
-        case creationFailed(String, underlying: Error)
-    }
-
     func deleteItem(at url: URL) async {
         do {
             try await fileOperationsService.deleteItem(at: url)

@@ -41,11 +41,6 @@ public class ProjectSessionBuilder {
         return self
     }
 
-    public func aiMode(_ aiModeRawValue: String) -> ProjectSessionBuilder {
-        self.aiModeRawValue = aiModeRawValue
-        return self
-    }
-
     public func build() -> ProjectSession {
         ProjectSession(
             uiConfiguration: uiConfiguration,

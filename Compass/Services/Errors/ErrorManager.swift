@@ -110,19 +110,8 @@ class ErrorManager: ObservableObject, ErrorManagerProtocol {
         showErrorAlert = false
     }
 
-    /// Get recent errors for debugging
-    func getRecentErrors() -> [AppError] {
-        return errorHistory
-    }
-
-    /// Clear error history
-    func clearErrorHistory() {
-        errorHistory.removeAll()
-    }
-
     private func logError(_ error: AppError, context: ErrorHandlingContext) {
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        let logMessage = "[\(timestamp)] [\(error.severity)] \(error.localizedDescription)"
 
         Task {
             await AppLogger.shared.error(

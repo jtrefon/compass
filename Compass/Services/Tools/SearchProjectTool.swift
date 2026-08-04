@@ -66,7 +66,6 @@ let description =        "THE PRIMARY search tool for ANY code search task. " +
 
         // 2. Symbol search via index (authoritative for code structure)
         if let index {
-            let symbolStart = ContinuousClock.now
             let symbolCount: Int
             if let symbols = try? await index.searchSymbolsWithPaths(nameLike: query, limit: fetchLimit) {
                 symbolCount = symbols.count
@@ -88,7 +87,6 @@ let description =        "THE PRIMARY search tool for ANY code search task. " +
 
             // 2. Full-text search via index
             if entries.count < maxResults {
-                let textStart = ContinuousClock.now
                 let textCount: Int
                 if let textMatches = try? await index.searchIndexedText(pattern: query, limit: fetchLimit) {
                     textCount = textMatches.count
@@ -110,7 +108,6 @@ let description =        "THE PRIMARY search tool for ANY code search task. " +
 
         // 3. Filesystem grep (fallback — only when index returns nothing)
         if entries.isEmpty {
-            let grepStart = ContinuousClock.now
             let grepResults = try await grepFilesystem(query: lowerQuery, maxResults: fetchLimit)
             if !grepResults.isEmpty {
                 entries.append(contentsOf: grepResults)

@@ -96,33 +96,3 @@ struct IDECapsuleDropdownLabel<Content: View>: View {
         .frame(height: AppConstants.Layout.controlHeight)
     }
 }
-
-struct IDEStatusItem: View {
-    let title: String
-    var systemImage: String? = nil
-    var action: (() -> Void)? = nil
-
-    var body: some View {
-        Group {
-            if let action {
-                Button(action: action, label: content)
-                    .buttonStyle(.plain)
-            } else {
-                content()
-            }
-        }
-        .foregroundStyle(AppConstants.Color.textSecondary)
-        .font(.caption)
-        .lineLimit(1)
-    }
-
-    @ViewBuilder
-    private func content() -> some View {
-        HStack(spacing: AppConstants.Layout.spacingXXS) {
-            if let systemImage {
-                Image(systemName: systemImage)
-            }
-            Text(title)
-        }
-    }
-}

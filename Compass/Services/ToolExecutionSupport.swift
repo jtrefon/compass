@@ -66,7 +66,6 @@ final class ToolArgumentResolver {
     }
     func updateProjectRoot(_ root: URL) { projectRoot = root }
     func isWriteLikeTool(_ name: String) -> Bool { ToolTaxonomy.mutation.contains(name) }
-    func resolvePath(from args: [String: Any]) -> String? { args["path"] as? String }
     func pathKey(for toolCall: AIToolCall) -> String {
         (toolCall.arguments["path"] as? String) ?? toolCall.arguments["targetPath"] as? String ?? ""
     }

@@ -23,11 +23,4 @@ final class ModelContextRegistry: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return contextLengthByModelId[modelID]
     }
-
-    func setContextLengths(_ lengths: [String: Int]) {
-        lock.lock(); defer { lock.unlock() }
-        for (id, length) in lengths where length > 0 {
-            contextLengthByModelId[id] = length
-        }
-    }
 }

@@ -305,18 +305,6 @@ extension TextViewRepresentable {
         }
 
         @MainActor
-        private func currentLineIndent(in textView: NSTextView) -> String {
-            let nsString = textView.string as NSString
-            let cursor = textView.selectedRange.location
-            let safeCursor = max(0, min(cursor, nsString.length))
-
-            let lineRange = nsString.lineRange(for: NSRange(location: safeCursor, length: 0))
-            if lineRange.location == NSNotFound || lineRange.length == 0 { return "" }
-
-            let line = nsString.substring(with: lineRange)
-            return leadingWhitespace(of: line)
-        }
-
         private func leadingWhitespace(of text: String) -> String {
             var result = ""
             for character in text {

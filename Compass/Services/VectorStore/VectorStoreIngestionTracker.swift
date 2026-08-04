@@ -23,13 +23,6 @@ public actor VectorStoreIngestionTracker {
         save()
     }
 
-    public func markBatchIngested(_ ids: [String]) {
-        for id in ids { ingested.insert(id) }
-        save()
-    }
-
-    public var allIngested: Set<String> { ingested }
-
     public func clear() {
         ingested.removeAll()
         save()
