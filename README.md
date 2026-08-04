@@ -12,9 +12,6 @@ and where we're going, and [BENCHMARKS.md](BENCHMARKS.md) for the numbers we've 
 
 [![CI](https://github.com/jtrefon/compass/actions/workflows/ci.yml/badge.svg)](https://github.com/jtrefon/compass/actions/workflows/ci.yml)
 [![Release](https://github.com/jtrefon/compass/actions/workflows/release.yml/badge.svg)](https://github.com/jtrefon/compass/actions/workflows/release.yml)
-[![Codacy Grade](https://app.codacy.com/project/badge/Grade/db02c680a7e24b90b6340b027b6ebc93)](https://app.codacy.com/gh/jtrefon/ai-ide/dashboard)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
 
 ---
 

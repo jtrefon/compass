@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-Current telemetry system writes to multiple locations including `~/Library/Application Support/osx-ide/Logs/` which causes:
+Current telemetry system writes to multiple locations including `~/Library/Application Support/compass/Logs/` which causes:
 - Cross-project pollution and data corruption
 - Impossible to debug per-project issues
 - Redundant I/O (writing to both locations)
@@ -31,7 +31,7 @@ Current telemetry system writes to multiple locations including `~/Library/Appli
 ## Fix Plan
 
 ### Step 1: Fix AIToolTraceLogger (CRITICAL)
-**File**: `osx-ide/Services/AIToolTraceLogger.swift`
+**File**: `compass/Services/AIToolTraceLogger.swift`
 
 Add project root support similar to AppLogger:
 - Add `setProjectRoot()` method
@@ -39,25 +39,25 @@ Add project root support similar to AppLogger:
 - Remove Application Support write
 
 ### Step 2: Fix ConversationScopedNDJSONStore  
-**File**: `osx-ide/Services/Logging/ConversationScopedNDJSONStore.swift`
+**File**: `compass/Services/Logging/ConversationScopedNDJSONStore.swift`
 
 - Remove Application Support path (keep only project path)
 - Fix `conversationDirectory()` to use project root
 
 ### Step 3: Fix ConversationIndexStore
-**File**: `osx-ide/Services/Logging/ConversationIndexStore.swift`
+**File**: `compass/Services/Logging/ConversationIndexStore.swift`
 
 - Remove Application Support write
 - Keep only project write
 
 ### Step 4: Fix AppLogger (optional cleanup)
-**File**: `osx-ide/Services/Logging/AppLogger.swift`
+**File**: `compass/Services/Logging/AppLogger.swift`
 
 - Remove Application Support write (keep only project)
 - Remove dated folder structure
 
 ### Step 5: Fix CrashReporter (optional cleanup)
-**File**: `osx-ide/Services/Errors/CrashReporter.swift`
+**File**: `compass/Services/Errors/CrashReporter.swift`
 
 - Remove Application Support write (keep only project)
 - Remove dated folder structure
@@ -88,11 +88,11 @@ Add project root support similar to AppLogger:
 
 ## Files to Modify
 
-1. `osx-ide/Services/AIToolTraceLogger.swift` - ADD project root support
-2. `osx-ide/Services/Logging/ConversationScopedNDJSONStore.swift` - REMOVE app support
-3. `osx-ide/Services/Logging/ConversationIndexStore.swift` - REMOVE app support
-4. `osx-ide/Services/Logging/AppLogger.swift` - REMOVE app support (optional)
-5. `osx-ide/Services/Errors/CrashReporter.swift` - REMOVE app support (optional)
+1. `compass/Services/AIToolTraceLogger.swift` - ADD project root support
+2. `compass/Services/Logging/ConversationScopedNDJSONStore.swift` - REMOVE app support
+3. `compass/Services/Logging/ConversationIndexStore.swift` - REMOVE app support
+4. `compass/Services/Logging/AppLogger.swift` - REMOVE app support (optional)
+5. `compass/Services/Errors/CrashReporter.swift` - REMOVE app support (optional)
 
 ## Implementation Order
 

@@ -24,7 +24,7 @@ The harness testing system has been enhanced to address critical issues with moc
 #### Key Files
 - `Services/OpenRouterAI/OpenRouterAIService.swift` - Rate limiting implementation
 - `Services/TestConfiguration.swift` - Test configuration management
-- `osx-ideTests/TestUtilities/ExternalAPITestIsolation.swift` - Test isolation utilities
+- `compassTests/TestUtilities/ExternalAPITestIsolation.swift` - Test isolation utilities
 
 #### Usage
 ```swift
@@ -53,8 +53,8 @@ USE_MOCK_SERVICES=false
 - **Targeted Mocking**: Only mock where absolutely necessary for test isolation
 
 #### Key Files
-- `osx-ideHarnessTests/RealServiceToolLoopTests.swift` - Real service integration tests
-- `osx-ideHarnessTests/AgenticHarnessTests.swift` - Updated with test isolation
+- `compassHarnessTests/RealServiceToolLoopTests.swift` - Real service integration tests
+- `compassHarnessTests/AgenticHarnessTests.swift` - Updated with test isolation
 
 ### 3. Enhanced Test Coverage
 
@@ -70,8 +70,8 @@ USE_MOCK_SERVICES=false
 - **Performance Testing**: Tests for large files, concurrent operations, timeouts
 
 #### Key Files
-- `osx-ideHarnessTests/EdgeCaseScenariosTests.swift` - Edge case and error handling tests
-- `osx-ideHarnessTests/TelemetryValidationTests.swift` - Telemetry validation tests
+- `compassHarnessTests/EdgeCaseScenariosTests.swift` - Edge case and error handling tests
+- `compassHarnessTests/TelemetryValidationTests.swift` - Telemetry validation tests
 
 ### 4. Code Quality Improvements
 

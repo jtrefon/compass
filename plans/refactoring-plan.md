@@ -1,4 +1,4 @@
-# Refactoring Plan: osx-ide Code Quality Improvements
+# Refactoring Plan: compass Code Quality Improvements
 
 ## Overview
 
@@ -10,7 +10,7 @@ This plan addresses the architecture issues, code smells, and technical debt ide
 
 Create a new file to hold shared utility functions duplicated across handlers.
 
-**Location:** `osx-ide/Services/ConversationFlow/ToolLoopUtilities.swift`
+**Location:** `compass/Services/ConversationFlow/ToolLoopUtilities.swift`
 
 **Functions to extract:**
 - `toolResultsSummaryText(_ toolResults: [ChatMessage]) -> String`
@@ -36,7 +36,7 @@ Extract the snapshot building logic into a dedicated utility.
 
 ### 2.1 Create ToolLoopConstants.swift
 
-**Location:** `osx-ide/Services/ConversationFlow/ToolLoopConstants.swift`
+**Location:** `compass/Services/ConversationFlow/ToolLoopConstants.swift`
 
 **Constants to define:**
 ```swift
@@ -69,7 +69,7 @@ enum ToolLoopConstants {
 
 ### 2.2 Create OrchestrationConstants.swift
 
-**Location:** `osx-ide/Services/Orchestration/OrchestrationConstants.swift`
+**Location:** `compass/Services/Orchestration/OrchestrationConstants.swift`
 
 ```swift
 enum OrchestrationConstants {
@@ -151,7 +151,7 @@ Remove the convenience method implementations from:
 
 ### 5.1 Create ToolLoopStallDetector
 
-**Location:** `osx-ide/Services/ConversationFlow/ToolLoopStallDetector.swift`
+**Location:** `compass/Services/ConversationFlow/ToolLoopStallDetector.swift`
 
 **Responsibilities:**
 - Detect repeated tool batch stalls
@@ -182,7 +182,7 @@ final class ToolLoopStallDetector {
 
 ### 5.2 Create ToolLoopMessageBuilder
 
-**Location:** `osx-ide/Services/ConversationFlow/ToolLoopMessageBuilder.swift`
+**Location:** `compass/Services/ConversationFlow/ToolLoopMessageBuilder.swift`
 
 **Responsibilities:**
 - Build tool failure recovery messages
@@ -219,12 +219,12 @@ After extracting utilities, the handler should focus on:
 
 ### 7.1 Unit tests
 ```bash
-xcodebuild test -scheme osx-ide -destination 'platform=macOS'
+xcodebuild test -scheme compass -destination 'platform=macOS'
 ```
 
 ### 7.2 Harness tests
 ```bash
-xcodebuild test -scheme osx-ide -destination 'platform=macOS' -only-testing:osx-ideHarnessTests
+xcodebuild test -scheme compass -destination 'platform=macOS' -only-testing:compassHarnessTests
 ```
 
 ---

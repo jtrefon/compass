@@ -1,3 +1,11 @@
+> **STALE — historical reference only (July 2026).** This document describes the
+> pre-refactor architecture (ToolLoopHandler / FinalResponseHandler / QA review,
+> `Conversation/` domain layer). Those components were replaced by the
+> **Orchestration graph** (see `Compass/Services/Orchestration/`,
+> `ConversationSendCoordinator`, `AIToolExecutor` + `ToolExecutionSupport`) in
+> the July 2026 refactor. **AGENTS.md is the source of truth** for the current
+> architecture; treat anything in this file that contradicts it as obsolete.
+
 # Architecture Documentation
 
 ## Overview

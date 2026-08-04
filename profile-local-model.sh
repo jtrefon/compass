@@ -10,7 +10,7 @@
 #   ./profile-local-model.sh
 #
 # Output:
-#   /tmp/osx-ide-profile/  — all profiling artifacts
+#   /tmp/Compass-profile/  — all profiling artifacts
 #   - sample.txt           — call stack samples (CPU hotspots)
 #   - spindump.txt         — system-wide spin dump
 #   - console.log          — all [LOCAL-MLX], [SEARCH-PROJECT], [TOOL-EXEC], [WEB-SEARCH] logs
@@ -20,10 +20,10 @@
 
 set -euo pipefail
 
-APP_NAME="osx-ide"
-APP_PATH="/Users/jack/Library/Developer/Xcode/DerivedData/osx-ide-eoaklgmzoruiukhbgdkrilmnzybq/Build/Products/Debug/osx-ide.app"
-SCHEME="osx-ide"
-OUTDIR="/tmp/osx-ide-profile"
+APP_NAME="Compass"
+APP_PATH="/Users/jack/Library/Developer/Xcode/DerivedData/Compass-eoaklgmzoruiukhbgdkrilmnzybq/Build/Products/Debug/Compass.app"
+SCHEME="Compass"
+OUTDIR="/tmp/Compass-profile"
 
 echo "============================================"
 echo "  Local Model Profiling Setup"
@@ -37,7 +37,7 @@ mkdir -p "$OUTDIR"
 echo ""
 echo "[1/4] Building app..."
 xcodebuild build -scheme "$SCHEME" -configuration Debug -destination 'platform=macOS' \
-    -derivedDataPath /Users/jack/Library/Developer/Xcode/DerivedData/osx-ide-eoaklgmzoruiukhbgdkrilmnzybq \
+    -derivedDataPath /Users/jack/Library/Developer/Xcode/DerivedData/Compass-eoaklgmzoruiukhbgdkrilmnzybq \
     2>&1 | tail -3
 if [ $? -ne 0 ]; then
     echo "BUILD FAILED"
@@ -81,7 +81,7 @@ log stream --process "$PID" --style compact --predicate '
     eventMessage CONTAINS "memory_pressure" OR
     eventMessage CONTAINS "unload" OR
     eventMessage CONTAINS "[DIAG]" OR
-    eventMessage CONTAINS "osx-ide"
+    eventMessage CONTAINS "Compass"
 ' > "$OUTDIR/console.log" 2>&1 &
 LOG_PID=$!
 

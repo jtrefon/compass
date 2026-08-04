@@ -36,8 +36,8 @@ But on disk:
 Before returning indexed file paths to the model, verify the file actually exists on disk.
 
 **Files to modify:**
-- `osx-ide/Services/RAG/CodebaseIndexRAGRetriever.swift` - Add existence check
-- `osx-ide/Services/Index/IndexCoordinator.swift` - Add existence validation
+- `compass/Services/RAG/CodebaseIndexRAGRetriever.swift` - Add existence check
+- `compass/Services/Index/IndexCoordinator.swift` - Add existence validation
 
 ### Fix 2: Index Should Clean Up Deleted Files (P1)
 
@@ -63,7 +63,7 @@ Problem: Doesn't detect when files are renamed/moved/deleted
 Before executing delete_file tool, verify the target file exists.
 
 **Files to modify:**
-- `osx-ide/Services/ToolExecutionCoordinator.swift` - Add pre-execution validation
+- `compass/Services/ToolExecutionCoordinator.swift` - Add pre-execution validation
 - Return helpful error message: "File 'X' does not exist. Did you mean 'Y.ts'?"
 
 ## Priority Order

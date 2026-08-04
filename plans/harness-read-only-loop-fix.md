@@ -24,7 +24,7 @@ Pattern: Model is exploring but never executing.
 
 ### 1. Read-Only Loop Detection Works
 
-In [`ToolLoopHandler.swift:669-700`](osx-ide/Services/ConversationFlow/ToolLoopHandler.swift:669):
+In [`ToolLoopHandler.swift:669-700`](compass/Services/ConversationFlow/ToolLoopHandler.swift:669):
 
 ```swift
 private func shouldStopForReadOnlyToolLoopStall(
@@ -42,7 +42,7 @@ The detection correctly identifies read-only loops.
 
 ### 2. Recovery Strategy is Wrong
 
-In [`ToolLoopHandler.swift:794-832`](osx-ide/Services/ConversationFlow/ToolLoopHandler.swift:794):
+In [`ToolLoopHandler.swift:794-832`](compass/Services/ConversationFlow/ToolLoopHandler.swift:794):
 
 ```swift
 private func requestFinalResponseForStalledToolLoop(...) async throws -> AIServiceResponse {

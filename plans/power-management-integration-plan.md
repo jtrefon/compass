@@ -23,7 +23,7 @@ This can cause:
 Create a new service that manages macOS power assertions using IOKit.
 
 ```swift
-// osx-ide/Services/PowerManagementService.swift
+// compass/Services/PowerManagementService.swift
 
 import Foundation
 import IOKit.pwr_mgt
@@ -56,7 +56,7 @@ final class PowerManagementService: ObservableObject {
     private var currentAssertionType: AssertionType?
     
     /// Name used for the assertion in system logs
-    private let assertionName = "com.osx-ide.agent-active" as CFString
+    private let assertionName = "com.compass.agent-active" as CFString
     
     /// Reason shown in Activity Monitor
     private let assertionReason = "AI Agent is actively processing" as CFString
@@ -158,7 +158,7 @@ final class PowerManagementService: ObservableObject {
 ### 2. Protocol for Testability
 
 ```swift
-// osx-ide/Services/PowerManagementServiceProtocol.swift
+// compass/Services/PowerManagementServiceProtocol.swift
 
 import Foundation
 
@@ -305,11 +305,11 @@ stateDiagram-v2
 ## Files to Create/Modify
 
 ### New Files
-- `osx-ide/Services/PowerManagementService.swift`
-- `osx-ide/Services/PowerManagementServiceProtocol.swift`
-- `osx-ideTests/PowerManagementServiceTests.swift`
+- `compass/Services/PowerManagementService.swift`
+- `compass/Services/PowerManagementServiceProtocol.swift`
+- `compassTests/PowerManagementServiceTests.swift`
 
 ### Modified Files
-- `osx-ide/Services/ConversationManager.swift` - Add power management integration
-- `osx-ide/Services/DependencyContainer.swift` - Register service
+- `compass/Services/ConversationManager.swift` - Add power management integration
+- `compass/Services/DependencyContainer.swift` - Register service
 - `ARCHITECTURE.md` - Document new service

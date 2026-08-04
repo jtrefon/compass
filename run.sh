@@ -1,9 +1,10 @@
 #!/bin/bash
 
-# run.sh - Unified build and run script for osx-ide
+# run.sh - Unified build and run script for Compass
 
-PROJECT_NAME="osx-ide"
-SCHEME="osx-ide"
+PROJECT_NAME="Compass"
+APP_PRODUCT_NAME="Compass"
+SCHEME="Compass"
 DERIVED_DATA_PATH_APP="./.build"
 DERIVED_DATA_PATH_TEST="./.build-tests"
 
@@ -198,9 +199,12 @@ show_help() {
     echo "  harness-online Run online production-parity harness suites"
     echo "         Examples: ./run.sh harness-online | ./run.sh harness-online AgenticHarnessTests"
     echo "  harness-offline Run offline-only harness suites"
-    echo "         Examples: ./run.sh harness-offline | ./run.sh harness-offline OfflineModeHarnessTests"
+    echo "         Examples: ./run.sh harness-offline | ./run.sh harness-offline StripMarkupTest"
     echo "  benchmark-offline Run offline inference benchmark harnesses"
     echo "         Examples: ./run.sh benchmark-offline | ./run.sh benchmark-offline sweep"
+    echo "  benchmark  Run the core benchmark suites (embeddings + metrics); JSON in .build-tests/benchmarks/"
+    echo "  lint   Run SwiftLint locally (advisory — see .swiftlint.yml)"
+    echo "  check-prompts Verify every prompt file under Prompts/ has a code reference (no orphan prompts)"
     echo "  e2e    Run UI (end-to-end) tests [optional suite]"
     echo "         Examples: ./run.sh e2e | ./run.sh e2e TerminalEchoUITests | ./run.sh e2e json"
     echo "  clean  Clean build artifacts"
@@ -208,9 +212,9 @@ show_help() {
 }
 
 copy_embedding_models() {
-    local dest="$DERIVED_DATA_PATH_APP/Build/Products/Debug/$PROJECT_NAME.app/Contents/Resources/EmbeddingModels"
+    local dest="$DERIVED_DATA_PATH_APP/Build/Products/Debug/$APP_PRODUCT_NAME.app/Contents/Resources/EmbeddingModels"
     mkdir -p "$dest"
-    local src="$(pwd)/osx-ide/Resources/EmbeddingModels"
+    local src="$(pwd)/Compass/Resources/EmbeddingModels"
     if [ -d "$src/bge-small-en-v1.5.mlmodelc" ]; then
         rsync -aq --delete "$src/" "$dest/"
         echo "[EMB] Copied embedding models to bundle"
@@ -221,6 +225,12 @@ copy_embedding_models() {
 
 build_app() {
     echo "Building $PROJECT_NAME..."
+    # NOTE: no automatic clean here — incremental builds are much faster.
+    # Run `./run.sh clean` manually when stale artifacts are suspected.
+    xcodebuild -resolvePackageDependencies \
+        -project "$PROJECT_NAME.xcodeproj" \
+        -scheme "$SCHEME" \
+        -derivedDataPath "$DERIVED_DATA_PATH_APP" >/dev/null
     xcodebuild -quiet -project "$PROJECT_NAME.xcodeproj" \
                -scheme "$SCHEME" \
                -configuration Debug \
@@ -231,7 +241,7 @@ build_app() {
 
 launch_app() {
     # Find the app bundle in derived data
-    APP_PATH=$(find "$DERIVED_DATA_PATH_APP" -name "$PROJECT_NAME.app" -type d | head -n 1)
+    APP_PATH=$(find "$DERIVED_DATA_PATH_APP" -name "$APP_PRODUCT_NAME.app" -type d | head -n 1)
     
     if [ -z "$APP_PATH" ]; then
         echo "Error: Could not find built application. Please run './run.sh build' first."
@@ -240,6 +250,123 @@ launch_app() {
 
     echo "Launching $APP_PATH..."
     open "$APP_PATH"
+}
+
+# ---------------------------------------------------------------------------
+# Device quarantine: Xcode's DTDK tries to install developer services on every
+# available device during `xcodebuild test` — a locked (passcode-protected)
+# iPhone then stalls the hosted test launch with "device is passcode protected"
+# retries, and every scheduled test fails without running. We unpair paired
+# iPhone/iPad devices before testing and re-pair afterwards (best-effort).
+# The phone stays physically connected and on Wi-Fi the whole time; pairing
+# also auto-restores on next unlock even if the restore step is skipped.
+# Opt out entirely with: COMPASS_QUARANTINE_DEVICES=0
+# ---------------------------------------------------------------------------
+quarantine_paired_ios_devices() {
+    [ "${COMPASS_QUARANTINE_DEVICES:-1}" = "1" ] || { echo "[devices] quarantine disabled (COMPASS_QUARANTINE_DEVICES=0)"; return 0; }
+    command -v xcrun >/dev/null 2>&1 || return 0
+    echo "[devices] Unpairing paired iPhone/iPad devices so tests are not blocked by locked devices..."
+    python3 - <<'PYEOF2'
+import json, os, subprocess, sys, tempfile
+
+def devicectl(*args, timeout=20):
+    return subprocess.run(["xcrun", "devicectl", *args], capture_output=True, text=True, timeout=timeout)
+
+def list_devices():
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        path = f.name
+    try:
+        r = devicectl("list", "devices", "--json-output", path)
+        if r.returncode != 0:
+            print(f"[devices] list failed: {r.stderr.strip()[:200]}", file=sys.stderr)
+            return []
+        return json.load(open(path)).get("result", {}).get("devices", [])
+    except Exception as e:
+        print(f"[devices] list error: {e}", file=sys.stderr)
+        return []
+    finally:
+        os.unlink(path)
+
+for d in list_devices():
+    if d.get("visibilityClass") == "unavailable":
+        continue
+    dev_type = d.get("hardwareProperties", {}).get("deviceType", "")
+    pairing = d.get("connectionProperties", {}).get("pairingState", "")
+    if dev_type in ("iPhone", "iPad") and pairing == "paired":
+        name = d.get("deviceProperties", {}).get("name", "?")
+        ident = d["identifier"]
+        try:
+            r = devicectl("manage", "unpair", "--device", ident)
+        except subprocess.TimeoutExpired:
+            print(f"[devices] warning: unpair timed out for {name}", file=sys.stderr)
+            continue
+        if r.returncode == 0:
+            print(f"[devices] quarantined {name} ({ident})")
+        else:
+            print(f"[devices] warning: could not unpair {name}: {r.stderr.strip()[:200]}", file=sys.stderr)
+PYEOF2
+}
+
+
+# xcodebuild does not propagate env vars into the app-hosted test process, so
+# the test profile dir is handed over via the app's standard defaults domain
+# (see AppLaunchContext.detect). Set before a test run, removed afterwards so
+# normal app launches never see it.
+# The app is sandboxed and cfprefsd clobbers external defaults writes, so the
+# test profile dir is handed over via a plain marker file inside the app's
+# sandbox container (AppLaunchContext.detect reads it for test processes).
+APP_PROFILE_MARKER_FILE="$HOME/Library/Application Support/compass-test-profile-path"
+
+write_test_profile_defaults() {
+    mkdir -p "$HOME/Library/Application Support"
+    printf '%s' "$1" > "$APP_PROFILE_MARKER_FILE"
+}
+
+clear_test_profile_defaults() {
+    rm -f "$APP_PROFILE_MARKER_FILE"
+}
+
+restore_quarantined_ios_devices() {
+    [[ "${COMPASS_QUARANTINE_DEVICES:-1}" == "1" ]] || return 0
+    command -v xcrun >/dev/null 2>&1 || return 0
+    echo "[devices] Re-pairing quarantined iOS devices (best-effort; auto-pairs on next unlock)..."
+    python3 - <<'PYEOF2'
+import json, os, subprocess, sys, tempfile
+
+def devicectl(*args, timeout=20):
+    return subprocess.run(["xcrun", "devicectl", *args], capture_output=True, text=True, timeout=timeout)
+
+def list_devices():
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        path = f.name
+    try:
+        r = devicectl("list", "devices", "--json-output", path)
+        if r.returncode != 0:
+            return []
+        return json.load(open(path)).get("result", {}).get("devices", [])
+    except Exception:
+        return []
+    finally:
+        os.unlink(path)
+
+for d in list_devices():
+    if d.get("visibilityClass") == "unavailable":
+        continue
+    dev_type = d.get("hardwareProperties", {}).get("deviceType", "")
+    pairing = d.get("connectionProperties", {}).get("pairingState", "")
+    if dev_type in ("iPhone", "iPad") and pairing != "paired":
+        ident = d["identifier"]
+        name = d.get("deviceProperties", {}).get("name", "?")
+        try:
+            r = devicectl("manage", "pair", "--device", ident, timeout=15)
+        except subprocess.TimeoutExpired:
+            print(f"[devices] re-pair deferred for {name} (device locked?) — auto-pairs on next unlock")
+            continue
+        if r.returncode == 0:
+            print(f"[devices] re-paired {name} ({ident})")
+        else:
+            print(f"[devices] re-pair deferred for {name} (device locked?) — auto-pairs on next unlock")
+PYEOF2
 }
 
 run_tests() {
@@ -255,6 +382,9 @@ run_tests() {
     )
     echo "Running unit tests..."
     prepare_derived_data_packages "$DERIVED_DATA_PATH_TEST"
+    quarantine_paired_ios_devices
+    write_test_profile_defaults "$(pwd)/.build-tests/test-profile"
+    local test_rc=0
     if [ -n "$suite" ]; then
         if [ "$suite" = "json" ]; then
             suite="JSONHighlighterTests"
@@ -268,7 +398,8 @@ run_tests() {
                    ENABLE_PREVIEWS=NO \
                    SWIFT_ENABLE_EXPLICIT_MODULES="$explicit_modules" \
                    "${skip_ui_tests[@]}" \
-                   test -only-testing:osx-ideTests/"$suite" -skip-testing:osx-ideUITests -skip-testing:osx-ideHarnessTests
+                   test -only-testing:CompassTests/"$suite" -skip-testing:CompassUITests -skip-testing:CompassHarnessTests
+        test_rc=$?
     else
         xcodebuild -quiet -project "$PROJECT_NAME.xcodeproj" \
                    -scheme "$SCHEME" \
@@ -278,8 +409,12 @@ run_tests() {
                    ENABLE_PREVIEWS=NO \
                    SWIFT_ENABLE_EXPLICIT_MODULES="$explicit_modules" \
                    "${skip_ui_tests[@]}" \
-                   test -only-testing:osx-ideTests -skip-testing:osx-ideUITests -skip-testing:osx-ideHarnessTests
+                   test -only-testing:CompassTests -skip-testing:CompassUITests -skip-testing:CompassHarnessTests
+        test_rc=$?
     fi
+    restore_quarantined_ios_devices
+    clear_test_profile_defaults
+    return $test_rc
 }
 
 run_harness() {
@@ -287,17 +422,20 @@ run_harness() {
     local explicit_modules="${SWIFT_ENABLE_EXPLICIT_MODULES:-NO}"
     echo "Running headless harness tests..."
     prepare_derived_data_packages "$DERIVED_DATA_PATH_TEST"
+    quarantine_paired_ios_devices
+    local harness_rc=0
     local harness_memory_limit_gb="${HARNESS_MAX_RSS_GB:-6}"
     echo "Harness memory guard enabled: ${harness_memory_limit_gb}GB limit"
     local harness_memory_limit_mb=$((harness_memory_limit_gb * 1024))
-    local local_model_memory_limit_mb="${OSXIDE_LOCAL_MODEL_MAX_RSS_MB:-$((harness_memory_limit_mb - 512))}"
+    local local_model_memory_limit_mb="${COMPASS_LOCAL_MODEL_MAX_RSS_MB:-$((harness_memory_limit_mb - 512))}"
     echo "Local model in-process memory budget: ${local_model_memory_limit_mb}MB"
     local test_profile_dir
     test_profile_dir="${HARNESS_TEST_PROFILE_DIR:-$(pwd)/.build-tests/harness-test-profile}"
     mkdir -p "$test_profile_dir"
+    write_test_profile_defaults "$test_profile_dir"
     echo "Harness test profile dir: $test_profile_dir"
     local online_harness_marker="$test_profile_dir/online-harness-enabled"
-    if [ -n "$OSX_IDE_RUN_ONLINE_HARNESS" ]; then
+    if [[ -n "$COMPASS_RUN_ONLINE_HARNESS" ]]; then
         : > "$online_harness_marker"
     else
         rm -f "$online_harness_marker"
@@ -309,15 +447,15 @@ run_harness() {
     # Build environment variables to pass to test runner
     # Using TEST_RUNNER_ENV_ prefix to pass env vars through xcodebuild to the test process
     local env_args=()
-    local runtime_env_args=("OSX_IDE_PROMPTS_ROOT=$resolved_prompts_root" "OSXIDE_TEST_PROFILE_DIR=$test_profile_dir" "TEST_RUNNER_ENV_OSXIDE_TEST_PROFILE_DIR=$test_profile_dir" "OSXIDE_LOCAL_MODEL_MAX_RSS_MB=$local_model_memory_limit_mb")
-    env_args+=("TEST_RUNNER_ENV_OSXIDE_LOCAL_MODEL_MAX_RSS_MB=$local_model_memory_limit_mb")
-    if [ -n "$OSXIDE_DISABLE_HEAVY_INIT" ]; then
-        env_args+=("TEST_RUNNER_ENV_OSXIDE_DISABLE_HEAVY_INIT=$OSXIDE_DISABLE_HEAVY_INIT")
-        runtime_env_args+=("OSXIDE_DISABLE_HEAVY_INIT=$OSXIDE_DISABLE_HEAVY_INIT" "TEST_RUNNER_ENV_OSXIDE_DISABLE_HEAVY_INIT=$OSXIDE_DISABLE_HEAVY_INIT")
+    local runtime_env_args=("COMPASS_PROMPTS_ROOT=$resolved_prompts_root" "COMPASS_TEST_PROFILE_DIR=$test_profile_dir" "TEST_RUNNER_ENV_COMPASS_TEST_PROFILE_DIR=$test_profile_dir" "COMPASS_LOCAL_MODEL_MAX_RSS_MB=$local_model_memory_limit_mb")
+    env_args+=("TEST_RUNNER_ENV_COMPASS_LOCAL_MODEL_MAX_RSS_MB=$local_model_memory_limit_mb")
+    if [ -n "$COMPASS_DISABLE_HEAVY_INIT" ]; then
+        env_args+=("TEST_RUNNER_ENV_COMPASS_DISABLE_HEAVY_INIT=$COMPASS_DISABLE_HEAVY_INIT")
+        runtime_env_args+=("COMPASS_DISABLE_HEAVY_INIT=$COMPASS_DISABLE_HEAVY_INIT" "TEST_RUNNER_ENV_COMPASS_DISABLE_HEAVY_INIT=$COMPASS_DISABLE_HEAVY_INIT")
         echo "Heavy init disabled for test runtime"
     fi
-    if [ -n "$OSXIDE_ENABLE_PRODUCTION_PARITY_HARNESS" ]; then
-        env_args+=("TEST_RUNNER_ENV_OSXIDE_ENABLE_PRODUCTION_PARITY_HARNESS=$OSXIDE_ENABLE_PRODUCTION_PARITY_HARNESS")
+    if [ -n "$COMPASS_ENABLE_PRODUCTION_PARITY_HARNESS" ]; then
+        env_args+=("TEST_RUNNER_ENV_COMPASS_ENABLE_PRODUCTION_PARITY_HARNESS=$COMPASS_ENABLE_PRODUCTION_PARITY_HARNESS")
         echo "Production parity harness enabled"
     fi
     if [ -n "$HARNESS_MODEL_ID" ]; then
@@ -330,23 +468,27 @@ run_harness() {
         echo "Using OpenRouter: $HARNESS_USE_OPENROUTER"
     fi
     local passthrough_test_envs=(
-        "OSXIDE_OFFLINE_BENCHMARK_ITERATIONS"
-        "OSXIDE_OFFLINE_BENCHMARK_PROMPT_TOKENS"
-        "OSXIDE_OFFLINE_BENCHMARK_CONTEXTS"
-        "OSXIDE_OFFLINE_BENCHMARK_MAX_KV_SIZES"
-        "OSXIDE_OFFLINE_BENCHMARK_MAX_OUTPUTS"
-        "OSXIDE_OFFLINE_BENCHMARK_PREFILL_STEPS"
-        "OSXIDE_OFFLINE_BENCHMARK_TEMPERATURES"
-        "OSXIDE_OFFLINE_BENCHMARK_TOP_P"
-        "OSXIDE_OFFLINE_BENCHMARK_REPETITION_PENALTIES"
-        "OSXIDE_OFFLINE_BENCHMARK_REPETITION_CONTEXT_SIZES"
-        "OSXIDE_BACKGROUND_WORK_QUIET_MS"
-        "OSXIDE_BACKGROUND_WORK_CPU_LOAD_PER_CORE_THRESHOLD"
-        "OSXIDE_BACKGROUND_WORK_RSS_THRESHOLD_MB"
-        "OSXIDE_LOCAL_MODEL_TEMPERATURE"
-        "OSXIDE_LOCAL_MODEL_TOP_P"
-        "OSXIDE_LOCAL_MODEL_REPETITION_PENALTY"
-        "OSXIDE_LOCAL_MODEL_REPETITION_CONTEXT_SIZE"
+        "COMPASS_OFFLINE_BENCHMARK_ITERATIONS"
+        "COMPASS_OFFLINE_BENCHMARK_PROMPT_TOKENS"
+        "COMPASS_OFFLINE_BENCHMARK_CONTEXTS"
+        "COMPASS_OFFLINE_BENCHMARK_MAX_KV_SIZES"
+        "COMPASS_OFFLINE_BENCHMARK_MAX_OUTPUTS"
+        "COMPASS_OFFLINE_BENCHMARK_PREFILL_STEPS"
+        "COMPASS_OFFLINE_BENCHMARK_TEMPERATURES"
+        "COMPASS_OFFLINE_BENCHMARK_TOP_P"
+        "COMPASS_OFFLINE_BENCHMARK_REPETITION_PENALTIES"
+        "COMPASS_OFFLINE_BENCHMARK_REPETITION_CONTEXT_SIZES"
+        "COMPASS_BACKGROUND_WORK_QUIET_MS"
+        "COMPASS_BACKGROUND_WORK_CPU_LOAD_PER_CORE_THRESHOLD"
+        "COMPASS_BACKGROUND_WORK_RSS_THRESHOLD_MB"
+        "COMPASS_LOCAL_MODEL_TEMPERATURE"
+        "COMPASS_LOCAL_MODEL_TOP_P"
+        "COMPASS_LOCAL_MODEL_REPETITION_PENALTY"
+        "COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE"
+        "COMPASS_DEGRADE_ON_TRANSPORT_FAILURE"
+        "COMPASS_FALLBACK_MODEL_ID"
+        "COMPASS_CIRCUIT_FAILURE_THRESHOLD"
+        "COMPASS_CIRCUIT_COOLDOWN_SEC"
     )
     local env_name
     for env_name in "${passthrough_test_envs[@]}"; do
@@ -355,18 +497,18 @@ run_harness() {
             runtime_env_args+=("${env_name}=${!env_name}" "TEST_RUNNER_ENV_${env_name}=${!env_name}")
         fi
     done
-    env_args+=("TEST_RUNNER_ENV_OSXIDE_TEST_PROFILE_DIR=$test_profile_dir")
-    if [ -n "$OSX_IDE_RUN_ONLINE_HARNESS" ]; then
-        env_args+=("TEST_RUNNER_ENV_OSX_IDE_RUN_ONLINE_HARNESS=$OSX_IDE_RUN_ONLINE_HARNESS")
-        runtime_env_args+=("OSX_IDE_RUN_ONLINE_HARNESS=$OSX_IDE_RUN_ONLINE_HARNESS")
+    env_args+=("TEST_RUNNER_ENV_COMPASS_TEST_PROFILE_DIR=$test_profile_dir")
+    if [[ -n "$COMPASS_RUN_ONLINE_HARNESS" ]]; then
+        env_args+=("TEST_RUNNER_ENV_COMPASS_RUN_ONLINE_HARNESS=$COMPASS_RUN_ONLINE_HARNESS")
+        runtime_env_args+=("COMPASS_RUN_ONLINE_HARNESS=$COMPASS_RUN_ONLINE_HARNESS")
         echo "Online harness runtime enabled"
     fi
-    if [ -n "$OSX_IDE_PROMPTS_ROOT" ]; then
-        env_args+=("TEST_RUNNER_ENV_OSX_IDE_PROMPTS_ROOT=$OSX_IDE_PROMPTS_ROOT")
-        resolved_prompts_root="$OSX_IDE_PROMPTS_ROOT"
-        echo "Using prompt root from OSX_IDE_PROMPTS_ROOT: $OSX_IDE_PROMPTS_ROOT"
+    if [ -n "$COMPASS_PROMPTS_ROOT" ]; then
+        env_args+=("TEST_RUNNER_ENV_COMPASS_PROMPTS_ROOT=$COMPASS_PROMPTS_ROOT")
+        resolved_prompts_root="$COMPASS_PROMPTS_ROOT"
+        echo "Using prompt root from COMPASS_PROMPTS_ROOT: $COMPASS_PROMPTS_ROOT"
     elif [ -d "$prompts_root_default" ]; then
-        env_args+=("TEST_RUNNER_ENV_OSX_IDE_PROMPTS_ROOT=$prompts_root_default")
+        env_args+=("TEST_RUNNER_ENV_COMPASS_PROMPTS_ROOT=$prompts_root_default")
         resolved_prompts_root="$prompts_root_default"
         echo "Using prompt root: $prompts_root_default"
     fi
@@ -385,13 +527,16 @@ run_harness() {
                   ENABLE_PREVIEWS=NO \
                   SWIFT_ENABLE_EXPLICIT_MODULES="$explicit_modules" \
                   "${env_args[@]}" \
-                  test -only-testing:osx-ideHarnessTests/"$suite" -skip-testing:osx-ideUITests -skip-testing:osx-ideTests
+                  test -only-testing:CompassHarnessTests/"$suite" -skip-testing:CompassUITests -skip-testing:CompassTests
+        harness_rc=$?
     else
         local skip_online_args=()
-        if [ -z "$OSX_IDE_RUN_ONLINE_HARNESS" ]; then
-            skip_online_args+=("-skip-testing:osx-ideHarnessTests/AgenticHarnessTests")
-            skip_online_args+=("-skip-testing:osx-ideHarnessTests/RealServiceToolLoopTests")
-            skip_online_args+=("-skip-testing:osx-ideHarnessTests/EdgeCaseScenariosTests")
+        if [ -z "$COMPASS_RUN_ONLINE_HARNESS" ]; then
+            skip_online_args+=("-skip-testing:CompassHarnessTests/PureAgenticHarnessTests")
+            skip_online_args+=("-skip-testing:CompassHarnessTests/RAGPreventionHarnessTests")
+            skip_online_args+=("-skip-testing:CompassHarnessTests/WebSearchHarnessTests")
+            skip_online_args+=("-skip-testing:CompassHarnessTests/WordPressReviewReproductionTests")
+            skip_online_args+=("-skip-testing:CompassHarnessTests/EmbeddingBenchmarkHarnessTests")
         fi
         # Do not change this to YES for online/provider-backed harnesses.
         # Parallel test execution floods the provider, triggers 429s, and risks account bans.
@@ -407,25 +552,27 @@ run_harness() {
                   "${env_args[@]}" \
                   "${skip_online_args[@]}" \
                   test \
-                  -only-testing:osx-ideHarnessTests \
-                  -skip-testing:osx-ideUITests \
-                  -skip-testing:osx-ideTests
+                  -only-testing:CompassHarnessTests \
+                  -skip-testing:CompassUITests \
+                  -skip-testing:CompassTests
+        harness_rc=$?
     fi
+    restore_quarantined_ios_devices
+    clear_test_profile_defaults
+    return $harness_rc
 }
 
 run_harness_online() {
     local suite=$1
     if [ -n "$suite" ]; then
-        OSX_IDE_RUN_ONLINE_HARNESS=1 run_harness "$suite"
+        COMPASS_RUN_ONLINE_HARNESS=1 run_harness "$suite"
     else
         echo "Running online harness suites..."
-        OSX_IDE_RUN_ONLINE_HARNESS=1 run_harness "AgenticHarnessTests"
-        OSX_IDE_RUN_ONLINE_HARNESS=1 run_harness "RealServiceToolLoopTests"
-        OSX_IDE_RUN_ONLINE_HARNESS=1 run_harness "TelemetryValidationTests"
-        OSX_IDE_RUN_ONLINE_HARNESS=1 run_harness "EdgeCaseScenariosTests"
-        OSX_IDE_RUN_ONLINE_HARNESS=1 run_harness "ToolLoopDropoutHarnessTests"
-        OSX_IDE_RUN_ONLINE_HARNESS=1 run_harness "OrchestrationSnapshotHarnessTests"
-        OSX_IDE_RUN_ONLINE_HARNESS=1 run_harness "IndexScopeHarnessTests"
+        COMPASS_RUN_ONLINE_HARNESS=1 run_harness "PureAgenticHarnessTests"
+        COMPASS_RUN_ONLINE_HARNESS=1 run_harness "RAGPreventionHarnessTests"
+        COMPASS_RUN_ONLINE_HARNESS=1 run_harness "WebSearchHarnessTests"
+        COMPASS_RUN_ONLINE_HARNESS=1 run_harness "WordPressReviewReproductionTests"
+        COMPASS_RUN_ONLINE_HARNESS=1 run_harness "EmbeddingBenchmarkHarnessTests"
     fi
 }
 
@@ -435,29 +582,33 @@ run_harness_offline() {
         run_harness "$suite"
     else
         echo "Running offline harness suites..."
-        run_harness "OfflineModeHarnessTests"
+        run_harness "StripMarkupTest"
     fi
 }
 
-run_benchmark_offline() {
-    local mode=$1
-    case "$mode" in
-        ""|"greeting")
-            echo "Running offline greeting benchmark..."
-            OSXIDE_DISABLE_HEAVY_INIT=1 TEST_RUNNER_ENV_OSXIDE_DISABLE_HEAVY_INIT=1 \
-                run_harness "OfflineModeHarnessTests/testOfflineHarnessInferenceBenchmarkSimpleGreeting"
-            ;;
-        "sweep")
-            echo "Running offline parameter sweep benchmark..."
-            OSXIDE_DISABLE_HEAVY_INIT=1 TEST_RUNNER_ENV_OSXIDE_DISABLE_HEAVY_INIT=1 \
-                run_harness "OfflineModeHarnessTests/testOfflineHarnessInferenceParameterSweepLongPrompt"
-            ;;
-        *)
-            echo "Unknown offline benchmark mode: $mode"
-            echo "Supported modes: greeting, sweep"
-            return 1
-            ;;
-    esac
+run_benchmark() {
+    local explicit_modules="${SWIFT_ENABLE_EXPLICIT_MODULES:-NO}"
+    echo "Running benchmark suites (EmbeddingBenchmarkHarnessTests + BenchmarkMetricsTests)..."
+    prepare_derived_data_packages "$DERIVED_DATA_PATH_TEST"
+    quarantine_paired_ios_devices
+    local bench_rc=0
+    xcodebuild -quiet -project "$PROJECT_NAME.xcodeproj" \
+               -scheme "$SCHEME" \
+               -configuration Debug \
+               -derivedDataPath "$DERIVED_DATA_PATH_TEST" \
+               -destination 'platform=macOS' \
+               -parallel-testing-enabled NO \
+               ENABLE_PREVIEWS=NO \
+               SWIFT_ENABLE_EXPLICIT_MODULES="$explicit_modules" \
+               test \
+               -only-testing:CompassHarnessTests/EmbeddingBenchmarkHarnessTests \
+               -only-testing:CompassHarnessTests/BenchmarkMetricsTests \
+               -skip-testing:CompassUITests \
+               -skip-testing:CompassTests
+    bench_rc=$?
+    restore_quarantined_ios_devices
+    echo "[BENCH] JSON results: .build-tests/benchmarks/latest.json"
+    return $bench_rc
 }
 
 run_e2e() {
@@ -465,6 +616,8 @@ run_e2e() {
     local explicit_modules="${SWIFT_ENABLE_EXPLICIT_MODULES:-NO}"
     echo "Running UI tests..."
     prepare_derived_data_packages "$DERIVED_DATA_PATH_TEST"
+    quarantine_paired_ios_devices
+    local e2e_rc=0
     if [ -n "$suite" ]; then
         if [ "$suite" = "json" ]; then
             suite="JSONHighlighterUITests"
@@ -477,7 +630,8 @@ run_e2e() {
                    -destination 'platform=macOS' \
                    ENABLE_PREVIEWS=NO \
                    SWIFT_ENABLE_EXPLICIT_MODULES="$explicit_modules" \
-                   test -only-testing:osx-ideUITests/"$suite" -skip-testing:osx-ideTests
+                   test -only-testing:CompassUITests/"$suite" -skip-testing:CompassTests
+        e2e_rc=$?
     else
         xcodebuild -project "$PROJECT_NAME.xcodeproj" \
                    -scheme "$SCHEME" \
@@ -486,8 +640,11 @@ run_e2e() {
                    -destination 'platform=macOS' \
                    ENABLE_PREVIEWS=NO \
                    SWIFT_ENABLE_EXPLICIT_MODULES="$explicit_modules" \
-                   test -only-testing:osx-ideUITests -skip-testing:osx-ideTests
+                   test -only-testing:CompassUITests -skip-testing:CompassTests
+        e2e_rc=$?
     fi
+    restore_quarantined_ios_devices
+    return $e2e_rc
 }
 
 clean() {
@@ -497,6 +654,36 @@ clean() {
 }
 
 COMMAND=$1
+
+run_lint() {
+    # Local static analysis (replaces hosted Codacy/Sonar for Swift):
+    # runs the repo's own .swiftlint.yml, including DESIGN_STANDARDS guardrails
+    # that hosted tools never apply. Advisory today — the codebase carries
+    # ~150 pre-existing errors; gate the build once the debt is burned down.
+    if ! command -v swiftlint >/dev/null 2>&1; then
+        echo "[lint] swiftlint not found — install with: brew install swiftlint"
+        return 1
+    fi
+    swiftlint lint
+}
+
+check_prompts() {
+    # Guardrail: every prompt file under Prompts/ must be referenced by code.
+    # Orphan prompts are direction-change debris — fix prompts rot silently.
+    local orphan_count=0
+    local checked_count=0
+    while IFS= read -r file; do
+        checked_count=$((checked_count + 1))
+        local key="${file#Prompts/}"
+        key="${key%.md}"
+        if ! rg -q --fixed-strings --glob '*.swift' "$key" Compass; then
+            echo "[check-prompts] ORPHAN: $key (no code reference)"
+            orphan_count=$((orphan_count + 1))
+        fi
+    done < <(find Prompts -name '*.md' | sort)
+    echo "[check-prompts] checked $checked_count prompt files, $orphan_count orphan(s)"
+    [ "$orphan_count" -eq 0 ]
+}
 
 case "$COMMAND" in
     app)
@@ -522,6 +709,15 @@ case "$COMMAND" in
         ;;
     benchmark-offline)
         run_benchmark_offline "$2"
+        ;;
+    check-prompts)
+        check_prompts
+        ;;
+    lint)
+        run_lint
+        ;;
+    benchmark)
+        run_benchmark
         ;;
     e2e)
         run_e2e "$2"

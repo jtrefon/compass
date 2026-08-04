@@ -1,6 +1,6 @@
 ---
 name: deepcode-cardinal-rules
-description: Cardinal rules for the osx-ide project. Use when writing, reviewing, or architecting code to avoid common LLM coding mistakes. Covers harness-vs-app separation, dead code detection, and build-first discipline.
+description: Cardinal rules for the Compass project. Use when writing, reviewing, or architecting code to avoid common LLM coding mistakes. Covers harness-vs-app separation, dead code detection, and build-first discipline.
 ---
 
 # DeepCode Cardinal Rules

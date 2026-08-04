@@ -1,7 +1,7 @@
 # Production Readiness Plan
 
 **Date:** 2026-05-16
-**Context:** Code review of osx-ide identified 10 areas needing improvement before production release.
+**Context:** Code review of compass identified 10 areas needing improvement before production release.
 **Goal:** Bring the application closer to production readiness by addressing structural, safety, and quality gaps.
 
 ---
@@ -21,7 +21,7 @@
 
 ### 1. Replace `unowned self` with `weak self` in ConversationManager
 
-**File:** `osx-ide/Services/ConversationManager.swift`, line 83
+**File:** `compass/Services/ConversationManager.swift`, line 83
 
 ```swift
 // BEFORE (crashes if deallocated during async work)
@@ -34,21 +34,21 @@ aiServiceProvider: { [weak self] in self?.aiService },
 Also audit the rest of `ConversationManager` for any other `unowned` captures. The same pattern may exist elsewhere in the codebase — a single `rg` pass across the project is warranted:
 
 ```sh
-rg '\[unowned self\]' osx-ide/
+rg '\[unowned self\]' compass/
 ```
 
 **Effort:** 30 min
 **Risk:** Low — straightforward replacement, existing tests should catch regressions.
 
 
-### 2. Hardcoded `/tmp/osx-ide-startup.log` — Add PID Isolation
+### 2. Hardcoded `/tmp/compass-startup.log` — Add PID Isolation
 
-**File:** `osx-ide/Services/DependencyContainer.swift`, function `earlyDiag`, line 25
+**File:** `compass/Services/DependencyContainer.swift`, function `earlyDiag`, line 25
 
-The hardcoded path `/tmp/osx-ide-startup.log` will collide if two instances run simultaneously (e.g., test runner + dev build, or multi-user Mac). Include the PID:
+The hardcoded path `/tmp/compass-startup.log` will collide if two instances run simultaneously (e.g., test runner + dev build, or multi-user Mac). Include the PID:
 
 ```swift
-let tmpLog = URL(fileURLWithPath: "/tmp/osx-ide-startup-\(ProcessInfo.processInfo.processIdentifier).log")
+let tmpLog = URL(fileURLWithPath: "/tmp/compass-startup-\(ProcessInfo.processInfo.processIdentifier).log")
 ```
 
 **Effort:** 5 min
@@ -59,7 +59,7 @@ let tmpLog = URL(fileURLWithPath: "/tmp/osx-ide-startup-\(ProcessInfo.processInf
 
 ### 3. Decompose DependencyContainer
 
-**Files:** `osx-ide/Services/DependencyContainer.swift` (539 lines)
+**Files:** `compass/Services/DependencyContainer.swift` (539 lines)
 
 **Problem:** The container is a god object — it constructs, holds, and manages lifecycle for every service in the app. The 150-line `init()` is hard to read, test, and modify.
 
@@ -85,7 +85,7 @@ Phase C — Lazy initialization:
 
 ### 4. Break Up ConversationManager
 
-**Files:** `osx-ide/Services/ConversationManager.swift` (likely 600+ lines)
+**Files:** `compass/Services/ConversationManager.swift` (likely 600+ lines)
 
 **Problem:** Despite the `ConversationSendCoordinator` extraction, `ConversationManager` still manages: message CRUD, streaming rendering, session/tab switching, provider issue display, power management observation, 5+ event bus subscriptions, and preview state.
 
@@ -106,7 +106,7 @@ Extract three new focused types:
 
 ### 5. Audit and Reduce EventBus Logging Overhead
 
-**Files:** `osx-ide/Core/EventBus.swift`, lines 40–48, 62–70
+**Files:** `compass/Core/EventBus.swift`, lines 40–48, 62–70
 
 **Problem:** Every `publish()` and `subscribe()` call spawns a `Task` for debug logging. High-frequency events (streaming chunks, indexing progress) create thousands of short-lived Tasks.
 
@@ -136,7 +136,7 @@ Start with Option A, measure impact, escalate to Option B if needed.
 
 ### 6. Replace `[String: Any]` Tool Parameters with Codable
 
-**Files:** `osx-ide/Services/AITool.swift` and all tool implementations in `osx-ide/Services/Tools/`
+**Files:** `compass/Services/AITool.swift` and all tool implementations in `compass/Services/Tools/`
 
 **Problem:** Every tool repeats the same guard-casting pattern:
 ```swift
@@ -258,7 +258,7 @@ This removes a free function floating at the top of a file and makes the startup
 `ConversationManagerProtocol` exists but it's not clear if all consumers go through the protocol or reach into `ConversationManager` directly. Audit all references:
 
 ```sh
-rg 'ConversationManager' osx-ide/ --no-filename | grep -v 'Tests/' | grep -v 'Protocol'
+rg 'ConversationManager' compass/ --no-filename | grep -v 'Tests/' | grep -v 'Protocol'
 ```
 
 Any direct usage that could use the protocol instead is a coupling point. This matters for the P1 refactor — the more consumers use the protocol, the safer the extraction.

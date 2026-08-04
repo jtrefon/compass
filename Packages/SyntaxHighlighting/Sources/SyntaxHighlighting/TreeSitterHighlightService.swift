@@ -202,6 +202,8 @@ public final class TreeSitterHighlightService {
             return .css
         case "swift":
             return .swift
+        case "php":
+            return .php
         default:
             return nil
         }

@@ -8,7 +8,7 @@
 ## Root Cause Analysis
 
 ### Primary Issue: Missing Safe Area Constraints
-The main layout in [`ContentView.swift`](osx-ide/ContentView.swift:49-58) uses a simple VStack without proper frame constraints:
+The main layout in [`ContentView.swift`](compass/ContentView.swift:49-58) uses a simple VStack without proper frame constraints:
 
 ```swift
 private var mainLayout: some View {
@@ -26,7 +26,7 @@ This VStack has no frame constraints to ensure it respects the window's safe are
 3. The IndexStatusBarView (height: 24) is placed at the bottom but not anchored to safe area
 
 ### Secondary Issues
-1. **Window Resizability**: `.windowResizability(.automatic)` in [`osx_ideApp.swift`](osx-ide/osx_ideApp.swift:383) may cause content sizing issues
+1. **Window Resizability**: `.windowResizability(.automatic)` in [`compassApp.swift`](compass/compassApp.swift:383) may cause content sizing issues
 2. **Toolbar Style**: `.windowToolbarStyle(.unifiedCompact)` affects window chrome calculations
 3. **No safe area padding**: The root view doesn't use `.safeAreaInset()` to position the status bar
 
@@ -65,11 +65,11 @@ private var mainLayout: some View {
 
 ### Step 2: Verify AIChatPanel Mode Selector Position
 
-The mode selector in [`AIChatPanel.swift`](osx-ide/Components/AIChatPanel.swift:149-173) is at the bottom of the chat panel. This should also respect safe areas. The panel already uses `.frame(maxWidth: .infinity, maxHeight: .infinity)` on line 125, which should be sufficient, but verify it fits properly.
+The mode selector in [`AIChatPanel.swift`](compass/Components/AIChatPanel.swift:149-173) is at the bottom of the chat panel. This should also respect safe areas. The panel already uses `.frame(maxWidth: .infinity, maxHeight: .infinity)` on line 125, which should be sufficient, but verify it fits properly.
 
 ### Step 3: Verify Window Configuration
 
-The window configuration in [`osx_ideApp.swift`](osx-ide/osx_ideApp.swift:62-101) should remain as-is for now, but we may need to adjust `.windowResizability(.automatic)` if the issue persists.
+The window configuration in [`compassApp.swift`](compass/compassApp.swift:62-101) should remain as-is for now, but we may need to adjust `.windowResizability(.automatic)` if the issue persists.
 
 ## Implementation Steps
 
