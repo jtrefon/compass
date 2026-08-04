@@ -203,6 +203,7 @@ show_help() {
     echo "  benchmark-offline Run offline inference benchmark harnesses"
     echo "         Examples: ./run.sh benchmark-offline | ./run.sh benchmark-offline sweep"
     echo "  benchmark  Run the core benchmark suites (embeddings + metrics); JSON in .build-tests/benchmarks/"
+    echo "  lint   Run SwiftLint locally (advisory — see .swiftlint.yml)"
     echo "  check-prompts Verify every prompt file under Prompts/ has a code reference (no orphan prompts)"
     echo "  e2e    Run UI (end-to-end) tests [optional suite]"
     echo "         Examples: ./run.sh e2e | ./run.sh e2e TerminalEchoUITests | ./run.sh e2e json"
@@ -654,6 +655,18 @@ clean() {
 
 COMMAND=$1
 
+run_lint() {
+    # Local static analysis (replaces hosted Codacy/Sonar for Swift):
+    # runs the repo's own .swiftlint.yml, including DESIGN_STANDARDS guardrails
+    # that hosted tools never apply. Advisory today — the codebase carries
+    # ~150 pre-existing errors; gate the build once the debt is burned down.
+    if ! command -v swiftlint >/dev/null 2>&1; then
+        echo "[lint] swiftlint not found — install with: brew install swiftlint"
+        return 1
+    fi
+    swiftlint lint
+}
+
 check_prompts() {
     # Guardrail: every prompt file under Prompts/ must be referenced by code.
     # Orphan prompts are direction-change debris — fix prompts rot silently.
@@ -699,6 +712,9 @@ case "$COMMAND" in
         ;;
     check-prompts)
         check_prompts
+        ;;
+    lint)
+        run_lint
         ;;
     benchmark)
         run_benchmark
