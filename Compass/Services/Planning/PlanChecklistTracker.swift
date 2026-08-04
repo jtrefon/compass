@@ -5,11 +5,6 @@ struct PlanChecklistProgress {
     let completed: Int
     let total: Int
 
-    var percentage: Int {
-        guard total > 0 else { return 0 }
-        return Int((Double(completed) / Double(total) * 100).rounded())
-    }
-
     var isComplete: Bool {
         total > 0 && completed >= total
     }

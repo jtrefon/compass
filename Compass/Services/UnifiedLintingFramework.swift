@@ -145,28 +145,6 @@ final class UnifiedLintingFramework {
         value.lowercased() == "error" ? .error : .warning
     }
 
-    private func findLineLengthIssues(
-        lines: [String],
-        max: Int,
-        path: String,
-        severity: DiagnosticSeverity,
-        message: String
-    ) -> [Diagnostic] {
-        var diagnostics: [Diagnostic] = []
-        for (index, line) in lines.enumerated() where line.count > max {
-            diagnostics.append(
-                Diagnostic(
-                    relativePath: path,
-                    line: index + 1,
-                    column: max + 1,
-                    severity: severity,
-                    message: message
-                )
-            )
-        }
-        return diagnostics
-    }
-
     private func findTrailingWhitespaceIssues(
         lines: [String],
         path: String,

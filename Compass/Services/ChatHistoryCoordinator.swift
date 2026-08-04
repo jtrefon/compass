@@ -75,28 +75,6 @@ final class ChatHistoryCoordinator: ObservableObject {
         recompose()
     }
 
-    // MARK: - Tool result commits (append-only)
-
-    /// Commit a tool result. If a live tool message exists for the same toolCallId,
-    /// it is removed from the live overlay and the committed result is appended.
-    /// This is still append-only — no existing committed message is altered.
-    func commitToolResult(_ message: ChatMessage) async {
-        if let id = message.toolCallId {
-            liveToolMessages.removeValue(forKey: id)
-            liveToolStatus.removeValue(forKey: id)
-        }
-        await append(message)
-    }
-
-    /// Synchronous variant for use in non-async closures (progress callbacks).
-    func commitToolResultSync(_ message: ChatMessage) {
-        if let id = message.toolCallId {
-            liveToolMessages.removeValue(forKey: id)
-            liveToolStatus.removeValue(forKey: id)
-        }
-        appendSync(message)
-    }
-
     // MARK: - Draft
 
     /// Replaces the in-flight draft with its final content and moves it into

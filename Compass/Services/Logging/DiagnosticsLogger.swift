@@ -98,8 +98,6 @@ public actor DiagnosticsLogger {
             stackTrace: includeStackTrace ? Thread.callStackSymbols.joined(separator: "\n") : nil
         )
         writeRecord(record)
-        
-        let threadInfo = Thread.isMainThread ? "MAIN" : "BG-\(tid)"
     }
     
     public func logStart(_ name: String, event: DiagnosticsEvent = .taskStart) {
@@ -129,16 +127,6 @@ public actor DiagnosticsLogger {
         logEvent(.error, name: message, metadata: metadata, includeStackTrace: true)
     }
     
-    public func logMainThreadBlock(_ operation: String) -> String {
-        let id = UUID().uuidString
-        logEvent(.mainThreadBlockStart, name: operation, metadata: ["blockId": id], includeStackTrace: true)
-        return id
-    }
-    
-    public func logMainThreadBlockEnd(_ id: String, operation: String) {
-        logEvent(.mainThreadBlockEnd, name: operation, metadata: ["blockId": id])
-    }
-    
     private func writeRecord(_ record: DiagnosticsRecord) {
         guard let logFileURL = logFileURL else { return }
         
@@ -159,32 +147,5 @@ public actor DiagnosticsLogger {
         } catch {
         }
     }
-    
-    public func getLogPath() -> String {
-        logFileURL?.path ?? "not configured"
-    }
 }
 
-public func diagnoseMainThreadBlock<T>(_ operation: String, _ work: () throws -> T) rethrows -> T {
-    let isMainThread = Thread.isMainThread
-    if isMainThread {
-        let id = UUID().uuidString
-        Task { await DiagnosticsLogger.shared.logEvent(.mainThreadBlockStart, name: operation, metadata: ["blockId": id], includeStackTrace: true) }
-        defer {
-            Task { await DiagnosticsLogger.shared.logEvent(.mainThreadBlockEnd, name: operation, metadata: ["blockId": id]) }
-        }
-        return try work()
-    } else {
-        return try work()
-    }
-}
-
-public func diagnoseAsyncOperation(_ name: String, event: DiagnosticsEvent = .taskStart) -> String {
-    let id = "\(name)_\(UUID().uuidString)"
-    Task { await DiagnosticsLogger.shared.logStart(id, event: event) }
-    return id
-}
-
-public func diagnoseAsyncOperationEnd(_ id: String, event: DiagnosticsEvent = .taskEnd) {
-    Task { await DiagnosticsLogger.shared.logEnd(id, event: event) }
-}

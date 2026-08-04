@@ -18,12 +18,6 @@ extension TextViewRepresentable.Coordinator {
     }
 
     @MainActor
-    func unregisterInlineCompletionHandlers() {
-        parent.lineCompletionEngine.unregisterSuggestionHandler(for: parent.paneID)
-        InlineCompletionDebugStore.shared.update(paneID: parent.paneID, presentation: nil)
-    }
-
-    @MainActor
     func handleFileSwitch(textView: NSTextView) {
         guard let signalBridge else { return }
         (textView as? CodeEditorTextView)?.clearInlineSuggestion()

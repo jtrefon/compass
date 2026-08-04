@@ -10,13 +10,6 @@ actor LocalModelProcessAIService: AIService {
 
     typealias MemoryPressureObserverFactory = @Sendable (@escaping @Sendable () -> Void) -> (any MemoryPressureObserving)?
 
-    private struct DefaultSamplingParameters {
-        let temperature: Float
-        let topP: Float
-        let repetitionPenalty: Float?
-        let repetitionContextSize: Int
-    }
-
     struct NoOpEventBus: EventBusProtocol {
         func publish<E: Event>(_ event: E) {}
 

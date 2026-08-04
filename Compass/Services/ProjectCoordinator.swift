@@ -117,8 +117,6 @@ class ProjectCoordinator: ObservableObject {
                     aiService: aiService
                 )
 
-                let indexDuration = Date().timeIntervalSince(indexStart) * 1000
-
                 // Check if cancelled before hopping to MainActor
                 if Task.isCancelled {
                     return
@@ -323,22 +321,6 @@ class ProjectCoordinator: ObservableObject {
         codebaseIndex?.setEnabled(enabled)
         if enabled {
             reindexProject()
-        }
-    }
-
-    private func scheduleAutoReindex(root: URL) {
-        pendingAutoReindexTask?.cancel()
-        pendingAutoReindexTask = Task.detached(priority: .utility) { [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            guard let self = self else { return }
-
-            if let index = await self.codebaseIndex {
-                await self.backgroundWorkGovernor.waitUntilReady(
-                    for: .indexing,
-                    reason: "scheduled_auto_reindex"
-                )
-                await index.reindexProject()
-            }
         }
     }
 

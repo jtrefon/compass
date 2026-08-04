@@ -88,28 +88,6 @@ public actor DatabaseStore {
         try database.saveSymbols(symbols)
     }
 
-    public func saveSymbolsBatched(_ symbols: [Symbol], batchSize: Int = 250) async throws {
-        guard batchSize > 0 else {
-            try database.saveSymbols(symbols)
-            return
-        }
-
-        if symbols.isEmpty {
-            return
-        }
-
-        var index = 0
-        while index < symbols.count {
-            let end = min(symbols.count, index + batchSize)
-            try database.saveSymbols(Array(symbols[index..<end]))
-            index = end
-
-            if index < symbols.count {
-                await Task.yield()
-            }
-        }
-    }
-
     public func deleteSymbols(for resourceId: String) throws {
         try database.deleteSymbols(for: resourceId)
     }

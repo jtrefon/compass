@@ -42,10 +42,6 @@ public actor AppLogger {
         // Note: No fallback to Application Support - logs only go to project directory
     }
 
-    public func updateConfiguration(_ configuration: LoggingConfiguration) {
-        self.config = configuration
-    }
-
     public func setProjectRoot(_ projectRoot: URL) {
         let ideDir = projectRoot.appendingPathComponent(AppConstantsFileSystem.projectDirName, isDirectory: true)
         let logsDir = ideDir.appendingPathComponent("logs", isDirectory: true)
@@ -54,10 +50,6 @@ public actor AppLogger {
 
     public func currentSessionId() -> String {
         sessionId
-    }
-
-    public func logsDirectoryPath() -> String {
-        projectLogFileURL?.deletingLastPathComponent().path ?? "no log configured"
     }
 
     public func log(

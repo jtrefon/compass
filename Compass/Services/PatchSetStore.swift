@@ -35,12 +35,6 @@ public actor PatchSetStore {
         )
     }
 
-    public func listPatchSetIds() -> [String] {
-        guard let root = stagingRootDirectory() else { return [] }
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return [] }
-        return names.sorted()
-    }
-
     public func loadManifest(patchSetId: String) -> PatchSetManifest? {
         guard let url = manifestURL(patchSetId: patchSetId) else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }

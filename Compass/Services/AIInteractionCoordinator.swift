@@ -106,8 +106,6 @@ final class AIInteractionCoordinator {
             isRunningUnitTests: isUnitTestRun
         )
         var lastError: AppError?
-        // RAG is exposed as a first-class tool (ContextTool) — never force-injected.
-        let augmentedContext: String? = nil
         let providerLabel = request.providerName ?? "OpenRouter"
         let retryStart = Date()
         var networkIssueActive = false

@@ -17,14 +17,6 @@ extension AIToolExecutor {
         }
     }
 
-    struct ToolExecutionCrashError: LocalizedError, Sendable {
-        let message: String
-
-        var errorDescription: String? {
-            message
-        }
-    }
-
     struct ToolExecutionMessageContext {
         let toolName: String
         let status: ToolExecutionStatus

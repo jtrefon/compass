@@ -1,43 +1,20 @@
 import Foundation
 
-/// How the conversation context is bounded for the LLM request.
-///
-/// - `compaction`: Summarise older turns via a `.checkpoint` node; the request
-///   projection drops everything before the latest checkpoint. Legacy strategy,
-///   gated behind `COMPASS_CONTEXT_COMPACTION_ENABLED` and OFF by default — it has
-///   been observed to drop the user's task goal and induce read-only loops.
-/// - `slidingWindow`: Roll the committed chain to fit the model's context window
-///   (token-budget-aware, front-truncated), preserving the most recent turns and
-///   the original task as a goal anchor. No content is rewritten. The default.
-/// - `passthrough`: Send the full immutable chain; let the provider handle
-///   overflow. Best for very large-window models.
-public enum ContextStrategy: String, Sendable, Codable {
-    case compaction
-    case slidingWindow
-    case passthrough
-}
-
-/// Capabilities and recommended strategy for a given model or model family.
-/// Used to decide at runtime whether to compact or let the full window through.
+/// Capabilities and recommended profile for a given model or model family.
+/// Used to decide at runtime how the context window is handled.
 public struct ModelContextProfile: Sendable {
     public let modelID: String
     public let windowSize: Int
     public let supportsPrefixCache: Bool
 
-    /// The strategy that best suits this model. The app uses this as the
-    /// default but the user/coordinator may override via `ChatHistoryCoordinator.setStrategy(_:)`.
-    public let defaultStrategy: ContextStrategy
-
     public init(
         modelID: String,
         windowSize: Int,
-        supportsPrefixCache: Bool,
-        defaultStrategy: ContextStrategy
+        supportsPrefixCache: Bool
     ) {
         self.modelID = modelID
         self.windowSize = windowSize
         self.supportsPrefixCache = supportsPrefixCache
-        self.defaultStrategy = defaultStrategy
     }
 }
 
@@ -53,33 +30,32 @@ extension ModelContextProfile {
     /// Everything else defaults to `compaction`.
     public static let registry: [String: ModelContextProfile] = [
         "anthropic/claude-sonnet-4":
-            .init(modelID: "anthropic/claude-sonnet-4", windowSize: 200_000, supportsPrefixCache: true, defaultStrategy: .slidingWindow),
+            .init(modelID: "anthropic/claude-sonnet-4", windowSize: 200_000, supportsPrefixCache: true),
         "anthropic/claude-haiku-3":
-            .init(modelID: "anthropic/claude-haiku-3", windowSize: 200_000, supportsPrefixCache: true, defaultStrategy: .slidingWindow),
+            .init(modelID: "anthropic/claude-haiku-3", windowSize: 200_000, supportsPrefixCache: true),
         "openai/gpt-4o":
-            .init(modelID: "openai/gpt-4o", windowSize: 128_000, supportsPrefixCache: true, defaultStrategy: .slidingWindow),
+            .init(modelID: "openai/gpt-4o", windowSize: 128_000, supportsPrefixCache: true),
         "openai/gpt-5":
-            .init(modelID: "openai/gpt-5", windowSize: 128_000, supportsPrefixCache: true, defaultStrategy: .slidingWindow),
+            .init(modelID: "openai/gpt-5", windowSize: 128_000, supportsPrefixCache: true),
         "deepseek/deepseek":
-            .init(modelID: "deepseek/deepseek", windowSize: 64_000, supportsPrefixCache: true, defaultStrategy: .compaction),
+            .init(modelID: "deepseek/deepseek", windowSize: 64_000, supportsPrefixCache: true),
         "qwen":
-            .init(modelID: "qwen", windowSize: 262_000, supportsPrefixCache: true, defaultStrategy: .slidingWindow),
+            .init(modelID: "qwen", windowSize: 262_000, supportsPrefixCache: true),
         "qwopus":
-            .init(modelID: "qwopus", windowSize: 64_000, supportsPrefixCache: true, defaultStrategy: .slidingWindow),
+            .init(modelID: "qwopus", windowSize: 64_000, supportsPrefixCache: true),
         "llama":
-            .init(modelID: "llama", windowSize: 128_000, supportsPrefixCache: true, defaultStrategy: .slidingWindow),
+            .init(modelID: "llama", windowSize: 128_000, supportsPrefixCache: true),
         "mistral":
-            .init(modelID: "mistral", windowSize: 128_000, supportsPrefixCache: true, defaultStrategy: .slidingWindow),
+            .init(modelID: "mistral", windowSize: 128_000, supportsPrefixCache: true),
         "gemma":
-            .init(modelID: "gemma", windowSize: 32_000, supportsPrefixCache: true, defaultStrategy: .compaction),
+            .init(modelID: "gemma", windowSize: 32_000, supportsPrefixCache: true),
     ]
 
     /// Safe fallback when no specific profile is registered.
     public static let `default` = ModelContextProfile(
         modelID: "unknown",
         windowSize: 32_000,
-        supportsPrefixCache: false,
-        defaultStrategy: .compaction
+        supportsPrefixCache: false
     )
 
     /// Lookup a profile by prefix-matching against the registry keys.

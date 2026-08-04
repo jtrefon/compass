@@ -10,13 +10,3 @@ extension URL {
         return String(filePath.dropFirst(rootPath.count + 1))
     }
 }
-
-extension String {
-    /// Returns `self` made relative to a root directory path.
-    /// If `self` is not under `root`, returns `self` unchanged.
-    func relativeToRoot(_ root: URL) -> String {
-        let rootPath = root.standardizedFileURL.path
-        guard hasPrefix(rootPath + "/") else { return self }
-        return String(dropFirst(rootPath.count + 1))
-    }
-}

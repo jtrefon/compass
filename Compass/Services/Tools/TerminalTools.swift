@@ -317,9 +317,7 @@ private actor RunCommandSessionStore {
         waitSeconds: TimeInterval,
         reasonWhenWaitingExpires: String
     ) async -> Observation {
-        let baseline = session.outputBuffer.snapshot()
         let deadline = Date().addingTimeInterval(waitSeconds)
-        let settleInterval: TimeInterval = 0.25
 
         while Date() < deadline {
             // Timeout/cancel from the executor must kill the underlying

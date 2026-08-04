@@ -35,13 +35,6 @@ struct ToolFileExclusion {
         let rel = url.relativeTo(projectRoot)
         return rel == projectRoot.standardizedFileURL.path ? "" : rel
     }
-
-    /// Returns the relative path of a URL from the project root, or nil if outside.
-    func tryRelativePath(for url: URL) -> String? {
-        let rel = url.relativeTo(projectRoot)
-        guard rel != url.standardizedFileURL.path else { return nil }
-        return rel
-    }
 }
 
 // MARK: - Static matching (patterns supplied by the caller)

@@ -48,25 +48,3 @@ public struct ProviderConfiguration: Sendable, Equatable {
         self.maxOutputTokens = maxOutputTokens
     }
 }
-
-public struct UsageInfo: Sendable, Equatable {
-    public let promptTokens: Int
-    public let completionTokens: Int
-    public let totalTokens: Int
-    public let costMicrodollars: Int?
-    public let accountBalanceMicrodollars: Int?
-
-    public init(
-        promptTokens: Int,
-        completionTokens: Int,
-        totalTokens: Int,
-        costMicrodollars: Int? = nil,
-        accountBalanceMicrodollars: Int? = nil
-    ) {
-        self.promptTokens = promptTokens
-        self.completionTokens = completionTokens
-        self.totalTokens = totalTokens
-        self.costMicrodollars = costMicrodollars
-        self.accountBalanceMicrodollars = accountBalanceMicrodollars
-    }
-}

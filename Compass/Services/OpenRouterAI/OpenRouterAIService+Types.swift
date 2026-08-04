@@ -19,30 +19,9 @@ extension OpenRouterAIService {
         let exclude: Bool
     }
 
-    struct OpenRouterChatInput {
-        let prompt: String
-        let tools: [AITool]?
-        let mode: AIMode?
-        let projectRoot: URL?
-    }
-
     struct OpenRouterChatHistoryInput {
         let messages: [OpenRouterChatMessage]
         let tools: [AITool]?
-        let mode: AIMode?
-        let projectRoot: URL?
-        let runId: String?
-        let stage: AIRequestStage?
-    }
-
-    internal struct RequestStartContext {
-        let requestId: String
-        let providerName: String
-        let baseURL: String
-        let streaming: Bool
-        let model: String
-        let messageCount: Int
-        let toolCount: Int
         let mode: AIMode?
         let projectRoot: URL?
         let runId: String?

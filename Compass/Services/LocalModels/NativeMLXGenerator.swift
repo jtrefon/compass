@@ -173,7 +173,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
     }
 
     private func logGenerationStart(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat? = nil, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String? = nil) {
-        let mlxStream = String(describing: StreamOrDevice.default)
         let defaultDevice = Device.defaultDevice()
         let deviceType = defaultDevice.deviceType?.rawValue ?? "unknown"
         let messageCount: Int
@@ -245,8 +244,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
         let loadDuration = loadStart.duration(to: ContinuousClock.now)
         let rssAfterLoadMB = Self.currentProcessRSSMB()
         try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "after_container_load")
-        let mlxActiveAfterLoad = MLX.Memory.activeMemory / (1024 * 1024)
-        let mlxPeakAfterLoad = MLX.Memory.peakMemory / (1024 * 1024)
         await AIToolTraceLogger.shared.log(type: "mlx.model_loaded", data: [
             "runId": runId ?? "",
             "modelId": modelId,
@@ -275,10 +272,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 context: context
             )
 
-            let rssBeforeGen = Self.currentProcessRSSMB()
-            let mlxActiveBeforeGen = MLX.Memory.activeMemory / (1024 * 1024)
-            let mlxPeakBeforeGen = MLX.Memory.peakMemory / (1024 * 1024)
-            let effectiveTokenCount = effectiveInput.text.tokens.size
             MLX.Memory.peakMemory = 0
             let genStart = ContinuousClock.now
             let streamResult = try await self.processGeneration(
@@ -411,9 +404,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
             result.chunkCount += 1
             if result.chunkCount == 1 {
                 let prefillMs = Self.milliseconds(genStart.duration(to: ContinuousClock.now))
-                let rssAfterPrefill = Self.currentProcessRSSMB()
-                let mlxActiveAfterPrefill = MLX.Memory.activeMemory / (1024 * 1024)
-                let mlxPeakAfterPrefill = MLX.Memory.peakMemory / (1024 * 1024)
                 await AIToolTraceLogger.shared.log(type: "mlx.first_token", data: [
                     "runId": runId ?? "",
                     "modelId": modelId,
@@ -522,8 +512,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
             "cacheKind": inferenceConfiguration.cacheKind,
             "hasCompletionInfo": streamResult.completionInfo != nil
         ])
-        let approxThinkingTokens = max(0, streamResult.thinkingCharCount) / 4
-        let approxExecutionTokens = max(0, streamResult.executionCharCount) / 4
         Self.logGenerationPerformance(
             modelId: modelId,
             inferenceConfiguration: inferenceConfiguration,

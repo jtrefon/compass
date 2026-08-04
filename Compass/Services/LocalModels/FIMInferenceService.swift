@@ -84,7 +84,6 @@ actor FIMInferenceService {
         guard totalChars > maxChars else { return }
 
         let maxSuffixChars = maxChars / 3
-        let maxPrefixChars = maxChars - maxSuffixChars
 
         if suffix.count > maxSuffixChars {
             suffix = String(suffix.prefix(maxSuffixChars))

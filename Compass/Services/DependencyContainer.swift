@@ -461,11 +461,6 @@ class DependencyContainer: ObservableObject {
         return _projectCoordinator.codebaseIndex
     }
 
-    var isCodebaseIndexEnabled: Bool {
-        return settingsStore.bool(
-            forKey: AppConstants.Storage.codebaseIndexEnabledKey, default: true)
-    }
-
     func setCodebaseIndexEnabled(_ enabled: Bool) {
         _projectCoordinator.setIndexEnabled(enabled)
     }
@@ -655,7 +650,6 @@ class DependencyContainer: ObservableObject {
                 }
             }
 
-            let totalEvents = eventLines.count
             await tracker.markIngested(conversationId: convId)
             ingested += 1
             eventBus.publish(VectorStoreIngestionProgressEvent(ingestedCount: ingested, totalCount: toIngest.count))

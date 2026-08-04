@@ -42,10 +42,6 @@ public enum LocalModelFileStore {
                 ?? textConfig?.maxPositionEmbeddings
                 ?? textConfig?.maxSequenceLength
         }
-
-        var effectiveModelType: String? {
-            modelType ?? textConfig?.modelType
-        }
     }
 
     /// Test isolation: unit tests MUST never read, migrate, or delete the

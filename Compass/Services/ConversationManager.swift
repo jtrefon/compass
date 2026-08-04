@@ -957,12 +957,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         appendToLiveModelStatusPreview("Run stopped by user. Ready for next input.")
     }
 
-    func cancelToolCall(id: String) {
-        updateCancelledToolCallIds { $0.insert(id) }
-        // Find the specific tool execution message and mark it as failed/cancelled
-        historyCoordinator.cancelLiveTool(id)
-    }
-
     // MARK: - Quick Actions
 
     func explainCode(_ code: String) {

@@ -168,12 +168,7 @@ actor PromptPrefixCache {
     func getStatistics() -> CacheStatistics {
         statistics
     }
-    
-    /// Reset statistics (useful for testing)
-    func resetStatistics() {
-        statistics = CacheStatistics()
-    }
-    
+
     // MARK: - Private Helpers
     
     private func cacheKey(conversationId: String, modelId: String) -> String {
@@ -219,8 +214,4 @@ actor PromptPrefixCache {
 // MARK: - AITool Extension for Hashing
 
 extension AITool {
-    /// A stable string representation for hashing
-    var stableRepresentation: String {
-        "\(name)_\(description)"
-    }
 }

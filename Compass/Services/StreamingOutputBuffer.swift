@@ -131,10 +131,6 @@ final class StreamingOutputBuffer {
         reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
-    var hasToolText: Bool {
-        toolText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-    }
-
     // MARK: - Reset
 
     func clear() {

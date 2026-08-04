@@ -77,23 +77,6 @@ public final class LanguageModuleManager: ObservableObject {
         return !disabled.contains(capability)
     }
 
-    public func toggleCapability(
-        _ capability: LanguageModuleCapability,
-        for language: CodeLanguage,
-        enabled: Bool
-    ) {
-        guard let module = allModules[language], module.capabilities.contains(capability) else { return }
-
-        var disabled = disabledCapabilitiesByLanguage[language] ?? []
-        if enabled {
-            disabled.remove(capability)
-        } else {
-            disabled.insert(capability)
-        }
-        disabledCapabilitiesByLanguage[language] = disabled
-        persistDisabledCapabilities()
-    }
-
     public var availableLanguages: [CodeLanguage] {
         allModules.keys.sorted { $0.rawValue < $1.rawValue }
     }

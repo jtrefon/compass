@@ -48,9 +48,4 @@ final class FileTreeAppearanceCoordinator {
         self.fontFamily = fontFamily
         applyAppearanceToVisibleRows()
     }
-
-    /// Gets the current font settings
-    var currentFont: (fontSize: Double, fontFamily: String) {
-        return (fontSize: fontSize, fontFamily: fontFamily)
-    }
 }

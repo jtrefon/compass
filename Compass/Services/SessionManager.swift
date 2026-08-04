@@ -339,12 +339,6 @@ final class SessionManager: ObservableObject {
         refreshClosed()
     }
 
-    func resetAll(input: inout String, livePreview: inout String, liveStatusPreview: inout String) {
-        input = ""
-        livePreview = ""
-        liveStatusPreview = ""
-    }
-
     func updateProjectRoot(_ newRoot: URL, input: inout String, livePreview: inout String,
                            liveStatusPreview: inout String, mode: inout AIMode) {
         projectRoot = newRoot
