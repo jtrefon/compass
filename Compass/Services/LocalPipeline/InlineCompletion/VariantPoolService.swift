@@ -67,6 +67,11 @@ actor VariantPoolService {
         Task { await store.upsert(pool) }
 
         chainTasks[paneID] = Task { [weak self] in
+            FIMTraceLogger.shared.log("chain.start", [
+                "pane": "\(paneID)",
+                "seeded": seededVariantText.map { "\($0.prefix(30))" } ?? "no",
+                "anchor": String(anchor.prefix(20)).replacingOccurrences(of: "\n", with: "\\n")
+            ])
             await self?.runChain(
                 paneID: paneID,
                 poolID: pool.id,
@@ -78,14 +83,6 @@ actor VariantPoolService {
                 seededFirstTokenID: seededFirstTokenID
             )
         }
-    }
-
-    /// Called by the engine on ANY new request: the running chain would keep
-    /// appending variants for a context that has moved. Pools stay (backtrack
-    /// still works); only the chain stops.
-    func cancelChain(paneID: FileEditorStateManager.PaneID) {
-        chainRevisions[paneID, default: 0] += 1
-        chainTasks[paneID]?.cancel()
     }
 
     /// The active pool for the current buffer (longest-anchor match), if any.
@@ -218,6 +215,13 @@ actor VariantPoolService {
                     rankScore: 0.5
                 )
             )
+            FIMTraceLogger.shared.log("chain.variant", [
+                "pane": "\(paneID)",
+                "temp": String(format: "%.1f", temperature),
+                "bans": "\(bans.count)",
+                "firstToken": "\(firstID ?? -1)",
+                "text": String(text.prefix(30))
+            ])
             onVariantsChanged?(paneID)
             return firstID
         } catch {

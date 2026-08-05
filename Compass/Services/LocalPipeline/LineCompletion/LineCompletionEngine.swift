@@ -34,6 +34,7 @@ final class LineCompletionEngine {
     private var recentRejections: [FileEditorStateManager.PaneID: Int] = [:]
     private var lastShownSuggestion: [FileEditorStateManager.PaneID: String] = [:]
     private var lastShownAt: [FileEditorStateManager.PaneID: Date] = [:]
+    private var lastShownCursor: [FileEditorStateManager.PaneID: Int] = [:]
     private var lastBufferBeforeCursor: [FileEditorStateManager.PaneID: String] = [:]
     private var lastPoolPublishAt: [FileEditorStateManager.PaneID: Date] = [:]
 
@@ -105,6 +106,15 @@ final class LineCompletionEngine {
 
             let bufferBeforeCursor = String(snapshot.buffer.prefix(snapshot.cursorPosition))
             self.lastBufferBeforeCursor[snapshot.paneID] = bufferBeforeCursor
+            let tail40 = String(bufferBeforeCursor.suffix(40))
+            let traceChar = typedChar.map { String($0) } ?? "nil"
+            FIMTraceLogger.shared.log("keystroke", [
+                "pane": "\(snapshot.paneID)",
+                "char": traceChar,
+                "gapMs": String(format: "%.0f", gapMs),
+                "cursor": "\(snapshot.cursorPosition)",
+                "tail": tail40.replacingOccurrences(of: "\n", with: "\\n")
+            ])
 
             // Pool consumption (accept-verify generalized over the variant
             // pool): serve the best variant whose head the buffer extends —
@@ -115,31 +125,36 @@ final class LineCompletionEngine {
             if let poolService = self.variantPoolService,
                let pool = await poolService.activePool(paneID: snapshot.paneID, bufferBeforeCursor: bufferBeforeCursor) {
                 hadSuggestionContext = true
+                FIMTraceLogger.shared.log("pool.active", [
+                    "anchor": String(pool.anchorPrefix.suffix(20)).replacingOccurrences(of: "\n", with: "\\n"),
+                    "variants": "\(pool.variants.count)"
+                ])
                 let variants = pool.variants.sorted { $0.rankScore > $1.rankScore }
                 if self.consumeHead(of: variants, bufferBeforeCursor: bufferBeforeCursor, paneID: snapshot.paneID) {
+                    FIMTraceLogger.shared.log("consume.pool", ["head": "matched"])
                     return
                 }
+                FIMTraceLogger.shared.log("consume.pool", ["head": "miss-deviation"])
             } else {
                 // Pre-pool accept-verify: the buffer's tail extends the shown
-                // suggestion's head — consume it without a model call.
+                // suggestion's head — consume it without a model call. The
+                // same newline rule as pools: consuming across a line break
+                // would leak the old line's suggestion onto the new line and
+                // block a fresh prediction.
                 if let lastShown = self.lastShownSuggestion[snapshot.paneID],
                    !lastShown.isEmpty,
                    let shownAt = self.lastShownAt[snapshot.paneID],
-                   Date().timeIntervalSince(shownAt) * 1000 < self.acceptVerifyWindowMs {
+                   Date().timeIntervalSince(shownAt) * 1000 < self.acceptVerifyWindowMs,
+                   self.lastShownCursor[snapshot.paneID].map({ !bufferBeforeCursor.dropFirst($0).contains("\n") }) ?? true {
                     hadSuggestionContext = true
                     if self.consumeHead(of: [InlineCompletionVariant(
                         id: UUID(), text: lastShown, temperature: 0.1,
                         bannedTokenCount: 0, createdAt: Date(), rankScore: 1
                     )], bufferBeforeCursor: bufferBeforeCursor, paneID: snapshot.paneID) {
+                        FIMTraceLogger.shared.log("consume.lastShown", ["head": "matched"])
                         return
                     }
                 }
-            }
-
-            // The context moved (any request supersedes the running chain —
-            // it would keep appending stale variants for the old context).
-            if let poolService = self.variantPoolService {
-                await poolService.cancelChain(paneID: snapshot.paneID)
             }
 
             let rejectCount = self.recentRejections[snapshot.paneID] ?? 0
@@ -147,14 +162,17 @@ final class LineCompletionEngine {
                 for: snapshot, settings: settings,
                 gapMs: gapMs, typedChar: typedChar, recentRejectionCount: rejectCount
             ) else {
+                FIMTraceLogger.shared.log("gate", ["decision": "reject", "gapMs": String(format: "%.0f", gapMs)])
                 self.publish(nil, for: snapshot.paneID)
                 return
             }
 
             if let cached = await self.resultCache.lookup(prefix: snapshot.buffer.prefix(snapshot.cursorPosition).suffix(100).description, suffix: snapshot.buffer.dropFirst(snapshot.cursorPosition).prefix(100).description) {
+                FIMTraceLogger.shared.log("cache", ["decision": "hit"])
                 self.publish(cached, for: snapshot.paneID)
                 return
             }
+            FIMTraceLogger.shared.log("cache", ["decision": "miss"])
 
             let context = self.contextAssembler.buildContext(from: snapshot)
             let request = InlineCompletionRequest(
@@ -168,6 +186,13 @@ final class LineCompletionEngine {
                 bannedTokenIDs: [],
                 variantTemperature: nil
             )
+
+            FIMTraceLogger.shared.log("infer.start", [
+                "prefixLen": "\(context.prefix.count)",
+                "suffixLen": "\(context.suffix.count)",
+                "maxTokens": "\(request.maxTokens)",
+                "gapMs": String(format: "%.0f", gapMs)
+            ])
 
             do {
                 NotificationCenter.default.post(name: .inlineCompletionStatusDidChange, object: InlineCompletionStatus.generating)
@@ -246,6 +271,10 @@ final class LineCompletionEngine {
                 // pool with this prediction and chain the alternatives.
                 if hadSuggestionContext, let poolService = self.variantPoolService {
                     let firstToken = await self.inferenceService.lastGeneratedFirstTokenID()
+                    FIMTraceLogger.shared.log("deviation.seed", [
+                        "text": String(result.suggestionText.prefix(40)),
+                        "firstToken": "\(firstToken ?? -1)"
+                    ])
                     await poolService.registerDeviation(
                         paneID: snapshot.paneID,
                         bufferBeforeCursor: bufferBeforeCursor,
@@ -257,6 +286,10 @@ final class LineCompletionEngine {
                         seededFirstTokenID: firstToken
                     )
                 }
+                FIMTraceLogger.shared.log("infer.result", [
+                    "outputLen": "\(result.suggestionText.count)",
+                    "accepted": "\(evaluation.isAccepted ? "yes" : "no")"
+                ])
 
                 NotificationCenter.default.post(name: .inlineCompletionStatusDidChange, object: InlineCompletionStatus.idle)
             } catch {
@@ -354,6 +387,7 @@ final class LineCompletionEngine {
         if let presentation {
             lastShownSuggestion[paneID] = presentation.suggestionText
             lastShownAt[paneID] = Date()
+            lastShownCursor[paneID] = lastBufferBeforeCursor[paneID]?.count ?? 0
         }
         suggestionHandlers[paneID]?(presentation)
     }

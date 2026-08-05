@@ -107,7 +107,11 @@ extension TextViewRepresentable {
                 guard let self else { return }
                 let variants = await self.parent.lineCompletionEngine.poolVariants(for: self.parent.paneID)
                 let texts = variants.map(\.text)
-                guard !texts.isEmpty else { return }
+                guard !texts.isEmpty else {
+                    FIMTraceLogger.shared.log("dropdown", ["action": "open-blocked", "variants": "0"])
+                    return
+                }
+                FIMTraceLogger.shared.log("dropdown", ["action": "open", "variants": "\(texts.count)"])
                 codeEditorTextView.showInlineCompletionDropdown(items: texts)
                 self.startDropdownRefreshTimer()
             }
@@ -121,6 +125,7 @@ extension TextViewRepresentable {
                 return false
             }
             let line = text.split(separator: "\n").first.map(String.init) ?? text
+            FIMTraceLogger.shared.log("dropdown", ["action": "accept", "text": String(line.prefix(40))])
             codeEditorTextView.insertText(line, replacementRange: codeEditorTextView.selectedRange)
             parent.lineCompletionEngine.markAccepted(on: parent.paneID, suggestionText: text)
             codeEditorTextView.hideInlineCompletionDropdown()

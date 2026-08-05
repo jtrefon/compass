@@ -3,6 +3,11 @@ import Foundation
 enum LineCompletionRankerEvaluation {
     case accepted(InlineSuggestionPresentation)
     case rejected(String)
+
+    var isAccepted: Bool {
+        if case .accepted = self { return true }
+        return false
+    }
 }
 
 @MainActor
