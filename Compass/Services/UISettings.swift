@@ -15,9 +15,6 @@ struct UISettings {
     let inlineCompletionDebounceMilliseconds: Int
     let inlineCompletionAggressiveness: Double
     let inlineCompletionMaxSuggestionLength: Int
-    let inlineCompletionMultilineEnabled: Bool
-    let inlineCompletionRetrievalEnabled: Bool
-    let inlineCompletionRoutingMode: InlineCompletionRoutingMode
     let inlineCompletionDebugOverlayEnabled: Bool
     let sidebarWidth: Double
     let terminalHeight: Double

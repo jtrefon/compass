@@ -22,7 +22,7 @@ extension TextViewRepresentable.Coordinator {
         guard let signalBridge else { return }
         (textView as? CodeEditorTextView)?.clearInlineSuggestion()
         InlineCompletionDebugStore.shared.update(paneID: parent.paneID, presentation: nil)
-        signalBridge.invalidate(textView: textView as? CodeEditorTextView)
+        signalBridge.invalidate()
     }
 
     @MainActor
@@ -38,7 +38,7 @@ extension TextViewRepresentable.Coordinator {
     @MainActor
     func invalidateInlineCompletion() {
         InlineCompletionDebugStore.shared.update(paneID: parent.paneID, presentation: nil)
-        signalBridge?.invalidate(textView: attachedTextView as? CodeEditorTextView)
+        signalBridge?.invalidate()
     }
 
     @MainActor

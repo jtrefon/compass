@@ -50,7 +50,7 @@ final class EditorSignalBridge {
         }
     }
 
-    func invalidate(textView: CodeEditorTextView? = nil) {
+    func invalidate() {
         debounceTask?.cancel()
         lastBuffer = nil
         lastTypedAt = nil

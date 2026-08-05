@@ -28,14 +28,6 @@ actor CompletionTelemetryService {
         cancelledCount += 1
     }
 
-    func recentSlowCompletions(thresholdMs: Double = 400) -> Int {
-        recentLatencies.suffix(6).filter { $0 >= thresholdMs }.count
-    }
-
-    func shouldReduceWorkload() -> Bool {
-        recentSlowCompletions(thresholdMs: 500) >= 4
-    }
-
     private func recordLatency(_ latency: Double) {
         recentLatencies.append(latency)
         if recentLatencies.count > 20 {

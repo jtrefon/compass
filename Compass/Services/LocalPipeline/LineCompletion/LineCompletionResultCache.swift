@@ -40,10 +40,6 @@ actor LineCompletionResultCache {
         }
     }
 
-    func invalidate() {
-        entries.removeAll()
-    }
-
     private func makeKey(prefix: String, suffix: String) -> Key {
         let tail = String(prefix.suffix(100))
         let head = String(suffix.prefix(100))

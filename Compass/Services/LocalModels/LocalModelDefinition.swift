@@ -11,13 +11,11 @@ struct FIMTokens: Sendable {
     let prefix: String
     let suffix: String
     let middle: String
-    let endOfText: String
 
     static let qwen25Coder = FIMTokens(
         prefix: "<|fim_prefix|>",
         suffix: "<|fim_suffix|>",
-        middle: "<|fim_middle|>",
-        endOfText: "<|endoftext|>"
+        middle: "<|fim_middle|>"
     )
 }
 

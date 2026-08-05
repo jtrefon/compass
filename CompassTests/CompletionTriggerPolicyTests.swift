@@ -3,47 +3,75 @@ import XCTest
 
 @MainActor
 final class CompletionTriggerPolicyTests: XCTestCase {
+    private func makeSnapshot(
+        buffer: String = "foo",
+        cursor: Int = 3,
+        selectionLength: Int = 0,
+        language: String = "swift",
+        isComposingText: Bool = false,
+        triggerReason: CompletionTriggerReason = .automatic
+    ) -> InlineCompletionEditorSnapshot {
+        InlineCompletionEditorSnapshot(
+            paneID: .primary, filePath: nil, language: language,
+            buffer: buffer, cursorPosition: cursor, selectionLength: selectionLength,
+            isComposingText: isComposingText, triggerReason: triggerReason
+        )
+    }
+
+    private func makeSettings(isEnabled: Bool = true) -> InlineCompletionSettings {
+        InlineCompletionSettings.default.with(isEnabled: isEnabled)
+    }
+
     func testAutomaticRequestSuppressedOnSelection() {
-        let policy = CompletionTriggerPolicy()
-        let disabledSettings = InlineCompletionSettings.default.with(isEnabled: false)
-        let enabledSettings = InlineCompletionSettings.default.with(isEnabled: true)
+        let gate = LineCompletionGate()
+        let noSelection = makeSnapshot()
+        let selectedText = makeSnapshot(cursor: 1, selectionLength: 2)
 
-        let noSelection = InlineCompletionEditorSnapshot(
-            paneID: .primary, filePath: nil, language: "swift",
-            buffer: "foo", cursorPosition: 3, selectionLength: 0,
-            isComposingText: false, triggerReason: .automatic
-        )
-        let selectedText = InlineCompletionEditorSnapshot(
-            paneID: .primary, filePath: nil, language: "swift",
-            buffer: "foo", cursorPosition: 1, selectionLength: 2,
-            isComposingText: false, triggerReason: .automatic
-        )
-
-        XCTAssertFalse(policy.shouldRequest(for: noSelection, settings: disabledSettings))
-        XCTAssertFalse(policy.shouldRequest(for: selectedText, settings: enabledSettings))
-        XCTAssertTrue(policy.shouldRequest(for: noSelection, settings: enabledSettings))
+        XCTAssertFalse(gate.shouldRequest(for: noSelection, settings: makeSettings(isEnabled: false), gapMs: 200, typedChar: nil, recentRejectionCount: 0))
+        XCTAssertFalse(gate.shouldRequest(for: selectedText, settings: makeSettings(), gapMs: 200, typedChar: nil, recentRejectionCount: 0))
+        XCTAssertTrue(gate.shouldRequest(for: noSelection, settings: makeSettings(), gapMs: 200, typedChar: nil, recentRejectionCount: 0))
     }
 
     func testManualTriggerBypassesUnsupportedLanguageGuard() {
-        let policy = CompletionTriggerPolicy()
-        let snapshot = InlineCompletionEditorSnapshot(
-            paneID: .primary, filePath: nil, language: "unknown-language",
-            buffer: "foo", cursorPosition: 3, selectionLength: 0,
-            isComposingText: false, triggerReason: .manual
-        )
+        let gate = LineCompletionGate()
+        let snapshot = makeSnapshot(language: "unknown-language", triggerReason: .manual)
 
-        XCTAssertTrue(policy.shouldRequest(for: snapshot, settings: .default))
+        XCTAssertTrue(gate.shouldRequest(for: snapshot, settings: .default, gapMs: 200, typedChar: nil, recentRejectionCount: 0))
     }
 
     func testAutomaticRequestIsSuppressedDuringTextComposition() {
-        let policy = CompletionTriggerPolicy()
-        let snapshot = InlineCompletionEditorSnapshot(
-            paneID: .primary, filePath: "/tmp/Test.swift", language: "swift",
-            buffer: "let value =", cursorPosition: 11, selectionLength: 0,
-            isComposingText: true, triggerReason: .automatic
-        )
+        let gate = LineCompletionGate()
+        let snapshot = makeSnapshot(isComposingText: true)
 
-        XCTAssertFalse(policy.shouldRequest(for: snapshot, settings: .default))
+        XCTAssertFalse(gate.shouldRequest(for: snapshot, settings: .default, gapMs: 200, typedChar: nil, recentRejectionCount: 0))
+    }
+
+    func testFastTypingSuppressesRequest() {
+        let gate = LineCompletionGate()
+        let snapshot = makeSnapshot()
+
+        XCTAssertFalse(gate.shouldRequest(for: snapshot, settings: .default, gapMs: 50, typedChar: "a", recentRejectionCount: 0))
+    }
+
+    func testTriggerCharacterOverridesFastTyping() {
+        let gate = LineCompletionGate()
+        let snapshot = makeSnapshot()
+
+        XCTAssertTrue(gate.shouldRequest(for: snapshot, settings: .default, gapMs: 50, typedChar: ".", recentRejectionCount: 0))
+    }
+
+    func testRejectCharacterSuppressesRequest() {
+        let gate = LineCompletionGate()
+        let snapshot = makeSnapshot()
+
+        XCTAssertFalse(gate.shouldRequest(for: snapshot, settings: .default, gapMs: 200, typedChar: ")", recentRejectionCount: 0))
+    }
+
+    func testRepeatedRejectionsSuppressRequest() {
+        let gate = LineCompletionGate()
+        let snapshot = makeSnapshot()
+
+        XCTAssertFalse(gate.shouldRequest(for: snapshot, settings: .default, gapMs: 200, typedChar: "a", recentRejectionCount: 3))
     }
 }
 
@@ -54,9 +82,6 @@ private extension InlineCompletionSettings {
             debounceMilliseconds: debounceMilliseconds,
             aggressiveness: aggressiveness,
             maxSuggestionLength: maxSuggestionLength,
-            multilineEnabled: multilineEnabled,
-            retrievalEnabled: retrievalEnabled,
-            routingMode: routingMode,
             debugOverlayEnabled: debugOverlayEnabled
         )
     }

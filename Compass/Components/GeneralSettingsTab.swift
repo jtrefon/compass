@@ -211,47 +211,6 @@ struct GeneralSettingsTab: View {
                     .disabled(!ui.inlineCompletionEnabled)
 
                     SettingsRow(
-                        title: NSLocalizedString("settings.inline_completion.multiline.title", comment: ""),
-                        subtitle: NSLocalizedString("settings.inline_completion.multiline.subtitle", comment: ""),
-                        systemImage: "text.justify.left"
-                    ) {
-                        Toggle("", isOn: inlineCompletionMultilineBinding)
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            .accessibilityIdentifier("Settings.InlineCompletion.Multiline")
-                    }
-                    .disabled(!ui.inlineCompletionEnabled)
-
-                    SettingsRow(
-                        title: NSLocalizedString("settings.inline_completion.retrieval.title", comment: ""),
-                        subtitle: NSLocalizedString("settings.inline_completion.retrieval.subtitle", comment: ""),
-                        systemImage: "magnifyingglass"
-                    ) {
-                        Toggle("", isOn: inlineCompletionRetrievalBinding)
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            .accessibilityIdentifier("Settings.InlineCompletion.Retrieval")
-                    }
-                    .disabled(!ui.inlineCompletionEnabled)
-
-                    SettingsRow(
-                        title: NSLocalizedString("settings.inline_completion.routing.title", comment: ""),
-                        subtitle: NSLocalizedString("settings.inline_completion.routing.subtitle", comment: ""),
-                        systemImage: "point.3.connected.trianglepath.dotted"
-                    ) {
-                        Picker("", selection: inlineCompletionRoutingModeBinding) {
-                            ForEach(InlineCompletionRoutingMode.allCases, id: \.self) { mode in
-                                Text(mode.settingsDisplayName)
-                                    .tag(mode)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 220)
-                        .accessibilityIdentifier("Settings.InlineCompletion.Routing")
-                    }
-                    .disabled(!ui.inlineCompletionEnabled)
-
-                    SettingsRow(
                         title: NSLocalizedString("settings.inline_completion.debug_overlay.title", comment: ""),
                         subtitle: NSLocalizedString("settings.inline_completion.debug_overlay.subtitle", comment: ""),
                         systemImage: "ladybug"
@@ -402,27 +361,6 @@ struct GeneralSettingsTab: View {
         )
     }
 
-    private var inlineCompletionMultilineBinding: Binding<Bool> {
-        Binding(
-            get: { ui.inlineCompletionMultilineEnabled },
-            set: { ui.setInlineCompletionMultilineEnabled($0) }
-        )
-    }
-
-    private var inlineCompletionRetrievalBinding: Binding<Bool> {
-        Binding(
-            get: { ui.inlineCompletionRetrievalEnabled },
-            set: { ui.setInlineCompletionRetrievalEnabled($0) }
-        )
-    }
-
-    private var inlineCompletionRoutingModeBinding: Binding<InlineCompletionRoutingMode> {
-        Binding(
-            get: { ui.inlineCompletionRoutingMode },
-            set: { ui.setInlineCompletionRoutingMode($0) }
-        )
-    }
-
     private var inlineCompletionDebugOverlayBinding: Binding<Bool> {
         Binding(
             get: { ui.inlineCompletionDebugOverlayEnabled },
@@ -445,20 +383,5 @@ struct GeneralSettingsTab: View {
             get: { statusBarVerbose },
             set: { statusBarVerbose = $0 }
         )
-    }
-}
-
-private extension InlineCompletionRoutingMode {
-    var settingsDisplayName: String {
-        switch self {
-        case .localOnly:
-            NSLocalizedString("settings.inline_completion.routing.local_only", comment: "")
-        case .remoteOnly:
-            NSLocalizedString("settings.inline_completion.routing.remote_only", comment: "")
-        case .hybridPreferLocal:
-            NSLocalizedString("settings.inline_completion.routing.hybrid_local", comment: "")
-        case .hybridPreferRemote:
-            NSLocalizedString("settings.inline_completion.routing.hybrid_remote", comment: "")
-        }
     }
 }

@@ -5,6 +5,7 @@ final class CodeEditorTextView: NSTextView {
     let foldingManager = CodeFoldingManager()
     private lazy var foldingDelegate = FoldingLayoutManagerDelegate(manager: foldingManager, textView: self)
     private let ghostTextView = CodeEditorTextView.makeGhostTextView()
+    private let inlineCompletionDropdown = InlineCompletionDropdownView()
     private var ghostPresentation: InlineSuggestionPresentation?
     private var scrollObs: NSKeyValueObservation?
 
@@ -20,11 +21,81 @@ final class CodeEditorTextView: NSTextView {
         ghostPresentation?.suggestionText
     }
 
+    var inlineCompletionDropdownVisible: Bool {
+        !inlineCompletionDropdown.isHidden
+    }
+
+    var selectedDropdownItem: String? {
+        inlineCompletionDropdown.selectedItem
+    }
+
+    // MARK: - Variant dropdown (FIM_VariantPools_Arch.md §5)
+
+    func showInlineCompletionDropdown(items: [String]) {
+        inlineCompletionDropdown.setItems(items)
+        guard !inlineCompletionDropdown.items.isEmpty else { return }
+        if inlineCompletionDropdown.superview == nil {
+            addSubview(inlineCompletionDropdown)
+        }
+        inlineCompletionDropdown.isHidden = false
+        ghostTextView.isHidden = true
+        positionInlineCompletionDropdown()
+    }
+
+    func updateInlineCompletionDropdown(items: [String]) {
+        guard inlineCompletionDropdownVisible else { return }
+        inlineCompletionDropdown.setItems(items)
+        if inlineCompletionDropdown.items.isEmpty {
+            hideInlineCompletionDropdown()
+        } else {
+            positionInlineCompletionDropdown()
+        }
+    }
+
+    func hideInlineCompletionDropdown() {
+        inlineCompletionDropdown.isHidden = true
+        if ghostPresentation != nil {
+            ghostTextView.isHidden = false
+        }
+    }
+
+    func moveDropdownSelection(up: Bool) -> Bool {
+        inlineCompletionDropdown.moveSelection(up: up)
+    }
+
+    private func positionInlineCompletionDropdown() {
+        guard let layoutManager, let textContainer else { return }
+        layoutManager.ensureLayout(for: textContainer)
+
+        let cursor = selectedRange.location
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: NSRange(location: cursor, length: 0), actualCharacterRange: nil)
+        var cursorRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        let origin = textContainerOrigin
+        cursorRect = cursorRect.offsetBy(dx: origin.x, dy: origin.y)
+
+        let height = inlineCompletionDropdown.frame.height
+        var y = cursorRect.minY + (font?.pointSize ?? 14) + 8
+        if y + height > bounds.height {
+            y = max(2, cursorRect.minY - height - 4)
+        }
+        let width = min(340, max(240, bounds.width - cursorRect.minX - 8))
+        inlineCompletionDropdown.frame = NSRect(
+            x: cursorRect.minX,
+            y: y,
+            width: width,
+            height: height
+        )
+    }
+
     override func viewWillMove(toSuperview newSuperview: NSView?) {
         super.viewWillMove(toSuperview: newSuperview)
         if newSuperview != nil {
             if ghostTextView.superview == nil {
                 addSubview(ghostTextView)
+            }
+            if inlineCompletionDropdown.superview == nil {
+                addSubview(inlineCompletionDropdown)
+                inlineCompletionDropdown.isHidden = true
             }
             observeScrollView()
         } else {
@@ -94,6 +165,9 @@ final class CodeEditorTextView: NSTextView {
 
 
     private func updateGhostTextFrame() {
+        if inlineCompletionDropdownVisible {
+            positionInlineCompletionDropdown()
+        }
         guard ghostPresentation != nil, !ghostTextView.isHidden else { return }
         guard let layoutManager, let textContainer else { return }
 

@@ -11,18 +11,14 @@ final class LineCompletionRankerTests: XCTestCase {
     ) -> InlineCompletionRequest {
         InlineCompletionRequest(
             requestId: UUID(),
-            filePath: nil,
             language: "swift",
             prefix: prefix,
             suffix: suffix,
-            cursorPosition: prefix.count,
-            scopeSummary: nil,
-            symbols: [],
-            retrievalContext: [],
             triggerReason: multiline ? .manual : .automatic,
             maxSuggestionLength: maxLength,
             maxTokens: max(10, maxLength / 3),
-            allowMultiline: multiline
+            bannedTokenIDs: [],
+            variantTemperature: nil
         )
     }
 

@@ -95,18 +95,6 @@ final class UIService: UIServiceProtocol {
         settingsStore.set(max(16, min(512, length)), forKey: AppConstantsStorage.inlineCompletionMaxLengthKey)
     }
 
-    func setInlineCompletionMultilineEnabled(_ enabled: Bool) {
-        settingsStore.set(enabled, forKey: AppConstantsStorage.inlineCompletionMultilineEnabledKey)
-    }
-
-    func setInlineCompletionRetrievalEnabled(_ enabled: Bool) {
-        settingsStore.set(enabled, forKey: AppConstantsStorage.inlineCompletionRetrievalEnabledKey)
-    }
-
-    func setInlineCompletionRoutingMode(_ mode: InlineCompletionRoutingMode) {
-        settingsStore.set(mode.rawValue, forKey: AppConstantsStorage.inlineCompletionRoutingModeKey)
-    }
-
     func setInlineCompletionDebugOverlayEnabled(_ enabled: Bool) {
         settingsStore.set(enabled, forKey: AppConstantsStorage.inlineCompletionDebugOverlayKey)
     }
@@ -209,9 +197,6 @@ final class UIService: UIServiceProtocol {
             inlineCompletionDebounceMilliseconds: inlineCompletionSettings.debounceMilliseconds,
             inlineCompletionAggressiveness: inlineCompletionSettings.aggressiveness,
             inlineCompletionMaxSuggestionLength: inlineCompletionSettings.maxSuggestionLength,
-            inlineCompletionMultilineEnabled: inlineCompletionSettings.multilineEnabled,
-            inlineCompletionRetrievalEnabled: inlineCompletionSettings.retrievalEnabled,
-            inlineCompletionRoutingMode: inlineCompletionSettings.routingMode,
             inlineCompletionDebugOverlayEnabled: inlineCompletionSettings.debugOverlayEnabled,
             sidebarWidth: sidebarWidth,
             terminalHeight: terminalHeight,
@@ -241,9 +226,6 @@ final class UIService: UIServiceProtocol {
         setInlineCompletionDebounceMilliseconds(settings.inlineCompletionDebounceMilliseconds)
         setInlineCompletionAggressiveness(settings.inlineCompletionAggressiveness)
         setInlineCompletionMaxSuggestionLength(settings.inlineCompletionMaxSuggestionLength)
-        setInlineCompletionMultilineEnabled(settings.inlineCompletionMultilineEnabled)
-        setInlineCompletionRetrievalEnabled(settings.inlineCompletionRetrievalEnabled)
-        setInlineCompletionRoutingMode(settings.inlineCompletionRoutingMode)
         setInlineCompletionDebugOverlayEnabled(settings.inlineCompletionDebugOverlayEnabled)
         setSidebarWidth(settings.sidebarWidth)
         setTerminalHeight(settings.terminalHeight)
@@ -271,9 +253,6 @@ final class UIService: UIServiceProtocol {
             AppConstantsStorage.inlineCompletionDebounceMsKey,
             AppConstantsStorage.inlineCompletionAggressivenessKey,
             AppConstantsStorage.inlineCompletionMaxLengthKey,
-            AppConstantsStorage.inlineCompletionMultilineEnabledKey,
-            AppConstantsStorage.inlineCompletionRetrievalEnabledKey,
-            AppConstantsStorage.inlineCompletionRoutingModeKey,
             AppConstantsStorage.inlineCompletionDebugOverlayKey
         ]
         keys.forEach { settingsStore.removeObject(forKey: $0) }
@@ -297,9 +276,6 @@ final class UIService: UIServiceProtocol {
             "inlineCompletionDebounceMilliseconds": settings.inlineCompletionDebounceMilliseconds,
             "inlineCompletionAggressiveness": settings.inlineCompletionAggressiveness,
             "inlineCompletionMaxSuggestionLength": settings.inlineCompletionMaxSuggestionLength,
-            "inlineCompletionMultilineEnabled": settings.inlineCompletionMultilineEnabled,
-            "inlineCompletionRetrievalEnabled": settings.inlineCompletionRetrievalEnabled,
-            "inlineCompletionRoutingMode": settings.inlineCompletionRoutingMode.rawValue,
             "inlineCompletionDebugOverlayEnabled": settings.inlineCompletionDebugOverlayEnabled,
             "sidebarWidth": settings.sidebarWidth,
             "terminalHeight": settings.terminalHeight,
@@ -328,9 +304,6 @@ final class UIService: UIServiceProtocol {
         applyInlineCompletionDebounceMilliseconds(from: settings)
         applyInlineCompletionAggressiveness(from: settings)
         applyInlineCompletionMaxSuggestionLength(from: settings)
-        applyInlineCompletionMultilineEnabled(from: settings)
-        applyInlineCompletionRetrievalEnabled(from: settings)
-        applyInlineCompletionRoutingMode(from: settings)
         applyInlineCompletionDebugOverlayEnabled(from: settings)
         applySidebarWidth(from: settings)
         applyTerminalHeight(from: settings)
@@ -418,24 +391,6 @@ final class UIService: UIServiceProtocol {
     private func applyInlineCompletionMaxSuggestionLength(from settings: [String: Any]) {
         guard let length = settings["inlineCompletionMaxSuggestionLength"] as? Int else { return }
         setInlineCompletionMaxSuggestionLength(length)
-    }
-
-    private func applyInlineCompletionMultilineEnabled(from settings: [String: Any]) {
-        guard let enabled = settings["inlineCompletionMultilineEnabled"] as? Bool else { return }
-        setInlineCompletionMultilineEnabled(enabled)
-    }
-
-    private func applyInlineCompletionRetrievalEnabled(from settings: [String: Any]) {
-        guard let enabled = settings["inlineCompletionRetrievalEnabled"] as? Bool else { return }
-        setInlineCompletionRetrievalEnabled(enabled)
-    }
-
-    private func applyInlineCompletionRoutingMode(from settings: [String: Any]) {
-        guard let rawValue = settings["inlineCompletionRoutingMode"] as? String,
-              let mode = InlineCompletionRoutingMode(rawValue: rawValue) else {
-            return
-        }
-        setInlineCompletionRoutingMode(mode)
     }
 
     private func applyInlineCompletionDebugOverlayEnabled(from settings: [String: Any]) {

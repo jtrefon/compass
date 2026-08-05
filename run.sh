@@ -440,6 +440,18 @@ run_harness() {
     else
         rm -f "$online_harness_marker"
     fi
+    # FIM benchmark knobs: app-hosted test processes cannot see env vars, so
+    # forward COMPASS_FIM_* via a config file in the test profile dir.
+    local fim_conf="$test_profile_dir/fim-bench.conf"
+    : > "$fim_conf"
+    local fim_key
+    for fim_key in COMPASS_FIM_TEMPERATURE COMPASS_FIM_TOP_P COMPASS_FIM_REPETITION_PENALTY \
+                   COMPASS_FIM_MAX_TOKENS COMPASS_FIM_CONTEXT_CHARS_PER_TOKEN \
+                   COMPASS_FIM_MAX_SUGGESTIONS COMPASS_FIM_REPEAT_ROUNDS; do
+        if [ -n "${!fim_key}" ]; then
+            echo "${fim_key}=${!fim_key}" >> "$fim_conf"
+        fi
+    done
     local prompts_root_default
     prompts_root_default="$(pwd)/Prompts"
     local resolved_prompts_root=""
@@ -485,6 +497,13 @@ run_harness() {
         "COMPASS_LOCAL_MODEL_TOP_P"
         "COMPASS_LOCAL_MODEL_REPETITION_PENALTY"
         "COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE"
+        "COMPASS_FIM_TEMPERATURE"
+        "COMPASS_FIM_TOP_P"
+        "COMPASS_FIM_REPETITION_PENALTY"
+        "COMPASS_FIM_MAX_TOKENS"
+        "COMPASS_FIM_CONTEXT_CHARS_PER_TOKEN"
+        "COMPASS_FIM_MAX_SUGGESTIONS"
+        "COMPASS_FIM_REPEAT_ROUNDS"
         "COMPASS_DEGRADE_ON_TRANSPORT_FAILURE"
         "COMPASS_FALLBACK_MODEL_ID"
         "COMPASS_CIRCUIT_FAILURE_THRESHOLD"
