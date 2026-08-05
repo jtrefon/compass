@@ -168,8 +168,10 @@ for the new context (cheap with KV reuse) rather than decoding stale branches.
   from the warm pool (zero inference behind it), ArrowUp/Down navigate,
   Tab/Enter accept the highlighted variant, Escape closes, typing closes,
   0.25s refresh timer while open, repositioned on scroll/layout.
-- **F. Docs + polish**: spec/benchmark updates, cache actor, snapshot off-main
-  — NEXT
+- **F. Docs + polish** ✅ DONE (2026-08-05): benchmark doc updated with
+  variant-pool results; spec non-goal pivoted (dropdown = warm-pool view).
+  Deferred polish (no jank measured, revisit if it appears): cache actor
+  extraction, snapshot building off-main.
 - **C. Engine integration**: accept-verify generalization, chain trigger,
   demotion, throttle, invalidation; engine tests
 - **D. Pool-recall + chain benchmarks** (quality/feasibility gate)
