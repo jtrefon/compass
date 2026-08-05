@@ -199,6 +199,18 @@ COMPASS_FIM_REPETITION_PENALTY=1.1 COMPASS_FIM_MAX_TOKENS=64 \
 
 Skips automatically when the FIM model is not installed.
 
+## Variant pools (2026-08-05 — FIM_VariantPools_Arch.md)
+
+| Metric | Value |
+|---|---|
+| Single-shot exact-match (corpus) | 23/49 (47%) |
+| **Pool-of-5 recall** (≥1 variant exact) | **29/49 (59%)** — +26% relative |
+| Warm variant cost (shared prefill, trim-back-K) | 131-162ms each |
+| 5-variant chain (warm) | ~0.6s total, fully background |
+| Banned-token determinism | same-prompt byte-identical; ban changes first token deterministically (286 → 853) |
+| Pool hit during typing | **zero** model calls (accept-verify over variants) |
+| Dropdown | Ctrl+Space, warm pool, no inference behind it |
+
 ## Next candidates
 
 1. **Stop generation at first newline** (biggest latency lever, ~45% cut,
