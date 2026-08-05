@@ -46,8 +46,8 @@ local chat all still work. The intelligence is on-device too.
 Requirements: **Apple Silicon Mac, macOS 26+**, Xcode 26+ for building from source.
 
 ```sh
-# Install via Homebrew (cask ships with v0.7)
-brew install --cask https://raw.githubusercontent.com/jtrefon/compass/main/Casks/compass.rb
+# Install via Homebrew (one command; auto-taps the cask)
+brew install --cask jtrefon/compass/compass
 
 # Or grab the latest DMG/ZIP from Releases
 # https://github.com/jtrefon/compass/releases
@@ -59,9 +59,9 @@ and search work immediately — no keys, no account, no network.
 For agentic coding, add your own API key (OpenRouter, Kilo, DeepSeek, any OpenAI-compatible
 endpoint) in Settings → Providers. Your key, your bill, your choice.
 
-> **The honest part:** builds are not notarized yet — Apple charges $99/year for that, and
-> Compass makes $0 until sponsors fund it (roadmap item, in the open). Your Mac will warn you
-> once: right-click → Open. The source is right here if you'd rather verify first.
+> **The honest part:** builds are not notarized yet. Compass ships without Apple's paid
+> notarization, like many open-source Mac apps; your Mac will ask you to confirm once
+> (right-click → Open). The source is right here if you'd rather verify first.
 
 ## What's shipping
 

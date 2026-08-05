@@ -23,16 +23,13 @@ import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, LATEST_MACOS } 
     <div class="container container-narrow">
       <div class="grid-2" style="gap:24px">
         <div class="card reveal" style="text-align:center;padding:32px">
-          <h3 style="font-size:1rem;margin-bottom:6px">Homebrew <span class="badge badge-beta" style="margin-left:4px">{BREW_AVAILABLE}</span></h3>
+          <h3 style="font-size:1rem;margin-bottom:6px">Homebrew <span class="badge badge-live" style="margin-left:4px">{BREW_AVAILABLE}</span></h3>
           <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">
-            The developer way: one command, easy updates. The cask ships with the v0.7 release.
+            The developer way: one command, works with the current release.
           </p>
           <div style="background:#0a0d13;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px 18px;font-family:var(--font-mono);font-size:.8rem;color:#9fe8c8;overflow-x:auto;white-space:nowrap;text-align:left">
             brew install --cask {INSTALL_BREW}
           </div>
-          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">
-            Until v0.7 lands, the DMG is the fastest path: one right-click → Open, and you're in.
-          </p>
         </div>
         <div class="card reveal" style="text-align:center;padding:32px">
           <h3 style="font-size:1rem;margin-bottom:6px">GitHub Releases</h3>
@@ -54,9 +51,9 @@ import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, LATEST_MACOS } 
       <p class="section-kicker reveal">The honest part</p>
       <h2 class="section-title reveal">About that Gatekeeper warning</h2>
       <p style="color:var(--text-dim);line-height:1.8;font-size:.95rem">
-        Compass isn't notarized yet. That's not an oversight, it's arithmetic: Apple charges $99/year
-        for notarization, and Compass currently makes $0. The moment sponsors cover it, every future
-        build is signed and your Mac trusts it out of the box. It's on the roadmap, in the open.
+        Compass ships without Apple's paid notarization, as most open-source Mac apps do. The
+        moment sponsorship covers the certificate, every future build is signed and your Mac
+        trusts it out of the box. It's on the roadmap, in the open.
       </p>
       <p style="color:var(--text-dim);line-height:1.8;font-size:.95rem;margin-top:12px">
         Until then, the first launch is a two-second ritual: <strong>right-click the app → Open →

@@ -7,10 +7,9 @@ export const SITE_URL = "https://jtrefon.github.io/compass";
 export const REPO = "https://github.com/jtrefon/compass";
 export const RELEASES = `${REPO}/releases`;
 
-export const INSTALL_BREW =
-  "brew install --cask https://raw.githubusercontent.com/jtrefon/compass/main/Casks/compass.rb";
-/** The brew cask ships with v0.7, the first release that builds Compass.app + compass.dmg */
-export const BREW_AVAILABLE = "v0.7";
+export const INSTALL_BREW = "jtrefon/compass/compass";
+/** Homebrew tap cask, live since v0.6: the fully-qualified token auto-taps */
+export const BREW_AVAILABLE = "Live";
 
 export const NAV = [
   { label: "Features", href: "/features" },
@@ -178,7 +177,7 @@ export const FAQ = [
   },
   {
     q: "It's not notarized. Is it safe?",
-    a: "MIT licensed, ~40k lines of Swift, CI green, and you can build it from source if you want to verify. The honest reason it's unsigned: Apple charges $99/year for notarization and Compass makes $0. Until sponsors fund it, your Mac will warn you once: right-click → Open, or use Homebrew. We'd rather be transparent than pretend.",
+    a: "MIT licensed, ~40k lines of Swift, CI green, and you can build it from source if you want to verify. Compass ships without Apple's paid notarization, like many open-source Mac apps; on first launch, right-click the app, choose Open, and confirm. We'd rather be transparent than pretend.",
   },
   {
     q: "One maintainer. Will this die like other projects?",
@@ -210,6 +209,6 @@ export const FAQ = [
   },
   {
     q: "How do I install it?",
-    a: "Homebrew with the cask (ships with v0.7). Until then: DMG from GitHub Releases, right-click → Open the first time. That's the whole ritual.",
+    a: "One command via Homebrew: brew install --cask jtrefon/compass/compass. Or grab the DMG from GitHub Releases. Either way, the first launch is a two-second confirmation: right-click → Open. That's the whole ritual.",
   },
 ] as const;
