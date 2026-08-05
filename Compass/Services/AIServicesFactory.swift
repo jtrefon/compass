@@ -133,16 +133,12 @@ enum AIServicesFactory {
     static func makeLineCompletionEngine(
         aiServices: AIServiceBundle
     ) -> LineCompletionEngine {
+        let provider = AIServiceInlineCompletionProvider()
+        let inferenceService = CompletionInferenceService(provider: provider)
+        let variantPoolService = VariantPoolService(provider: provider)
         return LineCompletionEngine(
-            inferenceService: CompletionInferenceService(
-                provider: AIServiceInlineCompletionProvider(
-                    remoteServiceProvider: {
-                        await aiServices.registry.activeRemoteService()
-                    },
-                    localServiceProvider: { aiServices.localModelService },
-                    localModelSelectionStore: aiServices.selectionStore
-                )
-            )
+            inferenceService: inferenceService,
+            variantPoolService: variantPoolService
         )
     }
 }

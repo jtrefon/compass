@@ -20,9 +20,6 @@ class InlineCompletionSettingsStore {
             debounceMilliseconds: storedDebounce == 0 ? defaults.debounceMilliseconds : max(50, min(800, storedDebounce)),
             aggressiveness: storedAggressiveness == 0 ? defaults.aggressiveness : max(0.05, min(1.0, storedAggressiveness)),
             maxSuggestionLength: storedMaxLength == 0 ? defaults.maxSuggestionLength : max(16, min(512, storedMaxLength)),
-            multilineEnabled: settingsStore.bool(forKey: AppConstantsStorage.inlineCompletionMultilineEnabledKey, default: defaults.multilineEnabled),
-            retrievalEnabled: settingsStore.bool(forKey: AppConstantsStorage.inlineCompletionRetrievalEnabledKey, default: defaults.retrievalEnabled),
-            routingMode: InlineCompletionRoutingMode(rawValue: settingsStore.string(forKey: AppConstantsStorage.inlineCompletionRoutingModeKey) ?? "") ?? defaults.routingMode,
             debugOverlayEnabled: settingsStore.bool(forKey: AppConstantsStorage.inlineCompletionDebugOverlayKey, default: defaults.debugOverlayEnabled)
         )
     }

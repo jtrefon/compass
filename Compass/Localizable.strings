@@ -255,16 +255,6 @@
 "settings.inline_completion.aggressiveness.subtitle" = "Bias more strongly toward short, confident completions.";
 "settings.inline_completion.max_length.title" = "Maximum suggestion length";
 "settings.inline_completion.max_length.subtitle" = "Cap the number of characters accepted from the model.";
-"settings.inline_completion.multiline.title" = "Manual multiline suggestions";
-"settings.inline_completion.multiline.subtitle" = "Allow multiline output when suggestions are requested manually.";
-"settings.inline_completion.retrieval.title" = "Retrieval context";
-"settings.inline_completion.retrieval.subtitle" = "Use same-file and indexed context when available.";
-"settings.inline_completion.routing.title" = "Routing mode";
-"settings.inline_completion.routing.subtitle" = "Choose whether automatic inference stays local or can use remote models.";
-"settings.inline_completion.routing.local_only" = "Local Only";
-"settings.inline_completion.routing.remote_only" = "Remote Only";
-"settings.inline_completion.routing.hybrid_local" = "Hybrid Prefer Local";
-"settings.inline_completion.routing.hybrid_remote" = "Hybrid Prefer Remote";
 "settings.inline_completion.debug_overlay.title" = "Debug overlay";
 "settings.inline_completion.debug_overlay.subtitle" = "Show live suggestion metadata over the editor.";
 

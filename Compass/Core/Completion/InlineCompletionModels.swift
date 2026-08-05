@@ -2,7 +2,6 @@ import Foundation
 
 enum InlineCompletionSource: String, Codable, CaseIterable, Sendable {
     case local
-    case remote
 }
 
 enum CompletionTriggerReason: String, Codable, CaseIterable, Sendable {
@@ -10,27 +9,19 @@ enum CompletionTriggerReason: String, Codable, CaseIterable, Sendable {
     case manual
 }
 
-enum InlineCompletionRoutingMode: String, Codable, CaseIterable, Sendable {
-    case localOnly
-    case remoteOnly
-    case hybridPreferLocal
-    case hybridPreferRemote
-}
-
 struct InlineCompletionRequest: Sendable {
     let requestId: UUID
-    let filePath: String?
     let language: String
     let prefix: String
     let suffix: String
-    let cursorPosition: Int
-    let scopeSummary: String?
-    let symbols: [String]
-    let retrievalContext: [String]
     let triggerReason: CompletionTriggerReason
     let maxSuggestionLength: Int
     let maxTokens: Int
-    let allowMultiline: Bool
+    /// Variant decoding (FIM_VariantPools_Arch.md §4): hard-excluded first
+    /// tokens of earlier variants + the variant's sampling temperature.
+    /// Empty on the standard path.
+    let bannedTokenIDs: [Int]
+    let variantTemperature: Float?
 }
 
 struct InlineCompletionResult: Sendable {
@@ -54,9 +45,6 @@ struct InlineCompletionSettings: Equatable, Sendable {
     let debounceMilliseconds: Int
     let aggressiveness: Double
     let maxSuggestionLength: Int
-    let multilineEnabled: Bool
-    let retrievalEnabled: Bool
-    let routingMode: InlineCompletionRoutingMode
     let debugOverlayEnabled: Bool
 
     static let `default` = InlineCompletionSettings(
@@ -70,9 +58,6 @@ struct InlineCompletionSettings: Equatable, Sendable {
         debounceMilliseconds: 0,
         aggressiveness: 0.6,
         maxSuggestionLength: 120,
-        multilineEnabled: true,
-        retrievalEnabled: false,
-        routingMode: .hybridPreferLocal,
         debugOverlayEnabled: {
 #if DEBUG
             true
@@ -101,6 +86,4 @@ struct InlineCompletionEditorSnapshot: Sendable {
 struct CompletionContextPayload: Sendable {
     let prefix: String
     let suffix: String
-    let scopeSummary: String?
-    let symbols: [String]
 }

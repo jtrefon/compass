@@ -62,15 +62,6 @@ class UIStateManager: ObservableObject {
     @Published var inlineCompletionMaxSuggestionLength: Int = InlineCompletionSettings.default.maxSuggestionLength {
         didSet { trackChange("inlineCompletionMaxSuggestionLength", from: oldValue, to: inlineCompletionMaxSuggestionLength) }
     }
-    @Published var inlineCompletionMultilineEnabled: Bool = InlineCompletionSettings.default.multilineEnabled {
-        didSet { trackChange("inlineCompletionMultilineEnabled", from: oldValue, to: inlineCompletionMultilineEnabled) }
-    }
-    @Published var inlineCompletionRetrievalEnabled: Bool = InlineCompletionSettings.default.retrievalEnabled {
-        didSet { trackChange("inlineCompletionRetrievalEnabled", from: oldValue, to: inlineCompletionRetrievalEnabled) }
-    }
-    @Published var inlineCompletionRoutingMode: InlineCompletionRoutingMode = InlineCompletionSettings.default.routingMode {
-        didSet { trackChange("inlineCompletionRoutingMode", from: oldValue.rawValue, to: inlineCompletionRoutingMode.rawValue) }
-    }
     @Published var inlineCompletionDebugOverlayEnabled: Bool = InlineCompletionSettings.default.debugOverlayEnabled {
         didSet { trackChange("inlineCompletionDebugOverlayEnabled", from: oldValue, to: inlineCompletionDebugOverlayEnabled) }
     }
@@ -217,21 +208,6 @@ class UIStateManager: ObservableObject {
         uiService.setInlineCompletionMaxSuggestionLength(inlineCompletionMaxSuggestionLength)
     }
 
-    func setInlineCompletionMultilineEnabled(_ enabled: Bool) {
-        inlineCompletionMultilineEnabled = enabled
-        uiService.setInlineCompletionMultilineEnabled(enabled)
-    }
-
-    func setInlineCompletionRetrievalEnabled(_ enabled: Bool) {
-        inlineCompletionRetrievalEnabled = enabled
-        uiService.setInlineCompletionRetrievalEnabled(enabled)
-    }
-
-    func setInlineCompletionRoutingMode(_ mode: InlineCompletionRoutingMode) {
-        inlineCompletionRoutingMode = mode
-        uiService.setInlineCompletionRoutingMode(mode)
-    }
-
     func setInlineCompletionDebugOverlayEnabled(_ enabled: Bool) {
         inlineCompletionDebugOverlayEnabled = enabled
         uiService.setInlineCompletionDebugOverlayEnabled(enabled)
@@ -294,9 +270,6 @@ class UIStateManager: ObservableObject {
         inlineCompletionDebounceMilliseconds = settings.inlineCompletionDebounceMilliseconds
         inlineCompletionAggressiveness = settings.inlineCompletionAggressiveness
         inlineCompletionMaxSuggestionLength = settings.inlineCompletionMaxSuggestionLength
-        inlineCompletionMultilineEnabled = settings.inlineCompletionMultilineEnabled
-        inlineCompletionRetrievalEnabled = settings.inlineCompletionRetrievalEnabled
-        inlineCompletionRoutingMode = settings.inlineCompletionRoutingMode
         inlineCompletionDebugOverlayEnabled = settings.inlineCompletionDebugOverlayEnabled
         sidebarWidth = settings.sidebarWidth
         terminalHeight = settings.terminalHeight
@@ -329,9 +302,6 @@ class UIStateManager: ObservableObject {
         inlineCompletionDebounceMilliseconds = InlineCompletionSettings.default.debounceMilliseconds
         inlineCompletionAggressiveness = InlineCompletionSettings.default.aggressiveness
         inlineCompletionMaxSuggestionLength = InlineCompletionSettings.default.maxSuggestionLength
-        inlineCompletionMultilineEnabled = InlineCompletionSettings.default.multilineEnabled
-        inlineCompletionRetrievalEnabled = InlineCompletionSettings.default.retrievalEnabled
-        inlineCompletionRoutingMode = InlineCompletionSettings.default.routingMode
         inlineCompletionDebugOverlayEnabled = InlineCompletionSettings.default.debugOverlayEnabled
         fontSize = AppConstants.Editor.defaultFontSize
         fontFamily = AppConstants.Editor.defaultFontFamily
