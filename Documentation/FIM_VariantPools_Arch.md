@@ -163,7 +163,13 @@ for the new context (cheap with KV reuse) rather than decoding stale branches.
   `testFIMVariantPoolRecall` — single-shot exact-match **23/49 (47%)** vs
   pool-of-5 recall **29/49 (59%)**, +6 sites (26% relative gain). The banned
   alternatives add real value. Quality gate passed.
-- **E. Dropdown UI**: component + keyboard nav (arrows/Tab/Enter/Escape) — NEXT
+- **E. Dropdown UI** ✅ DONE (2026-08-05): `InlineCompletionDropdownView`
+  (subview near the cursor, highlighted rows, 5 max); Ctrl+Space opens it
+  from the warm pool (zero inference behind it), ArrowUp/Down navigate,
+  Tab/Enter accept the highlighted variant, Escape closes, typing closes,
+  0.25s refresh timer while open, repositioned on scroll/layout.
+- **F. Docs + polish**: spec/benchmark updates, cache actor, snapshot off-main
+  — NEXT
 - **C. Engine integration**: accept-verify generalization, chain trigger,
   demotion, throttle, invalidation; engine tests
 - **D. Pool-recall + chain benchmarks** (quality/feasibility gate)

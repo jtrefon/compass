@@ -78,6 +78,12 @@ final class LineCompletionEngine {
         suggestionHandlers[paneID] = handler
     }
 
+    /// The pane's variant-pool alternatives (best-first) for the dropdown
+    /// (FIM_VariantPools_Arch.md §5). Empty when no pool exists.
+    func poolVariants(for paneID: FileEditorStateManager.PaneID) async -> [InlineCompletionVariant] {
+        await variantPoolService?.variants(paneID: paneID) ?? []
+    }
+
     func unregisterSuggestionHandler(for paneID: FileEditorStateManager.PaneID) {
         suggestionHandlers.removeValue(forKey: paneID)
     }

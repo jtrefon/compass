@@ -58,6 +58,11 @@ extension TextViewRepresentable {
                 parent.text = text
                 parent.selectedRange = range
                 lastKnownBufferText = text
+                // Typing closes the variant dropdown.
+                if let editor = attachedTextView as? CodeEditorTextView, editor.inlineCompletionDropdownVisible {
+                    editor.hideInlineCompletionDropdown()
+                    stopDropdownRefreshTimer()
+                }
                 updateSelectionContext(from: textView)
                 if !isProgrammaticUpdate {
                     scheduleAutomaticInlineCompletionIfNeeded(for: textView)
@@ -85,6 +90,70 @@ extension TextViewRepresentable {
                 engine.unregisterSuggestionHandler(for: paneID)
                 InlineCompletionDebugStore.shared.update(paneID: paneID, presentation: nil)
             }
+            stopDropdownRefreshTimer()
+        }
+
+        // MARK: - FIM variant dropdown
+
+        @MainActor
+        private func handleCompletionKey(in textView: NSTextView) -> Bool {
+            guard let codeEditorTextView = textView as? CodeEditorTextView else { return false }
+            if codeEditorTextView.inlineCompletionDropdownVisible {
+                codeEditorTextView.hideInlineCompletionDropdown()
+                stopDropdownRefreshTimer()
+                return true
+            }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let variants = await self.parent.lineCompletionEngine.poolVariants(for: self.parent.paneID)
+                let texts = variants.map(\.text)
+                guard !texts.isEmpty else { return }
+                codeEditorTextView.showInlineCompletionDropdown(items: texts)
+                self.startDropdownRefreshTimer()
+            }
+            return true
+        }
+
+        @MainActor
+        private func acceptDropdownSelection(in textView: NSTextView) -> Bool {
+            guard let codeEditorTextView = textView as? CodeEditorTextView,
+                  let text = codeEditorTextView.selectedDropdownItem else {
+                return false
+            }
+            let line = text.split(separator: "\n").first.map(String.init) ?? text
+            codeEditorTextView.insertText(line, replacementRange: codeEditorTextView.selectedRange)
+            parent.lineCompletionEngine.markAccepted(on: parent.paneID, suggestionText: text)
+            codeEditorTextView.hideInlineCompletionDropdown()
+            stopDropdownRefreshTimer()
+            parent.text = textView.string
+            parent.selectedRange = textView.selectedRange
+            updateSelectionContext(from: textView)
+            invalidateInlineCompletion()
+            return true
+        }
+
+        nonisolated(unsafe) private var dropdownRefreshTimer: Timer?
+
+        @MainActor
+        private func startDropdownRefreshTimer() {
+            stopDropdownRefreshTimer()
+            dropdownRefreshTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    guard let editor = self.attachedTextView as? CodeEditorTextView,
+                          editor.inlineCompletionDropdownVisible else {
+                        self.stopDropdownRefreshTimer()
+                        return
+                    }
+                    let variants = await self.parent.lineCompletionEngine.poolVariants(for: self.parent.paneID)
+                    editor.updateInlineCompletionDropdown(items: variants.map(\.text))
+                }
+            }
+        }
+
+        nonisolated private func stopDropdownRefreshTimer() {
+            dropdownRefreshTimer?.invalidate()
+            dropdownRefreshTimer = nil
         }
 
         // MARK: - Real-time editor behaviors
@@ -138,6 +207,32 @@ extension TextViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             guard let codeEditorTextView = textView as? CodeEditorTextView else {
                 return false
+            }
+
+            // FIM variant dropdown (FIM_VariantPools_Arch.md §5).
+            if commandSelector == #selector(NSResponder.complete(_:)) {
+                return handleCompletionKey(in: textView)
+            }
+            if codeEditorTextView.inlineCompletionDropdownVisible {
+                if commandSelector == #selector(NSResponder.insertTab(_:)) {
+                    return acceptDropdownSelection(in: textView)
+                }
+                if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                    return acceptDropdownSelection(in: textView)
+                }
+                if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                    codeEditorTextView.moveDropdownSelection(up: true)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                    codeEditorTextView.moveDropdownSelection(up: false)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                    codeEditorTextView.hideInlineCompletionDropdown()
+                    stopDropdownRefreshTimer()
+                    return true
+                }
             }
 
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {

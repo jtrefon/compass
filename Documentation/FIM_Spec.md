@@ -38,9 +38,11 @@ typing, and adapts to your typing speed.**
 
 ## 2. Non-goals (explicit — do not build)
 
-- Dropdown of N suggestions (measured: 3 sequential single-line predictions
-  = 4.3s small / 6.3s mid / 8.7s large files — not interactive). May be
-  revisited with the 4B model as an explicit user action.
+- Dropdown of N suggestions — rejected as *synchronous* generation (3
+  sequential predictions = 4.3s+), but now delivered as an **on-demand view of
+  the warm variant pool** (Ctrl+Space; arrows/Tab/Enter/Escape — see
+  `FIM_VariantPools_Arch.md` §5): zero added latency because the chain fills
+  the pool in the background while the user types.
 - Multi-line completions from the 1.5B FIM model (quality beyond poor,
   measured).
 - Per-keystroke re-prediction *without* KV-cache reuse (prefill recomputes;
