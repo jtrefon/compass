@@ -75,8 +75,8 @@ import { BASE_URL, REPO, PIPELINE_LOCAL, PIPELINE_CLOUD, REMOTE_PROVIDERS } from
         <div class="card reveal">
           <h3 style="font-size:1rem;margin-bottom:6px;font-family:var(--font-mono);color:var(--accent)">CodebaseIndex</h3>
           <p style="font-size:.85rem;color:var(--text-dim);line-height:1.6">
-            SQLite-backed index with <strong>FTS5 full-text search</strong>, symbol extraction, file watching, and chunk management.
-            The vector index uses <strong>HNSW</strong> over FAISS for embedding-based semantic search - <strong>10–50× faster</strong>
+            SQLite-backed index with symbol extraction, file watching, and chunk management.
+            The vector index uses <strong>HNSW</strong> over FAISS for embedding-based semantic search, <strong>10–50× faster</strong>
             than the original brute-force approach with ~95–99% recall.
           </p>
           <code style="margin-top:8px;display:inline-block">Services/Index/DatabaseManager.swift</code>
@@ -113,7 +113,7 @@ import { BASE_URL, REPO, PIPELINE_LOCAL, PIPELINE_CLOUD, REMOTE_PROVIDERS } from
             The cloud pipeline's retrieval layer with <strong>intent classification</strong>, evidence fusion ranking,
             code segment retrieval (HNSW-backed), symbol search, and project overview. Designed to inject
             relevant context without overloading the model. The local pipeline has its own on-device
-            retrieval — same philosophy, different hardware.
+            retrieval, same philosophy, different hardware.
           </p>
         </div>
         <div class="card reveal">
