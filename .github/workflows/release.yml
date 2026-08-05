@@ -193,8 +193,8 @@ jobs:
           ## Install
 
           - Download the DMG from this release, open it, and drag `Compass.app` into `Applications`.
-          - Homebrew convenience install:
-            `brew install --cask https://raw.githubusercontent.com/jtrefon/ai-ide/main/Casks/compass.rb`
+          - Homebrew convenience install (auto-taps the cask):
+            `brew install --cask jtrefon/compass/compass`
 
           ## macOS Security Note
 

@@ -474,18 +474,17 @@ import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, FEATURES_SHIPPI
       </p>
       <div class="grid-2" style="margin-top:20px">
         <div class="card reveal" style="text-align:center">
-          <h3 style="font-size:1rem;margin-bottom:8px">Homebrew <span class="badge badge-beta" style="margin-left:4px">{BREW_AVAILABLE}</span></h3>
-          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">One command, easy updates. Ships with the v0.7 release.</p>
+          <h3 style="font-size:1rem;margin-bottom:8px">Homebrew <span class="badge badge-live" style="margin-left:4px">{BREW_AVAILABLE}</span></h3>
+          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">One command, works with the current release.</p>
           <div class="terminal-block">brew install --cask {INSTALL_BREW}</div>
-          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">Until v0.7 lands, use the DMG below: the whole ritual is one right-click → Open.</p>
         </div>
         <div class="card reveal" style="text-align:center">
           <h3 style="font-size:1rem;margin-bottom:8px">GitHub Releases</h3>
           <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">Grab the latest DMG or ZIP directly from GitHub.</p>
           <a class="btn btn-primary" href={`${RELEASES}`} target="_blank" rel="noreferrer">Download latest</a>
           <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">
-            Not notarized: free and open source means no $99/year Apple fee until sponsors fund it.
-            Your Mac will warn you once.
+            Ships without Apple's paid notarization, like many open-source Mac apps. On first
+            launch, right-click the app, choose Open, and confirm. The full source is in the repo.
           </p>
         </div>
       </div>
