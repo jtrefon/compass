@@ -54,8 +54,11 @@ actor VariantPoolStore {
 
     /// The most specific pool whose anchor the typing path still passes
     /// through: the buffer region before the branch cursor must be unchanged
-    /// (it ends with the anchor). Backspace past the branch makes the newer
-    /// pool unmatchable and an older pool takes over.
+    /// (it ends with the anchor) AND the region after the branch cursor must
+    /// contain no newline — a new line means the context moved and the pool's
+    /// variants are stale (they were generated for the branch line). Backspace
+    /// past the branch makes the newer pool unmatchable and an older pool
+    /// takes over.
     func activePool(
         paneID: FileEditorStateManager.PaneID,
         bufferBeforeCursor: String
@@ -64,6 +67,9 @@ actor VariantPoolStore {
         var best: VariantPool?
         for var pool in pools {
             guard bufferBeforeCursor.count >= pool.anchorCursor else { continue }
+            // Newline after the branch point = the user moved to another line —
+            // the pool's variants were generated for the branch line.
+            guard !bufferBeforeCursor.dropFirst(pool.anchorCursor).contains("\n") else { continue }
             let branchRegion = bufferBeforeCursor.prefix(pool.anchorCursor)
             guard branchRegion.hasSuffix(pool.anchorPrefix) else { continue }
             if best == nil || pool.anchorPrefix.count > best!.anchorPrefix.count {

@@ -80,6 +80,14 @@ actor VariantPoolService {
         }
     }
 
+    /// Called by the engine on ANY new request: the running chain would keep
+    /// appending variants for a context that has moved. Pools stay (backtrack
+    /// still works); only the chain stops.
+    func cancelChain(paneID: FileEditorStateManager.PaneID) {
+        chainRevisions[paneID, default: 0] += 1
+        chainTasks[paneID]?.cancel()
+    }
+
     /// The active pool for the current buffer (longest-anchor match), if any.
     func activePool(paneID: FileEditorStateManager.PaneID, bufferBeforeCursor: String) async -> VariantPool? {
         await store.activePool(paneID: paneID, bufferBeforeCursor: bufferBeforeCursor)

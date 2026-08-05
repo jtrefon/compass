@@ -258,6 +258,29 @@ final class LineCompletionEngineTests: XCTestCase {
         XCTAssertEqual(provider.bansSeen.first ?? [], [100], "chained variants must ban the seed's first token")
     }
 
+    /// Consumption must happen BEFORE the gate: even during fast typing
+    /// (gapMs below the fast-typing threshold) the suggestion head is served
+    /// without a model call — the gate must never clear the ghost first.
+    func test_engine_fastTypingStillConsumesSuggestionHead() async throws {
+        let inference = TestLineInferenceService()
+        inference.responses = [.immediate("lor: red;")]
+        let engine = makeEngine(inference: inference)
+        let captured = CapturedLineSuggestions()
+        engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
+
+        engine.requestCompletion(for: snapshot(buffer: ".foo { c", cursor: 8), gapMs: 400, typedChar: "c")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(captured.lastSuggestion, "lor: red;")
+        XCTAssertEqual(inference.capturedRequests.count, 1)
+
+        // Fast keystroke extending the head — must consume, not gate-reject.
+        captured.reset()
+        engine.requestCompletion(for: snapshot(buffer: ".foo { cl", cursor: 9), gapMs: 50, typedChar: "l")
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(captured.lastSuggestion, "or: red;", "fast typing must still consume the head")
+        XCTAssertEqual(inference.capturedRequests.count, 1, "no model call on consumption")
+    }
+
     // MARK: - Helpers
 
     private func makeEngine(

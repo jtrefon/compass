@@ -103,21 +103,14 @@ final class LineCompletionEngine {
                 return
             }
 
-            let rejectCount = self.recentRejections[snapshot.paneID] ?? 0
-            guard self.gate.shouldRequest(
-                for: snapshot, settings: settings,
-                gapMs: gapMs, typedChar: typedChar, recentRejectionCount: rejectCount
-            ) else {
-                self.publish(nil, for: snapshot.paneID)
-                return
-            }
-
             let bufferBeforeCursor = String(snapshot.buffer.prefix(snapshot.cursorPosition))
             self.lastBufferBeforeCursor[snapshot.paneID] = bufferBeforeCursor
 
             // Pool consumption (accept-verify generalized over the variant
             // pool): serve the best variant whose head the buffer extends —
-            // no model call. A miss here is the deviation signal.
+            // no model call. Runs BEFORE the gate so fast typing never clears
+            // the ghost while the suggestion is being consumed. A miss here
+            // is the deviation signal.
             var hadSuggestionContext = false
             if let poolService = self.variantPoolService,
                let pool = await poolService.activePool(paneID: snapshot.paneID, bufferBeforeCursor: bufferBeforeCursor) {
@@ -141,6 +134,21 @@ final class LineCompletionEngine {
                         return
                     }
                 }
+            }
+
+            // The context moved (any request supersedes the running chain —
+            // it would keep appending stale variants for the old context).
+            if let poolService = self.variantPoolService {
+                await poolService.cancelChain(paneID: snapshot.paneID)
+            }
+
+            let rejectCount = self.recentRejections[snapshot.paneID] ?? 0
+            guard self.gate.shouldRequest(
+                for: snapshot, settings: settings,
+                gapMs: gapMs, typedChar: typedChar, recentRejectionCount: rejectCount
+            ) else {
+                self.publish(nil, for: snapshot.paneID)
+                return
             }
 
             if let cached = await self.resultCache.lookup(prefix: snapshot.buffer.prefix(snapshot.cursorPosition).suffix(100).description, suffix: snapshot.buffer.dropFirst(snapshot.cursorPosition).prefix(100).description) {
@@ -192,9 +200,13 @@ final class LineCompletionEngine {
                     confidenceScore: 0.5, source: .local, latencyMs: 0
                 )
                 if let final = result {
+                    // Cache keys must match the lookup window (last 100 chars
+                    // of prefix, first 100 of suffix) — previously the store
+                    // used the full assembler prefix, so lookups never hit.
                     await self.resultCache.store(
                         InlineSuggestionPresentation(requestId: final.requestId, suggestionText: final.suggestionText, source: final.source, confidenceScore: final.confidenceScore, latencyMs: final.latencyMs),
-                        prefix: context.prefix, suffix: context.suffix
+                        prefix: String(context.prefix.suffix(100)),
+                        suffix: String(context.suffix.prefix(100))
                     )
                 }
 

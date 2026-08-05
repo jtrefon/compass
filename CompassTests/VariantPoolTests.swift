@@ -40,6 +40,34 @@ final class VariantPoolStoreTests: XCTestCase {
         XCTAssertNil(active)
     }
 
+    /// The PHP scenario: a pool was anchored on line 3 ($plugin); the user
+    /// moves to a NEW line and types "$". The newline between the branch
+    /// point and the cursor must make the pool stale — otherwise its
+    /// temp-0.7 variants get served as garbage suggestions.
+    func testPoolIsStaleWhenCursorMovedToNewLine() async {
+        let store = VariantPoolStore(byteBudget: 1_000_000)
+        let branchBuffer = "$plugin->method();\n"
+        let pool = VariantPool(
+            id: UUID(), paneID: .primary,
+            anchorPrefix: String(branchBuffer.suffix(10)),
+            anchorCursor: branchBuffer.count,
+            variants: [InlineCompletionVariant(
+                id: UUID(), text: "$return", temperature: 0.7,
+                bannedTokenCount: 3, createdAt: Date(), rankScore: 0.5
+            )],
+            lastHitAt: Date(), byteSize: 0
+        )
+        await store.upsert(pool)
+
+        // Same line continuation → pool active.
+        let sameLine = await store.activePool(paneID: .primary, bufferBeforeCursor: branchBuffer + "->")
+        XCTAssertNotNil(sameLine, "continuing on the same line keeps the pool active")
+
+        // New line → stale.
+        let newLine = await store.activePool(paneID: .primary, bufferBeforeCursor: branchBuffer + "\n$")
+        XCTAssertNil(newLine, "a newline after the branch point must invalidate the pool")
+    }
+
     func testEvictionUnderByteBudgetEvictsLRU() async {
         let store = VariantPoolStore(byteBudget: 500)
         await store.upsert(makePool(anchor: "first", cursor: 5))
