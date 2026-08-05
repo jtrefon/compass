@@ -68,7 +68,7 @@ endpoint) in Settings → Providers. Your key, your bill, your choice.
 - **Real FIM completion** — ghost text in <100ms from a 4B on-device model, not a remote
   round-trip, not a fake heuristic
 - **Private local chat** — ask questions, bounce ideas, get a second pair of eyes, entirely on-device
-- **ANE-accelerated RAG** — SQLite FTS5 + HNSW/FAISS retrieval, embeddings on the Apple Neural Engine
+- **ANE-accelerated RAG** — SQLite index + HNSW/FAISS retrieval, embeddings on the Apple Neural Engine
 - **Agentic coding, your provider** — Planner → Worker → QA orchestration, 20+ tools, harness-tested
 - **Built-in terminal & browser**, tree-sitter highlighting across 20+ languages, per-project
   system prompts, command palette, project state persistence
