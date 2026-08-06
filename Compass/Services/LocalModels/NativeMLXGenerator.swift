@@ -330,9 +330,16 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 }
 
                 if !skipReuse, commonLen < promptTokenIds.count {
+                    // Suffix must be 1-D: the TokenIterator adds the batch
+                    // axis itself (`step` applies [text: .newAxis]). A 2-D
+                    // suffix produced a 4-D (B,1,S,H) model input, so the
+                    // sequence length was read as 1 and the Qwen3.5 linear
+                    // layers crashed their reshape on the second request.
                     let suffixTokens = Array(promptTokenIds[commonLen...])
-                    let suffixArray = MLXArray(suffixTokens).expandedDimensions(axis: 0)
-                    effectiveInput = LMInput(text: LMInput.Text(tokens: suffixArray), image: nil, video: nil)
+                    effectiveInput = LMInput(
+                        text: LMInput.Text(tokens: MLXArray(suffixTokens)),
+                        image: nil, video: nil
+                    )
                     kvCache = reuseCache
                 } else if !skipReuse, commonLen == promptTokenIds.count {
                     // Exact-prefix case: the cache already holds ALL prompt
