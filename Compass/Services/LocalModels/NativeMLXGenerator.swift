@@ -802,47 +802,50 @@ actor NativeMLXGenerator: LocalModelGenerating {
         configuration _: ModelConfiguration,
         modelDirectory: URL
     ) async throws -> ModelContainer {
-        struct LocalTokenizerLoader: MLXLMCommon.TokenizerLoader {
-            let directory: URL
-            func load(from _: URL) async throws -> any MLXLMCommon.Tokenizer {
-                let upstream = try await AutoTokenizer.from(modelFolder: directory)
-                struct Bridge: MLXLMCommon.Tokenizer {
-                    let upstream: any Tokenizers.Tokenizer
-                    func encode(text: String, addSpecialTokens: Bool) -> [Int] {
-                        upstream.encode(text: text, addSpecialTokens: addSpecialTokens)
-                    }
-                    func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String {
-                        upstream.decode(tokens: tokenIds, skipSpecialTokens: skipSpecialTokens)
-                    }
-                    func convertTokenToId(_ token: String) -> Int? {
-                        upstream.convertTokenToId(token)
-                    }
-                    func convertIdToToken(_ id: Int) -> String? {
-                        upstream.convertIdToToken(id)
-                    }
-                    var bosToken: String? { upstream.bosToken }
-                    var eosToken: String? { upstream.eosToken }
-                    var unknownToken: String? { upstream.unknownToken }
-                    func applyChatTemplate(
-                        messages: [[String: any Sendable]],
-                        tools: [[String: any Sendable]]?,
-                        additionalContext: [String: any Sendable]?
-                    ) throws -> [Int] {
-                        do {
-                            return try upstream.applyChatTemplate(
-                                messages: messages, tools: tools,
-                                additionalContext: additionalContext)
-                        } catch Tokenizers.TokenizerError.missingChatTemplate {
-                            throw MLXLMCommon.TokenizerError.missingChatTemplate
-                        }
-                    }
-                }
-                return Bridge(upstream: upstream)
-            }
-        }
         let tokenizerLoader = LocalTokenizerLoader(directory: modelDirectory)
         // Fixed chat model (Qwen3.5-4B) is text-only — always the LLM factory.
         return try await LLMModelFactory.shared.loadContainer(
             from: modelDirectory, using: tokenizerLoader)
+    }
+}
+
+/// Bridges the huggingface swift-transformers AutoTokenizer into the
+/// MLXLMCommon.Tokenizer protocol (model loading requires it).
+struct LocalTokenizerLoader: MLXLMCommon.TokenizerLoader {
+    let directory: URL
+    func load(from _: URL) async throws -> any MLXLMCommon.Tokenizer {
+        let upstream = try await AutoTokenizer.from(modelFolder: directory)
+        struct Bridge: MLXLMCommon.Tokenizer {
+            let upstream: any Tokenizers.Tokenizer
+            func encode(text: String, addSpecialTokens: Bool) -> [Int] {
+                upstream.encode(text: text, addSpecialTokens: addSpecialTokens)
+            }
+            func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String {
+                upstream.decode(tokens: tokenIds, skipSpecialTokens: skipSpecialTokens)
+            }
+            func convertTokenToId(_ token: String) -> Int? {
+                upstream.convertTokenToId(token)
+            }
+            func convertIdToToken(_ id: Int) -> String? {
+                upstream.convertIdToToken(id)
+            }
+            var bosToken: String? { upstream.bosToken }
+            var eosToken: String? { upstream.eosToken }
+            var unknownToken: String? { upstream.unknownToken }
+            func applyChatTemplate(
+                messages: [[String: any Sendable]],
+                tools: [[String: any Sendable]]?,
+                additionalContext: [String: any Sendable]?
+            ) throws -> [Int] {
+                do {
+                    return try upstream.applyChatTemplate(
+                        messages: messages, tools: tools,
+                        additionalContext: additionalContext)
+                } catch Tokenizers.TokenizerError.missingChatTemplate {
+                    throw MLXLMCommon.TokenizerError.missingChatTemplate
+                }
+            }
+        }
+        return Bridge(upstream: upstream)
     }
 }
