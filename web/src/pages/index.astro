@@ -1,7 +1,7 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import ProductShot from "../components/ProductShot.astro";
-import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE, ROADMAP, FAQ, SITE_TITLE, SITE_DESCRIPTION } from "../consts";
+import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, INSTALL_CURL, INSTALL_SCRIPT_URL, FEATURES_SHIPPING, FEATURES_BETA, COMPETITIVE, ROADMAP, FAQ, SITE_TITLE, SITE_DESCRIPTION } from "../consts";
 ---
 
 <BaseLayout title={SITE_TITLE} description={SITE_DESCRIPTION} canonical={`${BASE_URL}/`}>
@@ -479,15 +479,21 @@ import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, FEATURES_SHIPPI
           <div class="terminal-block">brew install --cask {INSTALL_BREW}</div>
         </div>
         <div class="card reveal" style="text-align:center">
-          <h3 style="font-size:1rem;margin-bottom:8px">GitHub Releases</h3>
-          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">Grab the latest DMG or ZIP directly from GitHub.</p>
-          <a class="btn btn-primary" href={`${RELEASES}`} target="_blank" rel="noreferrer">Download latest</a>
+          <h3 style="font-size:1rem;margin-bottom:8px">One-line installer</h3>
+          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">Downloads the latest release and checks its signature.</p>
+          <div class="terminal-block">{INSTALL_CURL}</div>
           <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">
-            Ships without Apple's paid notarization, like many open-source Mac apps. On first
-            launch, right-click the app, choose Open, and confirm. The full source is in the repo.
+            The installer is open source: <a href={INSTALL_SCRIPT_URL} target="_blank" rel="noreferrer">read install.sh</a>
           </p>
         </div>
       </div>
+      <div style="display:flex;justify-content:center;margin-top:20px">
+        <a class="btn btn-secondary" href={`${RELEASES}`} target="_blank" rel="noreferrer">Or grab the latest release from GitHub</a>
+      </div>
+      <p style="font-size:.78rem;color:var(--text-faint);text-align:center;margin-top:12px">
+        Ships without Apple's paid notarization, like many open-source Mac apps. On first launch,
+        right-click the app, choose Open, and confirm. The full source is in the repo.
+      </p>
     </div>
   </section>
 

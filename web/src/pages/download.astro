@@ -1,6 +1,6 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
-import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, LATEST_MACOS } from "../consts";
+import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, INSTALL_CURL, INSTALL_SCRIPT_URL, LATEST_MACOS } from "../consts";
 ---
 
 <BaseLayout
@@ -21,7 +21,20 @@ import { BASE_URL, REPO, RELEASES, INSTALL_BREW, BREW_AVAILABLE, LATEST_MACOS } 
 
   <section class="section section-alt" style="padding-top:0">
     <div class="container container-narrow">
-      <div class="grid-2" style="gap:24px">
+      <div class="grid-3" style="gap:24px">
+        <div class="card reveal" style="text-align:center;padding:32px">
+          <h3 style="font-size:1rem;margin-bottom:6px">One-line installer</h3>
+          <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">
+            Downloads the latest release, checks the signature, and installs to
+            <code>/Applications</code>. Open source, in the repo.
+          </p>
+          <div style="background:#0a0d13;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px 18px;font-family:var(--font-mono);font-size:.8rem;color:#9fe8c8;overflow-x:auto;white-space:nowrap;text-align:left">
+            {INSTALL_CURL}
+          </div>
+          <p style="font-size:.78rem;color:var(--text-faint);margin-top:12px">
+            Read it first if you like: <a href={INSTALL_SCRIPT_URL} target="_blank" rel="noreferrer">install.sh</a>
+          </p>
+        </div>
         <div class="card reveal" style="text-align:center;padding:32px">
           <h3 style="font-size:1rem;margin-bottom:6px">Homebrew <span class="badge badge-live" style="margin-left:4px">{BREW_AVAILABLE}</span></h3>
           <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:16px">

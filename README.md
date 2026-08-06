@@ -2,7 +2,7 @@
 
 > AI coding that respects your machine.
 
-**Compass is a native AI IDE for macOS** — agentic coding with your own provider and keys, plus
+**Compass is a native AI IDE for macOS**: agentic coding with your own provider and keys, plus
 on-device RAG, FIM completion, and local chat that work fully offline. ~200MB, MIT licensed,
 no Electron, no lock-in.
 
@@ -31,7 +31,7 @@ Liquid Glass, Apple Neural Engine) with two deliberately separate AI pipelines:
 | Network | None required. Ever. | Required for agentic work |
 
 The local model never orchestrates. The cloud model never runs inline completion. Each does what
-it's best at — that's the whole architecture in one sentence.
+it's best at: that's the whole architecture in one sentence.
 
 **Vibe code at full speed.** Bring the best model in the world, run the full agentic pipeline at
 native speed, pay your provider's rate — not a per-seat tax.
@@ -49,12 +49,15 @@ Requirements: **Apple Silicon Mac, macOS 26+**, Xcode 26+ for building from sour
 # Install via Homebrew (one command; auto-taps the cask)
 brew install --cask jtrefon/compass/compass
 
+# Or the one-line installer (downloads the latest release, checks the signature):
+curl -fsSL https://raw.githubusercontent.com/jtrefon/compass/main/install.sh | bash
+
 # Or grab the latest DMG/ZIP from Releases
 # https://github.com/jtrefon/compass/releases
 ```
 
 First launch: Compass indexes your project and pulls the on-device model. Local completion, chat,
-and search work immediately — no keys, no account, no network.
+and search work immediately: no keys, no account, no network.
 
 For agentic coding, add your own API key (OpenRouter, Kilo, DeepSeek, any OpenAI-compatible
 endpoint) in Settings → Providers. Your key, your bill, your choice.
