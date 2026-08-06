@@ -9,6 +9,7 @@
 ./run.sh harness          # Headless integration tests
 ./run.sh e2e              # XCUITest suites
 ./run.sh check-prompts    # Guardrail: no orphan prompt files (no code reference)
+./run.sh benchmark-local  # Local chat KPI benchmark (Qwen3.5-4B); knobs via COMPASS_LOCAL_MODEL_*
 ./run.sh clean            # rm -rf .build .build-tests + xcodebuild clean
 ```
 

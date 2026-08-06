@@ -202,6 +202,8 @@ show_help() {
     echo "         Examples: ./run.sh harness-offline | ./run.sh harness-offline StripMarkupTest"
     echo "  benchmark-offline Run offline inference benchmark harnesses"
     echo "         Examples: ./run.sh benchmark-offline | ./run.sh benchmark-offline sweep"
+    echo "  benchmark-local  Run the local chat KPI benchmark (Qwen3.5-4B)"
+    echo "         Example: COMPASS_LOCAL_MODEL_PREFILL_STEP_SIZE=512 ./run.sh benchmark-local"
     echo "  benchmark  Run the core benchmark suites (embeddings + metrics); JSON in .build-tests/benchmarks/"
     echo "  lint   Run SwiftLint locally (advisory — see .swiftlint.yml)"
     echo "  check-prompts Verify every prompt file under Prompts/ has a code reference (no orphan prompts)"
@@ -618,6 +620,63 @@ run_benchmark() {
     return $bench_rc
 }
 
+run_benchmark_local() {
+    local explicit_modules="${SWIFT_ENABLE_EXPLICIT_MODULES:-NO}"
+    echo "Running local chat benchmark (LocalBenchmarkHarnessTests)..."
+    prepare_derived_data_packages "$DERIVED_DATA_PATH_TEST"
+    quarantine_paired_ios_devices
+    local harness_memory_limit_gb="${HARNESS_MAX_RSS_GB:-10}"
+    echo "Harness memory guard enabled: ${harness_memory_limit_gb}GB limit"
+    local harness_memory_limit_mb=$((harness_memory_limit_gb * 1024))
+    local local_model_memory_limit_mb="${COMPASS_LOCAL_MODEL_MAX_RSS_MB:-$((harness_memory_limit_mb - 512))}"
+    local test_profile_dir
+    test_profile_dir="${HARNESS_TEST_PROFILE_DIR:-$(pwd)/.build-tests/harness-test-profile}"
+    mkdir -p "$test_profile_dir"
+    write_test_profile_defaults "$test_profile_dir"
+    # Local-chat benchmark knobs: app-hosted test processes cannot see env
+    # vars, so forward COMPASS_LOCAL_MODEL_* via a conf file in the test
+    # profile dir (read by LocalModelInferenceOverrides).
+    local bench_conf="$test_profile_dir/local-bench.conf"
+    : > "$bench_conf"
+    local bench_key
+    for bench_key in COMPASS_LOCAL_MODEL_TEMPERATURE COMPASS_LOCAL_MODEL_TOP_P \
+                     COMPASS_LOCAL_MODEL_REPETITION_PENALTY COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE \
+                     COMPASS_LOCAL_MODEL_CONTEXT_LENGTH COMPASS_LOCAL_MODEL_MAX_KV_SIZE \
+                     COMPASS_LOCAL_MODEL_MAX_OUTPUT_TOKENS COMPASS_LOCAL_MODEL_PREFILL_STEP_SIZE \
+                     COMPASS_LOCAL_MODEL_KV_CACHE_4BIT; do
+        if [ -n "${!bench_key}" ]; then
+            echo "${bench_key}=${!bench_key}" >> "$bench_conf"
+        fi
+    done
+    local prompts_root_default
+    prompts_root_default="$(pwd)/Prompts"
+    local runtime_env_args=("COMPASS_PROMPTS_ROOT=$prompts_root_default" "COMPASS_TEST_PROFILE_DIR=$test_profile_dir" "TEST_RUNNER_ENV_COMPASS_TEST_PROFILE_DIR=$test_profile_dir" "COMPASS_LOCAL_MODEL_MAX_RSS_MB=$local_model_memory_limit_mb")
+    if [ -n "$LOCAL_BENCH_TASKS" ]; then
+        echo "LOCAL_BENCH_TASKS=$LOCAL_BENCH_TASKS" >> "$bench_conf"
+    fi
+    if [ -n "$LOCAL_BENCH_ITERATIONS" ]; then
+        echo "LOCAL_BENCH_ITERATIONS=$LOCAL_BENCH_ITERATIONS" >> "$bench_conf"
+    fi
+    local bench_rc=0
+    run_with_memory_guard "$harness_memory_limit_gb" \
+        env "${runtime_env_args[@]}" xcodebuild -project "$PROJECT_NAME.xcodeproj" \
+              -scheme "$SCHEME" \
+              -configuration Debug \
+              -derivedDataPath "$DERIVED_DATA_PATH_TEST" \
+              -destination 'platform=macOS' \
+              -parallel-testing-enabled NO \
+              ENABLE_PREVIEWS=NO \
+              SWIFT_ENABLE_EXPLICIT_MODULES="$explicit_modules" \
+              test \
+              -only-testing:CompassHarnessTests/LocalBenchmarkHarnessTests \
+              -skip-testing:CompassUITests \
+              -skip-testing:CompassTests
+    bench_rc=$?
+    restore_quarantined_ios_devices
+    echo "[LOCAL-BENCH] rows: <project>/.ide/logs/local-bench.ndjson"
+    return $bench_rc
+}
+
 run_e2e() {
     local suite=$1
     local explicit_modules="${SWIFT_ENABLE_EXPLICIT_MODULES:-NO}"
@@ -716,6 +775,9 @@ case "$COMMAND" in
         ;;
     benchmark-offline)
         run_benchmark_offline "$2"
+        ;;
+    benchmark-local)
+        run_benchmark_local
         ;;
     check-prompts)
         check_prompts

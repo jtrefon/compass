@@ -17,9 +17,12 @@ struct LocalModelInferenceConfiguration: Sendable, Equatable, Hashable {
 }
 
 enum LocalModelInferenceOverrides {
-    /// Resolves the inference configuration from env vars over production
-    /// defaults. Env knobs are the experiment surface (run.sh forwards them
-    /// to the harness process, mirroring the FIM benchmark conf pattern).
+    /// Resolves the inference configuration from env vars / the benchmark
+    /// conf file over production defaults. Env knobs are the experiment
+    /// surface (run.sh forwards them to the harness process, mirroring the
+    /// FIM benchmark conf pattern): direct env wins, then the conf file in
+    /// the test-profile dir (harness runs cannot rely on env passthrough),
+    /// then defaults.
     static func resolve(
         defaultContextLength: Int,
         defaultMaxOutputTokens: Int,
@@ -30,14 +33,19 @@ enum LocalModelInferenceOverrides {
         defaultKVCache4BitEnabled: Bool
     ) -> LocalModelInferenceConfiguration {
         let environment = ProcessInfo.processInfo.environment
-        let envContext = parseInt(environment["COMPASS_LOCAL_MODEL_CONTEXT_LENGTH"])
-        let envMaxKV = parseInt(environment["COMPASS_LOCAL_MODEL_MAX_KV_SIZE"])
-        let envMaxOutput = parseInt(environment["COMPASS_LOCAL_MODEL_MAX_OUTPUT_TOKENS"])
-        let envPrefill = parseInt(environment["COMPASS_LOCAL_MODEL_PREFILL_STEP_SIZE"])
-        let envTemperature = parseFloat(environment["COMPASS_LOCAL_MODEL_TEMPERATURE"])
-        let envTopP = parseFloat(environment["COMPASS_LOCAL_MODEL_TOP_P"])
-        let envRepetitionPenalty = parseOptionalFloat(environment["COMPASS_LOCAL_MODEL_REPETITION_PENALTY"])
-        let envRepetitionContextSize = parseInt(environment["COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE"])
+        let conf = benchmarkConfValues(environment: environment)
+        func value(_ key: String) -> String? {
+            environment[key].flatMap { $0.isEmpty ? nil : $0 } ?? conf[key]
+        }
+        let envContext = parseInt(value("COMPASS_LOCAL_MODEL_CONTEXT_LENGTH"))
+        let envMaxKV = parseInt(value("COMPASS_LOCAL_MODEL_MAX_KV_SIZE"))
+        let envMaxOutput = parseInt(value("COMPASS_LOCAL_MODEL_MAX_OUTPUT_TOKENS"))
+        let envPrefill = parseInt(value("COMPASS_LOCAL_MODEL_PREFILL_STEP_SIZE"))
+        let envTemperature = parseFloat(value("COMPASS_LOCAL_MODEL_TEMPERATURE"))
+        let envTopP = parseFloat(value("COMPASS_LOCAL_MODEL_TOP_P"))
+        let envRepetitionPenalty = parseOptionalFloat(value("COMPASS_LOCAL_MODEL_REPETITION_PENALTY"))
+        let envRepetitionContextSize = parseInt(value("COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE"))
+        let envKV4Bit = value("COMPASS_LOCAL_MODEL_KV_CACHE_4BIT")
 
         let contextLength = clamp(
             envContext ?? defaultContextLength,
@@ -54,9 +62,7 @@ enum LocalModelInferenceOverrides {
             min: 64,
             max: 8_192
         )
-        let kvCache4BitEnabled = environment["COMPASS_LOCAL_MODEL_KV_CACHE_4BIT"] == "0"
-            ? false
-            : defaultKVCache4BitEnabled
+        let kvCache4BitEnabled = envKV4Bit == "0" ? false : defaultKVCache4BitEnabled
         let prefillStepSize = clamp(
             envPrefill ?? 128,
             min: 64,
@@ -89,6 +95,34 @@ enum LocalModelInferenceOverrides {
             repetitionContextSize: repetitionContextSize,
             kvCache4BitEnabled: kvCache4BitEnabled
         )
+    }
+
+    /// Reads `<test-profile-dir>/local-bench.conf` (written by run.sh from
+    /// the COMPASS_LOCAL_MODEL_* env vars) — app-hosted test processes can't
+    /// see the caller's env, so the conf file is the transport. The profile
+    /// dir comes from the same marker file the FIM harness uses.
+    private static func benchmarkConfValues(environment: [String: String]) -> [String: String] {
+        let profileDir = environment["COMPASS_TEST_PROFILE_DIR"]
+            ?? (try? String(contentsOf: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/compass-test-profile-path"),
+                encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let profileDir, !profileDir.isEmpty,
+              let conf = try? String(
+                contentsOf: URL(fileURLWithPath: profileDir).appendingPathComponent("local-bench.conf"),
+                encoding: .utf8
+              ) else {
+            return [:]
+        }
+        var values: [String: String] = [:]
+        for line in conf.split(separator: "\n") {
+            let parts = line.split(separator: "=", maxSplits: 1)
+            if parts.count == 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespaces)
+                let val = parts[1].trimmingCharacters(in: .whitespaces)
+                if !key.isEmpty && !val.isEmpty { values[key] = val }
+            }
+        }
+        return values
     }
 
     nonisolated private static func parseInt(_ rawValue: String?) -> Int? {
