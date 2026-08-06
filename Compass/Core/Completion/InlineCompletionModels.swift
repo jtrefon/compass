@@ -42,7 +42,6 @@ struct InlineSuggestionPresentation: Equatable, Sendable {
 
 struct InlineCompletionSettings: Equatable, Sendable {
     let isEnabled: Bool
-    let debounceMilliseconds: Int
     let aggressiveness: Double
     let maxSuggestionLength: Int
     let debugOverlayEnabled: Bool
@@ -55,9 +54,10 @@ struct InlineCompletionSettings: Equatable, Sendable {
             AppRuntimeEnvironment.launchContext.isTesting
 #endif
         }(),
-        debounceMilliseconds: 0,
         aggressiveness: 0.6,
-        maxSuggestionLength: 120,
+        // Single-line premise (FIM_Spec.md §4): the budget matches the engine's
+        // output tokens; the renderer clamps at one line anyway.
+        maxSuggestionLength: 64,
         debugOverlayEnabled: {
 #if DEBUG
             true

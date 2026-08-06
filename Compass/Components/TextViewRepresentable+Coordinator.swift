@@ -39,6 +39,7 @@ extension TextViewRepresentable {
             self.attachedTextView = textView
             configureInlineCompletionHandlers()
             setupMutationSubscription()
+            setupPoolChangeObservation()
         }
 
         private func setupMutationSubscription() {
@@ -61,7 +62,6 @@ extension TextViewRepresentable {
                 // Typing closes the variant dropdown.
                 if let editor = attachedTextView as? CodeEditorTextView, editor.inlineCompletionDropdownVisible {
                     editor.hideInlineCompletionDropdown()
-                    stopDropdownRefreshTimer()
                 }
                 updateSelectionContext(from: textView)
                 if !isProgrammaticUpdate {
@@ -90,7 +90,6 @@ extension TextViewRepresentable {
                 engine.unregisterSuggestionHandler(for: paneID)
                 InlineCompletionDebugStore.shared.update(paneID: paneID, presentation: nil)
             }
-            stopDropdownRefreshTimer()
         }
 
         // MARK: - FIM variant dropdown
@@ -100,16 +99,18 @@ extension TextViewRepresentable {
             guard let codeEditorTextView = textView as? CodeEditorTextView else { return false }
             if codeEditorTextView.inlineCompletionDropdownVisible {
                 codeEditorTextView.hideInlineCompletionDropdown()
-                stopDropdownRefreshTimer()
                 return true
             }
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let variants = await self.parent.lineCompletionEngine.poolVariants(for: self.parent.paneID)
                 let texts = variants.map(\.text)
-                guard !texts.isEmpty else { return }
+                guard !texts.isEmpty else {
+                    FIMTraceLogger.shared.log("dropdown", ["action": "open-blocked", "variants": "0"])
+                    return
+                }
+                FIMTraceLogger.shared.log("dropdown", ["action": "open", "variants": "\(texts.count)"])
                 codeEditorTextView.showInlineCompletionDropdown(items: texts)
-                self.startDropdownRefreshTimer()
             }
             return true
         }
@@ -121,10 +122,10 @@ extension TextViewRepresentable {
                 return false
             }
             let line = text.split(separator: "\n").first.map(String.init) ?? text
+            FIMTraceLogger.shared.log("dropdown", ["action": "accept", "text": String(line.prefix(40))])
             codeEditorTextView.insertText(line, replacementRange: codeEditorTextView.selectedRange)
             parent.lineCompletionEngine.markAccepted(on: parent.paneID, suggestionText: text)
             codeEditorTextView.hideInlineCompletionDropdown()
-            stopDropdownRefreshTimer()
             parent.text = textView.string
             parent.selectedRange = textView.selectedRange
             updateSelectionContext(from: textView)
@@ -132,28 +133,19 @@ extension TextViewRepresentable {
             return true
         }
 
-        nonisolated(unsafe) private var dropdownRefreshTimer: Timer?
-
-        @MainActor
-        private func startDropdownRefreshTimer() {
-            stopDropdownRefreshTimer()
-            dropdownRefreshTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        /// Event-driven dropdown refresh: the engine fires this whenever the
+        /// variant pool changes — re-read the pool only if the dropdown is
+        /// open (no polling).
+        private func setupPoolChangeObservation() {
+            parent.lineCompletionEngine.onPoolVariantsChanged = { [weak self] paneID in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, paneID == self.parent.paneID else { return }
                     guard let editor = self.attachedTextView as? CodeEditorTextView,
-                          editor.inlineCompletionDropdownVisible else {
-                        self.stopDropdownRefreshTimer()
-                        return
-                    }
+                          editor.inlineCompletionDropdownVisible else { return }
                     let variants = await self.parent.lineCompletionEngine.poolVariants(for: self.parent.paneID)
                     editor.updateInlineCompletionDropdown(items: variants.map(\.text))
                 }
             }
-        }
-
-        nonisolated private func stopDropdownRefreshTimer() {
-            dropdownRefreshTimer?.invalidate()
-            dropdownRefreshTimer = nil
         }
 
         // MARK: - Real-time editor behaviors
@@ -169,8 +161,14 @@ extension TextViewRepresentable {
             if let codeEditorTextView = textView as? CodeEditorTextView,
                codeEditorTextView.hasInlineSuggestion,
                replacementString != nil {
+                // Typing clears the GHOST visually only. It must NOT call
+                // invalidateInlineCompletion(): that wipes the bridge's
+                // keystroke timestamps (next gap = 0 → gate rejects) and the
+                // engine's consumption state (lastShown → accept-verify can
+                // never fire) — measured as alternating suggestions and no
+                // cache in fim-trace.ndjson. The next request consumes or
+                // re-infers naturally.
                 codeEditorTextView.clearInlineSuggestion()
-                invalidateInlineCompletion()
             }
 
             guard let replacementString else { return true }
@@ -230,7 +228,6 @@ extension TextViewRepresentable {
                 }
                 if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
                     codeEditorTextView.hideInlineCompletionDropdown()
-                    stopDropdownRefreshTimer()
                     return true
                 }
             }
@@ -261,7 +258,7 @@ extension TextViewRepresentable {
 
             if commandSelector == #selector(NSResponder.cancelOperation(_:)), codeEditorTextView.hasInlineSuggestion {
                 codeEditorTextView.clearInlineSuggestion()
-                parent.lineCompletionEngine.markDismissed()
+                parent.lineCompletionEngine.markDismissed(on: parent.paneID)
                 invalidateInlineCompletion()
                 return true
             }

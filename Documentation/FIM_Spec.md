@@ -185,42 +185,30 @@ Files (all FIM-related; cleanup target):
 - Harness: `CompassHarnessTests/FIMBenchmarkHarnessTests.swift`, `FIMBenchmarkFixtures.swift`
 - run.sh: `fim-bench.conf` plumbing (§8)
 
-## 7. Landmines discovered (cleanup checklist — verify each)
+## 7. Landmine checklist — current status (2026-08-06)
 
-1. **Two provider init paths** in `AIServiceInlineCompletionProvider` (one
-   takes `aiServiceProvider` + offline checker; the other takes remote/local
-   providers + selection store) — remnant of the model-changer experiment.
-   One should die.
-2. **Hybrid routing modes return nil** (`CompletionInferenceService.swift`
-   `case .hybridPreferLocal, .hybridPreferRemote: return nil`) — silently
-   broken; product ships local-only anyway.
-3. **Two prompt shapes**: prompt-based `complete(prompt:)` (with
-   Language/File/Scope/Symbols — the cloud/legacy path) vs prefix/suffix FIM
-   path. Only the FIM path is product.
-4. **`maxSuggestionLength` default 120 + `multilineEnabled` true** — conflicts
-   with the single-line premise; the renderer clamps, so the extra tokens are
-   wasted latency (measured ~45% waste). Setting + defaults to reconcile.
-5. **`FIMInferenceService` internals**: hardcoded `contextLength = 4096`,
-   `kvBits: 0` no-op with comment, `FIMTokens.qwen25Coder` constants, legacy
-   `bridge`/tokenizer plumbing — audit for dead members (several already
-   deleted in the 2026-08 dead-code pass).
-6. **`LineCompletionEngine`/Ranker/Filter** (deterministic path) — separate
-   system from FIM; decide: is it the "typeahead string-match proxy" (keep,
-   as accept-verify/instant path) or duplicate (merge)? Spec says: keep as
-   the instant typeahead layer.
-7. **Settings store knobs** (aggressiveness, retrievalEnabled, routingMode,
-   multilineEnabled, maxSuggestionLength) — mostly experimental; reconcile
-   with spec (keep: debounce, maxSuggestionLength; drop or repurpose rest).
-8. **`CompletionTriggerPolicy` + `CompletionTelemetryService`** — verify they
-   are on the live path or delete.
-9. **UIStateManager `inlineCompletionMaxSuggestionLength`** — verify usage.
-10. **FIM harness defaults** must mirror production defaults (already aligned
-    at 0.1/0.9/1.1/64); the env path goes through `fim-bench.conf` — never
-    reintroduce `TEST_RUNNER_ENV_`-only reading for app-hosted tests.
-11. **`LocalModelSelectionStore`** — FIM model is fixed; any selection-store
-    usage for FIM is dead.
-12. **`EditorSignalBridge` / `InlineCompletionDebugStore`** — dev tooling;
-    keep only if used by the live path.
+All items below are RESOLVED unless marked. The list is historical; the live
+architecture is documented in §5/§6 and `FIM_VariantPools_Arch.md`.
+
+1. ✅ Two provider init paths — resolved (single init, local-only).
+2. ✅ Hybrid routing modes — deleted (local-only; UC-5 cloud fallback fixed).
+3. ✅ Two prompt shapes — deleted (streaming prefix/suffix FIM path only).
+4. ✅ `maxSuggestionLength` default now 64 + `multilineEnabled` deleted —
+   reconciled with the single-line premise (2026-08-06).
+5. ✅ `FIMInferenceService` internals — audited; dead members deleted.
+6. ✅ Deterministic ranker/filter — kept as output guardrails; the two
+   keystroke gates merged into `LineCompletionGate`.
+7. ✅ Settings knobs — routing/multiline/retrieval/debounce deleted;
+   `aggressiveness` (ranker floor) + `maxSuggestionLength` remain.
+8. ✅ `CompletionTriggerPolicy` + `CompletionTelemetryService` — gate merged
+   into `LineCompletionGate`; the telemetry service was write-only and is
+   deleted (2026-08-06). Diagnostics live in `FIMTraceLogger`.
+9. ✅ `inlineCompletionMaxSuggestionLength` — verified live (settings UI).
+10. ✅ Harness defaults mirror production (0.1/0.9/1.1/64); knobs via
+    `fim-bench.conf`.
+11. ✅ `LocalModelSelectionStore` — no FIM usage remains.
+12. ✅ `EditorSignalBridge` / `InlineCompletionDebugStore` — live; bridge is
+    the keystroke-identity choke point.
 
 ## 8. Experiment protocol (how we tune safely)
 

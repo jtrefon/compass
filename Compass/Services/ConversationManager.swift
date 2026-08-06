@@ -511,6 +511,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
             // CRITICAL: Set project root for all loggers including AI trace
             await AIToolTraceLogger.shared.setProjectRoot(root)
             await AppLogger.shared.setProjectRoot(root)
+            FIMTraceLogger.shared.setProjectRoot(root)
             await ConversationLogStore.shared.setProjectRoot(root)
             await ExecutionLogStore.shared.setProjectRoot(root)
             await ConversationIndexStore.shared.setProjectRoot(root)

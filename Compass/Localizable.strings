@@ -249,8 +249,6 @@
 "settings.inline_completion.subtitle" = "Low-latency ghost text suggestions for the active editor pane.";
 "settings.inline_completion.enabled.title" = "Enable inline completion";
 "settings.inline_completion.enabled.subtitle" = "Show contextual suggestions while typing in supported files.";
-"settings.inline_completion.debounce.title" = "Automatic debounce";
-"settings.inline_completion.debounce.subtitle" = "Wait this long after typing before requesting a suggestion.";
 "settings.inline_completion.aggressiveness.title" = "Ranking aggressiveness";
 "settings.inline_completion.aggressiveness.subtitle" = "Bias more strongly toward short, confident completions.";
 "settings.inline_completion.max_length.title" = "Maximum suggestion length";

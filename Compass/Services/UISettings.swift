@@ -12,7 +12,6 @@ struct UISettings {
     let wordWrap: Bool
     let minimapVisible: Bool
     let inlineCompletionEnabled: Bool
-    let inlineCompletionDebounceMilliseconds: Int
     let inlineCompletionAggressiveness: Double
     let inlineCompletionMaxSuggestionLength: Int
     let inlineCompletionDebugOverlayEnabled: Bool
