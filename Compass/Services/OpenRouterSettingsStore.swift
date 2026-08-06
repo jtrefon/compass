@@ -60,7 +60,7 @@ class ProviderOpenRouterSettingsStore: OpenRouterSettingsStoring, @unchecked Sen
         self.defaultModel = ""
         self.defaultBaseURL = OpenRouterSettings.empty.baseURL
         self.defaultReasoningMode = .modelAndAgent
-        self.defaultToolPromptMode = .fullStatic
+        self.defaultToolPromptMode = .concise
     }
 
     init(
@@ -70,7 +70,7 @@ class ProviderOpenRouterSettingsStore: OpenRouterSettingsStoring, @unchecked Sen
         defaultModel: String,
         defaultBaseURL: String,
         defaultReasoningMode: ReasoningMode = .modelAndAgent,
-        defaultToolPromptMode: ToolPromptMode = .fullStatic
+        defaultToolPromptMode: ToolPromptMode = .concise
     ) {
         self.settingsStore = settingsStore
         self.environment = ProcessInfo.processInfo.environment

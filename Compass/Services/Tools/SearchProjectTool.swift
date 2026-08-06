@@ -5,12 +5,7 @@ import Foundation
 /// into a single call. Returns ALL occurrences of a query with type, location, and context.
 struct SearchProjectTool: AITool {
     let name = "search"
-let description =        "THE PRIMARY search tool for ANY code search task. " +
-        "Finds classes, functions, variables, files, and text patterns. " +
-        "Uses symbol lookup, full-text search, and filesystem grep " +
-        "— automatically picks the fastest available method. " +
-        "Returns results grouped by file with match type and line numbers. " +
-        "PAGINATION: when results show a 'showing X-Y of Z' footer, use offset=Y max_results=<page size> to get the next page."
+let description =        "Search the codebase: symbols, text, and filenames, grouped by file. Paginated via offset/max_results."
 
     var parameters: [String: Any] {
         [
@@ -18,7 +13,7 @@ let description =        "THE PRIMARY search tool for ANY code search task. " +
             "properties": [
                 "query": [
                     "type": "string",
-                    "description": "The search term (class name, function name, variable, import, etc.). Case-insensitive."
+                    "description": "Search term (class, function, variable, text). Case-insensitive."
                 ],
                 "max_results": [
                     "type": "integer",

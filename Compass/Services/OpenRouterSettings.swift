@@ -84,7 +84,7 @@ struct OpenRouterSettings: Equatable {
         baseURL: "https://openrouter.ai/api/v1",
         systemPrompt: "",
         reasoningMode: .modelAndAgent,
-        toolPromptMode: .fullStatic,
+        toolPromptMode: .concise,
         contextOverride: 0
     )
 }

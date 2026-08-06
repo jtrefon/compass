@@ -2,7 +2,7 @@ import Foundation
 
 struct FindFileTool: AITool {
     let name = "glob"
-    let description = "Find files by name with optional max_results and offset pagination. Searches from the project root by default — no prior `ls` needed. PAGINATION: when results show a 'showing X-Y of Z' footer, use offset=Y max_results=<page size> for the next page."
+    let description = "Find files by name from the project root. Paginated via offset/max_results."
     var parameters: [String: Any] {
         [
             "type": "object",

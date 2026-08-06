@@ -5,7 +5,7 @@ import Foundation
 /// Each session maintains its own browser state (cookies, history, JS context).
 struct WebBrowseTool: AITool {
     let name = "web_fetch"
-let description = "Browse a webpage and extract its main readable content."
+let description = "Browse a webpage and extract readable content (sessioned navigation)."
 
     var parameters: [String: Any] {
         [

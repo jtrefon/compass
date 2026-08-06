@@ -3,7 +3,7 @@ import Foundation
 /// List files in a directory
 struct ListFilesTool: AITool {
     let name = "ls"
-    let description = "List files and directories under a path with optional name filter, limit, and offset pagination. Vendor directories are marked (excluded). PAGINATION: when results show a 'showing X-Y of Z' footer, use offset=Y limit=<page size> for the next page."
+    let description = "List files/directories under a path. Paginated via offset/limit."
     var parameters: [String: Any] {
         FileToolParameterSchemaBuilder.objectSchema(
             properties: [

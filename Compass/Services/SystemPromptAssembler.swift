@@ -45,30 +45,37 @@ struct SystemPromptAssembler {
                     : "System/tool-system-prompt-concise",
                 projectRoot: input.projectRoot
             ))
-            // Load per-tool prompts from the canonical v3 tool prompts directory.
-            // NOTE: the previous v2 prompt set was removed; v3 is authoritative.
-            let toolPromptKeys = [
-                "Tools/v3/read",
-                "Tools/v3/write",
-                "Tools/v3/edit",
-                "Tools/v3/ls",
-                "Tools/v3/glob",
-                "Tools/v3/search",
-                "Tools/v3/rm",
-                "Tools/v3/context",
-                "Tools/v3/web_search",
-                "Tools/v3/web_fetch",
-                "Tools/v3/bash",
-                "Tools/v3/plan"
-            ]
-            var toolPrompts: [String] = []
-            for key in toolPromptKeys {
-                if let prompt = try? PromptRepository.shared.prompt(key: key, projectRoot: input.projectRoot) {
-                    toolPrompts.append(prompt)
+            // Chat: the JSON tool schemas (rendered by the chat template) ARE
+            // the tool advertisement — the v3 markdown prompts duplicated the
+            // schemas at ~3.9K tokens and leaked mutation/terminal tool prose
+            // into a mode that cannot use them. Coder/agent keep the v3
+            // reference prompts until their own slimming pass.
+            if input.mode != .chat {
+                // Load per-tool prompts from the canonical v3 tool prompts directory.
+                // NOTE: the previous v2 prompt set was removed; v3 is authoritative.
+                let toolPromptKeys = [
+                    "Tools/v3/read",
+                    "Tools/v3/write",
+                    "Tools/v3/edit",
+                    "Tools/v3/ls",
+                    "Tools/v3/glob",
+                    "Tools/v3/search",
+                    "Tools/v3/rm",
+                    "Tools/v3/context",
+                    "Tools/v3/web_search",
+                    "Tools/v3/web_fetch",
+                    "Tools/v3/bash",
+                    "Tools/v3/plan"
+                ]
+                var toolPrompts: [String] = []
+                for key in toolPromptKeys {
+                    if let prompt = try? PromptRepository.shared.prompt(key: key, projectRoot: input.projectRoot) {
+                        toolPrompts.append(prompt)
+                    }
                 }
-            }
-            if !toolPrompts.isEmpty {
-                sections.append("## Tool Reference\n\nEach tool below has WHAT (what it does), WHEN (when to use it), HOW (parameters and overloading), and OUTPUT (response format).\n\n" + toolPrompts.joined(separator: "\n\n---\n\n"))
+                if !toolPrompts.isEmpty {
+                    sections.append("## Tool Reference\n\nEach tool below has WHAT (what it does), WHEN (when to use it), HOW (parameters and overloading), and OUTPUT (response format).\n\n" + toolPrompts.joined(separator: "\n\n---\n\n"))
+                }
             }
             if let envelope = try? PromptRepository.shared.prompt(
                 key: "System/tool-execution-envelope",
