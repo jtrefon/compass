@@ -33,6 +33,8 @@ final class PromptCacheEntry: @unchecked Sendable {
 
 protocol LocalModelGenerating: Sendable {
     func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat?, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String?) async throws -> AIServiceResponse
+    func preload(modelId: String, modelDirectory: URL, toolCallFormat: ToolCallFormat?) async throws
+    func unloadAllModels(reason: String) async
 }
 
 actor NativeMLXGenerator: LocalModelGenerating {
@@ -63,13 +65,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
     }
 
     nonisolated static let sharedTestGenerator: LocalModelGenerating = {
-        struct NoOpEventBus: EventBusProtocol {
-            func publish<E: Event>(_ event: E) {}
-            func subscribe<E: Event>(to eventType: E.Type, handler: @escaping (E) -> Void) -> AnyCancellable {
-                AnyCancellable {}
-            }
-        }
-        return NativeMLXGenerator(eventBus: NoOpEventBus())
+        NativeMLXGenerator(eventBus: NoOpEventBus())
     }()
 
     init(eventBus: EventBusProtocol) {
@@ -110,9 +106,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
         var collectedToolCalls: [AIToolCall] = []
         var completionInfo: GenerateCompletionInfo?
         var chunkCount: Int = 0
-        var thinkingCharCount: Int = 0
-        var executionCharCount: Int = 0
-        var thinkingEnded: Bool = false
     }
 
     func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat? = nil, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String? = nil) async throws -> AIServiceResponse {
@@ -317,13 +310,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
         var effectiveInput = input
         var kvCache: [KVCache]? = nil
 
-        // H11: media turns drop the image/video payloads on the reused path
-        // (the suffix input is text-only) — never reuse a KV cache for
-        // multimodal turns.
-        if input.image != nil || input.video != nil {
-            return (nil, input)
-        }
-
         let (cachedCache, cachedTokenIds) = cacheEntry?.get() ?? (nil, [])
         if let cachedCache, !cachedCache.isEmpty, !cachedTokenIds.isEmpty, !promptTokenIds.isEmpty {
             let commonLen = Self.commonPrefixLength(cachedTokenIds, promptTokenIds)
@@ -386,13 +372,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
             context: context
         )
         var result = StreamResult()
-        var isInThinking = false
-
-        func publishStatus(_ message: String) {
-            guard let runId else { return }
-            guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            eventBus.publish(LocalModelStreamingStatusEvent(runId: runId, message: message))
-        }
 
         for await generation in stream {
             if Task.isCancelled {
@@ -412,24 +391,9 @@ actor NativeMLXGenerator: LocalModelGenerating {
                     "promptTokensPerSecond": result.chunkCount > 0 ? Double(result.chunkCount) / (Double(prefillMs) / 1000.0) : 0
                 ])
             }
-            if result.chunkCount % 50 == 0 {
-                let elapsedMs = Self.milliseconds(genStart.duration(to: ContinuousClock.now))
-            }
 
             switch generation {
             case .chunk(let text):
-                if text.contains("<think>") {
-                    isInThinking = true
-                }
-                if text.contains("</think>") {
-                    isInThinking = false
-                    result.thinkingEnded = true
-                }
-                if isInThinking {
-                    result.thinkingCharCount += text.count
-                } else {
-                    result.executionCharCount += text.count
-                }
                 result.output.append(text)
                 if let runId, !text.isEmpty {
                     // Always publish the first chunk (short completions may
@@ -444,7 +408,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 }
             case .toolCall(let toolCall):
                 result.collectedToolCalls.append(Self.makeAIToolCall(from: toolCall))
-                publishStatus("Structured tool call detected: \(toolCall.function.name)")
             }
         }
 
@@ -512,18 +475,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
             "cacheKind": inferenceConfiguration.cacheKind,
             "hasCompletionInfo": streamResult.completionInfo != nil
         ])
-        Self.logGenerationPerformance(
-            modelId: modelId,
-            inferenceConfiguration: inferenceConfiguration,
-            loadDuration: loadDuration,
-            totalDuration: totalDuration,
-            completionInfo: streamResult.completionInfo,
-            outputCharacterCount: trimmedOutput.count,
-            toolCallCount: streamResult.collectedToolCalls.count,
-            rssBeforeLoadMB: rssBeforeLoadMB,
-            rssAfterLoadMB: rssAfterLoadMB,
-            rssAfterGenerationMB: Self.currentProcessRSSMB()
-        )
         let toolCalls: [AIToolCall]? = streamResult.collectedToolCalls.isEmpty ? nil : streamResult.collectedToolCalls
         return AIServiceResponse(
             content: trimmedOutput.isEmpty ? nil : trimmedOutput,
@@ -588,68 +539,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
         return false
     }
 
-    nonisolated private static func logGenerationPerformance(
-        modelId: String,
-        inferenceConfiguration: LocalModelInferenceConfiguration,
-        loadDuration: Duration,
-        totalDuration: Duration,
-        completionInfo: GenerateCompletionInfo?,
-        outputCharacterCount: Int,
-        toolCallCount: Int,
-        rssBeforeLoadMB: Int,
-        rssAfterLoadMB: Int,
-        rssAfterGenerationMB: Int
-    ) {
-        let loadMS = milliseconds(loadDuration)
-        let totalMS = milliseconds(totalDuration)
-        let snapshot: LocalModelGenerationPerformanceSnapshot
-        if let info = completionInfo {
-            let promptMS = Int((info.promptTime * 1000).rounded())
-            let generateMS = Int((info.generateTime * 1000).rounded())
-            snapshot = LocalModelGenerationPerformanceSnapshot(
-                modelId: modelId,
-                inferenceConfiguration: inferenceConfiguration,
-                loadMilliseconds: loadMS,
-                totalMilliseconds: totalMS,
-                promptTokenCount: info.promptTokenCount,
-                promptMilliseconds: promptMS,
-                promptTokensPerSecond: info.promptTokensPerSecond,
-                generationTokenCount: info.generationTokenCount,
-                generationMilliseconds: generateMS,
-                generationTokensPerSecond: info.tokensPerSecond,
-                toolCallCount: toolCallCount,
-                outputCharacterCount: outputCharacterCount,
-                rssBeforeLoadMB: rssBeforeLoadMB,
-                rssAfterLoadMB: rssAfterLoadMB,
-                rssAfterGenerationMB: rssAfterGenerationMB,
-                timestamp: Date()
-            )
-        } else {
-            snapshot = LocalModelGenerationPerformanceSnapshot(
-                modelId: modelId,
-                inferenceConfiguration: inferenceConfiguration,
-                loadMilliseconds: loadMS,
-                totalMilliseconds: totalMS,
-                promptTokenCount: nil,
-                promptMilliseconds: nil,
-                promptTokensPerSecond: nil,
-                generationTokenCount: nil,
-                generationMilliseconds: nil,
-                generationTokensPerSecond: nil,
-                toolCallCount: toolCallCount,
-                outputCharacterCount: outputCharacterCount,
-                rssBeforeLoadMB: rssBeforeLoadMB,
-                rssAfterLoadMB: rssAfterLoadMB,
-                rssAfterGenerationMB: rssAfterGenerationMB,
-                timestamp: Date()
-            )
-        }
-
-        Task {
-            await LocalModelGenerationPerformanceRecorder.shared.record(snapshot)
-        }
-    }
-
     nonisolated private static func milliseconds(_ duration: Duration) -> Int {
         Int((Double(duration.components.seconds) * 1000) + (Double(duration.components.attoseconds) / 1_000_000_000_000_000))
     }
@@ -697,198 +586,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
             if a[i] != b[i] { return i }
         }
         return minLen
-    }
-
-    nonisolated static func extractGemmaToolCalls(from content: String) -> [AIToolCall]? {
-        let calls = parseGemmaToolCalls(from: content)
-        guard !calls.isEmpty else { return nil }
-        return calls
-    }
-
-    nonisolated static func parseGemmaToolCalls(from content: String) -> [AIToolCall] {
-        let marker = "call:"
-        var results: [AIToolCall] = []
-        var searchStart = content.startIndex
-
-        while let markerRange = content.range(of: marker, range: searchStart..<content.endIndex) {
-            let afterMarker = markerRange.upperBound
-
-            var nameEnd = afterMarker
-            while nameEnd < content.endIndex, content[nameEnd].isLetter || content[nameEnd].isNumber || content[nameEnd] == "_" {
-                nameEnd = content.index(after: nameEnd)
-            }
-            guard nameEnd > afterMarker else {
-                searchStart = markerRange.upperBound
-                continue
-            }
-            let name = String(content[afterMarker..<nameEnd])
-
-            var braceStart = nameEnd
-            while braceStart < content.endIndex, content[braceStart].isWhitespace {
-                braceStart = content.index(after: braceStart)
-            }
-            guard braceStart < content.endIndex, content[braceStart] == "{" else {
-                searchStart = nameEnd
-                continue
-            }
-
-            var depth = 1
-            var pos = content.index(after: braceStart)
-            while pos < content.endIndex && depth > 0 {
-                let ch = content[pos]
-                if ch == "{" { depth += 1 }
-                else if ch == "}" { depth -= 1 }
-                if depth > 0 {
-                    pos = content.index(after: pos)
-                }
-            }
-            guard depth == 0 else {
-                searchStart = nameEnd
-                continue
-            }
-            let argsText = String(content[content.index(after: braceStart)..<pos])
-
-            let cleanedArgs = argsText.replacingOccurrences(of: "<|\"|>", with: "\"")
-
-            let jsonText = "{\(cleanedArgs)}"
-            var arguments: [String: Any] = [:]
-            if let jsonData = jsonText.data(using: .utf8),
-               let jsonObj = try? JSONSerialization.jsonObject(with: jsonData),
-               let argsDict = jsonObj as? [String: Any] {
-                arguments = argsDict
-            } else {
-                var fallbackArgs: [String: String] = [:]
-                let stripped = cleanedArgs.replacingOccurrences(of: "\"", with: "")
-                let pairPattern = #"(\w+):(.*?)(?:,\s*\w+|$)"#
-                if let pairRegex = try? NSRegularExpression(pattern: pairPattern, options: [.dotMatchesLineSeparators]) {
-                    let pairRange = NSRange(stripped.startIndex..<stripped.endIndex, in: stripped)
-                    let pairMatches = pairRegex.matches(in: stripped, options: [], range: pairRange)
-                    for pair in pairMatches {
-                        guard pair.numberOfRanges >= 3,
-                              let keyRange = Range(pair.range(at: 1), in: stripped),
-                              let valRange = Range(pair.range(at: 2), in: stripped) else { continue }
-                        let key = String(stripped[keyRange])
-                        let val = String(stripped[valRange]).trimmingCharacters(in: .whitespaces)
-                        fallbackArgs[key] = val
-                    }
-                }
-                arguments = fallbackArgs
-            }
-
-            results.append(AIToolCall(
-                id: UUID().uuidString,
-                name: name,
-                arguments: arguments
-            ))
-
-            searchStart = content.index(after: pos)
-        }
-
-        return results
-    }
-
-    nonisolated static func extractFallbackToolCalls(
-        from content: String,
-        toolsWereProvided: Bool,
-        structuredToolCallsWereDetected: Bool,
-        toolCallFormat: ToolCallFormat?
-    ) -> [AIToolCall]? {
-        guard toolsWereProvided, !structuredToolCallsWereDetected else { return nil }
-        guard !content.isEmpty else { return nil }
-
-        if let directCall = decodeFallbackToolCall(from: content) {
-            return [directCall]
-        }
-
-        if let wrappedCalls = decodeFallbackToolCallsEnvelope(from: content), !wrappedCalls.isEmpty {
-            return wrappedCalls
-        }
-
-        if let fencedJSON = extractFirstJSONCodeBlock(from: content) {
-            if let directCall = decodeFallbackToolCall(from: fencedJSON) {
-                return [directCall]
-            }
-            if let wrappedCalls = decodeFallbackToolCallsEnvelope(from: fencedJSON), !wrappedCalls.isEmpty {
-                return wrappedCalls
-            }
-        }
-
-        return nil
-    }
-
-    nonisolated private static func regexMatches(in text: String, pattern: String) -> [String] {
-        guard let expression = try? NSRegularExpression(
-            pattern: pattern,
-            options: [.dotMatchesLineSeparators, .caseInsensitive]
-        ) else {
-            return []
-        }
-
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return expression.matches(in: text, options: [], range: range).compactMap { match in
-            guard let matchRange = Range(match.range, in: text) else { return nil }
-            return String(text[matchRange])
-        }
-    }
-
-    nonisolated private static func regexCaptureGroups(in text: String, pattern: String) -> [[String]] {
-        guard let expression = try? NSRegularExpression(
-            pattern: pattern,
-            options: [.dotMatchesLineSeparators, .caseInsensitive]
-        ) else {
-            return []
-        }
-
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return expression.matches(in: text, options: [], range: range).map { match in
-            guard match.numberOfRanges > 1 else { return [] }
-            return (1..<match.numberOfRanges).compactMap { index in
-                let groupRange = match.range(at: index)
-                guard groupRange.location != NSNotFound,
-                      let swiftRange = Range(groupRange, in: text) else {
-                    return nil
-                }
-                return String(text[swiftRange])
-            }
-        }
-    }
-
-    nonisolated private static func decodeFallbackToolCall(from raw: String) -> AIToolCall? {
-        guard let data = raw.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode(AIToolCall.self, from: data) else {
-            return nil
-        }
-        return decoded
-    }
-
-    nonisolated private static func decodeFallbackToolCallsEnvelope(from raw: String) -> [AIToolCall]? {
-        guard let data = raw.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rawToolCalls = object["tool_calls"] as? [[String: Any]] else {
-            return nil
-        }
-
-        let decodedToolCalls = rawToolCalls.compactMap { rawCall -> AIToolCall? in
-            guard JSONSerialization.isValidJSONObject(rawCall),
-                  let callData = try? JSONSerialization.data(withJSONObject: rawCall),
-                  let call = try? JSONDecoder().decode(AIToolCall.self, from: callData) else {
-                return nil
-            }
-            return call
-        }
-        return decodedToolCalls.isEmpty ? nil : decodedToolCalls
-    }
-
-    nonisolated private static func extractFirstJSONCodeBlock(from content: String) -> String? {
-        guard let openingRange = content.range(of: "```json") ?? content.range(of: "```") else {
-            return nil
-        }
-        let remainder = content[openingRange.upperBound...]
-        guard let closingRange = remainder.range(of: "```") else {
-            return nil
-        }
-        return remainder[..<closingRange.lowerBound]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func unloadAllModels(reason: String = "unknown") {

@@ -50,9 +50,6 @@ final class LocalModelSettingsViewModel: ObservableObject {
     private let settingsStore: SettingsStore
     private let selectionStore: LocalModelSelectionStore
 
-    private let offlineModeEnabledKey = "AI.OfflineModeEnabled"
-    private let kvCache4BitEnabledKey = "LocalModel.KVCache4BitEnabled"
-
     init(
         downloader: LocalModelDownloader = LocalModelDownloader(),
         settingsStore: SettingsStore = SettingsStore(userDefaults: AppRuntimeEnvironment.userDefaults)
@@ -62,9 +59,9 @@ final class LocalModelSettingsViewModel: ObservableObject {
         self.selectionStore = LocalModelSelectionStore(settingsStore: settingsStore)
         self.chatModel = LocalModelCatalog.chatModel
         self.fimModel = LocalModelCatalog.fimModel
-        self.offlineModeEnabled = settingsStore.bool(forKey: offlineModeEnabledKey, default: false)
-        self.kvCache4BitEnabled = settingsStore.bool(forKey: kvCache4BitEnabledKey, default: true)
-        let ctx = settingsStore.integer(forKey: "LocalModel.ContextLength")
+        self.offlineModeEnabled = settingsStore.bool(forKey: LocalModelSettingsKeys.offlineModeEnabled, default: false)
+        self.kvCache4BitEnabled = settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: true)
+        let ctx = settingsStore.integer(forKey: LocalModelSettingsKeys.contextLength)
         self.contextLength = ctx > 0 ? Double(ctx) : Double(chatModel.defaultContextLength)
         updateOfflineStatusMessage()
     }

@@ -4,7 +4,6 @@ import Foundation
 
 struct SendRequest {
     let userInput: String
-    let mediaAttachments: [ChatMessageMediaAttachment]
     let mode: AIMode
     let projectRoot: URL
     let conversationId: String
@@ -12,12 +11,10 @@ struct SendRequest {
     let availableTools: [AITool]
     let draftAssistantMessageId: UUID?
     let usesLocalModel: Bool
-    let modelID: String?
     let preservesCache: Bool
 
     init(
         userInput: String,
-        mediaAttachments: [ChatMessageMediaAttachment] = [],
         mode: AIMode,
         projectRoot: URL,
         conversationId: String,
@@ -25,11 +22,9 @@ struct SendRequest {
         availableTools: [AITool],
         draftAssistantMessageId: UUID?,
         usesLocalModel: Bool = false,
-        modelID: String? = nil,
         preservesCache: Bool = false
     ) {
         self.userInput = userInput
-        self.mediaAttachments = mediaAttachments
         self.mode = mode
         self.projectRoot = projectRoot
         self.conversationId = conversationId
@@ -37,7 +32,6 @@ struct SendRequest {
         self.availableTools = availableTools
         self.draftAssistantMessageId = draftAssistantMessageId
         self.usesLocalModel = usesLocalModel
-        self.modelID = modelID
         self.preservesCache = preservesCache
     }
 }
@@ -50,8 +44,6 @@ final class ConversationSendCoordinator {
     private let aiInteractionCoordinator: AIInteractionCoordinator
     private let toolExecutionCoordinator: ToolExecutionCoordinator
     var clearStreamingBuffer: (@MainActor () -> Void)?
-    var onToolStatus: (@MainActor (String) -> Void)?
-    var onStatusUpdate: (@MainActor (String) -> Void)?
 
     init(
         historyCoordinator: ChatHistoryCoordinator,

@@ -27,8 +27,7 @@ final class OpenRouterAIServiceTests: XCTestCase {
         }
         """
 
-        let service = OpenRouterAIService(eventBus: NoOpEventBus())
-        let message = await service.decodeOpenRouterErrorMessage(from: Data(json.utf8))
+        let message = OpenRouterAIService.decodeErrorMessage(from: Data(json.utf8))
 
         XCTAssertEqual(message, "OpenRouter error (429): Rate limit exceeded. Provider: OpenRouter.")
     }
@@ -44,8 +43,7 @@ final class OpenRouterAIServiceTests: XCTestCase {
         }
         """
 
-        let service = OpenRouterAIService(eventBus: NoOpEventBus())
-        let message = await service.decodeOpenRouterErrorMessage(from: Data(json.utf8))
+        let message = OpenRouterAIService.decodeErrorMessage(from: Data(json.utf8))
 
         XCTAssertEqual(message, "OpenRouter error (401): Invalid API key.")
     }

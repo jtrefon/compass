@@ -45,7 +45,7 @@ enum ReasoningIntensity: String, CaseIterable, Equatable {
 
     static var current: ReasoningIntensity {
         ReasoningIntensity(
-            rawValue: UserDefaults.standard.string(forKey: "AI.ReasoningIntensity") ?? ""
+            rawValue: AppRuntimeEnvironment.userDefaults.string(forKey: LocalModelSettingsKeys.reasoningIntensity) ?? ""
         ) ?? .default
     }
 

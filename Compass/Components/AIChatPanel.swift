@@ -45,8 +45,10 @@ struct AIChatPanel: View {
             settings.model = model.id
             store.save(settings)
 
-            UserDefaults.standard.set(false, forKey: "AI.OfflineModeEnabled")
-            NotificationCenter.default.post(name: .localModelOfflineModeDidChange, object: nil)
+            Task {
+                let store = LocalModelSelectionStore()
+                await store.setOfflineModeEnabled(false)
+            }
             modelDisplayName = model.name ?? model.id
             isModelPopover = false
             modelSearch.searchQuery = ""
@@ -267,9 +269,6 @@ struct AIChatPanel: View {
         .onReceive(NotificationCenter.default.publisher(for: .localModelOfflineModeDidChange)) { _ in
             refreshModelState()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .localModelSelectionDidChange)) { _ in
-            refreshModelState()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .remoteProviderDidChange)) { _ in
             refreshModelState()
             Task {
@@ -280,12 +279,11 @@ struct AIChatPanel: View {
     }
 
     private func refreshModelState() {
-        let defaults = UserDefaults.standard
-        isOfflineMode = defaults.bool(forKey: "AI.OfflineModeEnabled")
+        let defaults = AppRuntimeEnvironment.userDefaults
+        isOfflineMode = defaults.bool(forKey: LocalModelSettingsKeys.offlineModeEnabled)
         reasoningIntensity = ReasoningIntensity.current
         if isOfflineMode {
-            let modelId = defaults.string(forKey: "LocalModel.SelectedId") ?? ""
-            modelDisplayName = LocalModelCatalog.model(id: modelId)?.displayName ?? modelId
+            modelDisplayName = LocalModelCatalog.chatModel.displayName
         } else {
             let provider = currentProvider()
             let store = settingsStore(for: provider)
@@ -364,7 +362,6 @@ struct AIChatPanel: View {
                 Button {
                     Task {
                         let store = LocalModelSelectionStore()
-                        await store.setSelectedModelId(quickSelectModel.id)
                         await store.setOfflineModeEnabled(true)
                     }
                     isModelPopover = false
@@ -382,7 +379,10 @@ struct AIChatPanel: View {
                 Menu {
                     ForEach(ReasoningIntensity.allCases, id: \.self) { intensity in
                         Button {
-                            UserDefaults.standard.set(intensity.rawValue, forKey: "AI.ReasoningIntensity")
+                            AppRuntimeEnvironment.userDefaults.set(
+                                intensity.rawValue,
+                                forKey: LocalModelSettingsKeys.reasoningIntensity
+                            )
                             reasoningIntensity = intensity
                         } label: {
                             HStack {
@@ -410,10 +410,6 @@ struct AIChatPanel: View {
             width: AppConstants.Overlay.modelPopoverWidth,
             height: AppConstants.Overlay.modelPopoverHeight
         )
-    }
-
-    private var quickSelectModel: LocalModelDefinition {
-        LocalModelCatalog.chatModel
     }
 
     private static let historyDateFormatter: DateFormatter = {

@@ -203,7 +203,7 @@ final class OpenAICompatibleChatServiceTests: XCTestCase {
 
         _ = try await service.sendMessage(AIServiceHistoryRequest(
             messages: history,
-            mediaAttachments: [],
+
             tools: [OpenAITestNoopTool(name: "read", description: "Read", parameters: ["type": "object"])],
             mode: .coder,
             projectRoot: nil

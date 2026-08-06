@@ -5,48 +5,10 @@ import MLX
 
 struct LocalModelPromptBuilder {
 
-    func buildChatMessages(
-        messages: [ChatMessage],
-        explicitContext: String?,
-        systemContent: String,
-        modelID: String,
-        projectRoot: URL?
-    ) -> [Chat.Message] {
-        var chatMessages: [Chat.Message] = []
-        let merged = mergedSystemContent(
-            messages: messages,
-            explicitContext: explicitContext,
-            systemContent: systemContent
-        )
-
-        chatMessages.append(.system(merged))
-
-        for message in messages {
-            switch message.role {
-            case .user:
-                chatMessages.append(.user(
-                    message.content,
-                    images: imageInputs(from: message.mediaAttachments),
-                    videos: videoInputs(from: message.mediaAttachments)
-                ))
-            case .assistant:
-                chatMessages.append(.assistant(message.content))
-            case .system:
-                continue
-            case .tool:
-                chatMessages.append(.tool(replayToolMessageContent(from: message)))
-            }
-        }
-
-        return chatMessages
-    }
-
     func buildRawMessages(
         messages: [ChatMessage],
         explicitContext: String?,
-        systemContent: String,
-        modelID: String,
-        projectRoot: URL?
+        systemContent: String
     ) -> [[String: any Sendable]] {
         let merged = mergedSystemContent(
             messages: messages,
@@ -299,20 +261,6 @@ struct LocalModelPromptBuilder {
     }
 
     // MARK: - Private helpers
-
-    private func imageInputs(from attachments: [ChatMessageMediaAttachment]) -> [UserInput.Image] {
-        attachments.compactMap { attachment in
-            guard attachment.kind == .image else { return nil }
-            return .url(attachment.url)
-        }
-    }
-
-    private func videoInputs(from attachments: [ChatMessageMediaAttachment]) -> [UserInput.Video] {
-        attachments.compactMap { attachment in
-            guard attachment.kind == .video else { return nil }
-            return .url(attachment.url)
-        }
-    }
 
     private func rawMessageValue(from value: Any) -> (any Sendable)? {
         switch value {

@@ -16,7 +16,7 @@ final class AgentLoopTests: XCTestCase {
         let coord = ToolExecutionCoordinator(executor: executor)
         let history = ChatHistoryCoordinator(eventBus: eventBus)
         let mock = QueueToolMockService(responses: [])
-        let aiCoord = AIInteractionCoordinator(aiService: mock, codebaseIndex: nil, eventBus: eventBus)
+        let aiCoord = AIInteractionCoordinator(aiService: mock, eventBus: eventBus)
         let tools: [AITool] = [PatchFileToolAdapter(projectRoot: tempDir), ReadFileTool(fileSystemService: FileSystemService(), pathValidator: PathValidator(projectRoot: tempDir))]
         let request = SendRequest(
             userInput: "refactor sample.php",
@@ -117,7 +117,7 @@ final class AgentLoopTests: XCTestCase {
         let mock = QueueToolMockService(responses: [
             AIServiceResponse(content: "Hello! How can I help?", toolCalls: nil)
         ])
-        let aiCoord = AIInteractionCoordinator(aiService: mock, codebaseIndex: nil, eventBus: eventBus)
+        let aiCoord = AIInteractionCoordinator(aiService: mock, eventBus: eventBus)
         let tools: [AITool] = [PatchFileToolAdapter(projectRoot: tempDir)]
         let request = SendRequest(
             userInput: "hello",

@@ -38,7 +38,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     private struct UserMessageContext {
         let text: String
-        let mediaAttachments: [ChatMessageMediaAttachment]
         let hasSelectionContext: Bool
         let message: ChatMessage
     }
@@ -66,15 +65,11 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     // MARK: - Published State
 
     @Published var currentInput: String = ""
-    @Published var currentMediaAttachments: [ChatMessageMediaAttachment] = []
     @Published var isSending: Bool = false
     @Published var error: String?
     @Published var currentMode: AIMode = .chat
     @Published var cancelledToolCallIds: Set<String> = []
     private let cancelledToolCallIDsBox = CancelledToolCallIDsBox()
-    @Published private(set) var liveModelOutputPreview: String = ""
-    @Published private(set) var liveModelOutputStatusPreview: String = ""
-    @Published private(set) var isLiveModelOutputPreviewVisible: Bool = true
     @Published private(set) var conversationTabs: [ConversationTabItem] = []
     @Published private(set) var closedConversations: [ClosedConversation] = []
     @Published private(set) var providerIssue: ConversationProviderIssueState?
@@ -96,9 +91,8 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     private var codebaseIndex: (any CodebaseIndexProtocol)?
     private var projectRoot: URL
     private let conversationLogger: ConversationLogger
-    private let settingsStore = SettingsStore(userDefaults: AppRuntimeEnvironment.userDefaults)
-    private lazy var aiRouter = AIRouter(settingsStore: settingsStore)
     private let sessionManager: SessionManager
+    private let settingsStore = SettingsStore(userDefaults: AppRuntimeEnvironment.userDefaults)
     private let activityCoordinator: AgentActivityCoordinating?
     /// Token for the current API sending activity
     private var apiSendingActivityToken: AgentActivityToken?
@@ -114,18 +108,11 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     private var activeStreamingRunId: String?
     private var draftAssistantMessageId: UUID?
-    private var draftAssistantText: String = ""
-    private var draftReasoningText: String = ""
-    private var streamingRenderTask: Task<Void, Never>?
     private var lastRenderedDraftContent: String = ""
     private var lastRenderedDraftReasoning: String = ""
     private let outputBuffer = StreamingOutputBuffer()
     private var activeSendTask: Task<Void, Never>?
     private var activeRunCounter = 0
-    private let maxPreviewCharacters = 12_000
-    private let maxStatusPreviewCharacters = 4_000
-
-    // Live preview — direct publish, no buffer
 
     // MARK: - Computed Properties
 
@@ -145,21 +132,10 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         toolProvider.availableTools(mode: currentMode, pathValidator: pathValidator)
     }
 
-    /// Reads the model ID from the active provider's UserDefaults key.
-    private var activeModelID: String? {
-        // Read the model for the ACTIVE provider only — the previous scan
-        // returned the first non-empty model of any provider, so context
-        // sizing and displays used the wrong model ID.
-        let provider = settingsStore.string(forKey: "AI.SelectedRemoteProvider") ?? ""
-        let key: String
-        switch provider {
-        case "Kilo Code": key = "KiloCodeModel"
-        case "DeepSeek": key = "DeepSeekModel"
-        case "Alibaba Cloud": key = "AlibabaModel"
-        case "OpenCode Go": key = "OpenCodeGoModel"
-        default: key = "OpenRouterModel"
-        }
-        return settingsStore.string(forKey: key).flatMap { $0.isEmpty ? nil : $0 }
+    /// Single routing decision: offline mode = local MLX, else remote. This
+    /// is the ONLY place the local/remote split is resolved for sends.
+    private var usesLocalModel: Bool {
+        settingsStore.bool(forKey: LocalModelSettingsKeys.offlineModeEnabled, default: false)
     }
 
     // MARK: - Initialization
@@ -178,7 +154,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
         self.aiInteractionCoordinator = AIInteractionCoordinator(
             aiService: dependencies.services.aiService,
-            codebaseIndex: dependencies.environment.codebaseIndex,
             eventBus: dependencies.environment.eventBus
         )
 
@@ -216,12 +191,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         self.sendCoordinator.clearStreamingBuffer = { [weak self] in
             self?.clearStreamingText()
         }
-        self.sendCoordinator.onToolStatus = { [weak self] status in
-            self?.setLiveModelPreview(status)
-        }
-        self.sendCoordinator.onStatusUpdate = { [weak self] message in
-            self?.appendToLiveModelStatusPreview(message)
-        }
 
         initializeLogging(root: root)
         setupObservation()
@@ -240,7 +209,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     deinit {
         activeSendTask?.cancel()
-        streamingRenderTask?.cancel()
     }
 
     // MARK: - Session Management
@@ -267,12 +235,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     }
 
     private func saveCurrentSessionSnapshot() {
-        sessionManager.saveSnapshot(
-            input: currentInput,
-            livePreview: liveModelOutputPreview,
-            liveStatusPreview: liveModelOutputStatusPreview,
-            mode: currentMode
-        )
+        sessionManager.saveSnapshot(input: currentInput, mode: currentMode)
     }
 
     private func updateCancelledToolCallIds(_ mutate: (inout Set<String>) -> Void) {
@@ -285,8 +248,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         sessionManager.restoreSession(
             sessionId,
             input: &currentInput,
-            livePreview: &liveModelOutputPreview,
-            liveStatusPreview: &liveModelOutputStatusPreview,
             mode: &currentMode
         )
     }
@@ -305,13 +266,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
             .subscribe(to: LocalModelStreamingReasoningChunkEvent.self) { [weak self] event in
                 guard let self else { return }
                 self.handleLocalModelStreamingReasoningChunk(event)
-            }
-            .store(in: &cancellables)
-
-        eventBus
-            .subscribe(to: LocalModelStreamingStatusEvent.self) { [weak self] event in
-                guard let self else { return }
-                self.handleLocalModelStreamingStatus(event)
             }
             .store(in: &cancellables)
 
@@ -370,7 +324,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         guard let draftId = draftAssistantMessageId else { return }
         guard !event.chunk.isEmpty else { return }
 
-        appendToLiveModelPreview(event.chunk)
         renderStreamingChunk(event.chunk, draftId: draftId)
     }
 
@@ -383,7 +336,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     }
 
     private func renderStreamingChunk(_ chunk: String, draftId: UUID) {
-        draftAssistantText.append(chunk)
         outputBuffer.appendContent(chunk)
         outputBuffer.flushClassification()
         let renderContent = outputBuffer.hasContent ? outputBuffer.content : ""
@@ -403,7 +355,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     }
 
     private func renderStreamingReasoning(_ chunk: String, draftId: UUID) {
-        draftReasoningText.append(chunk)
         outputBuffer.appendReasoning(chunk)
         let renderReasoning: String? = outputBuffer.hasReasoning ? outputBuffer.reasoning : nil
         guard renderReasoning != lastRenderedDraftReasoning else { return }
@@ -421,11 +372,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         )
     }
 
-    private func handleLocalModelStreamingStatus(_ event: LocalModelStreamingStatusEvent) {
-        guard let runId = activeStreamingRunId, runId == event.runId else { return }
-        appendToLiveModelStatusPreview(event.message)
-    }
-
     private func handleOpenRouterUsageUpdated(_ event: OpenRouterUsageUpdatedEvent) {
         guard let runId = event.runId, runId == activeStreamingRunId else { return }
         guard let draftId = draftAssistantMessageId else { return }
@@ -436,7 +382,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
                 id: draftMessage.id,
                 role: draftMessage.role,
                 content: draftMessage.content,
-                mediaAttachments: draftMessage.mediaAttachments,
                 timestamp: draftMessage.timestamp,
                 context: ChatMessageContentContext(
                     reasoning: draftMessage.reasoning,
@@ -530,16 +475,13 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     func updateCodebaseIndex(_ newIndex: CodebaseIndexProtocol?) {
         codebaseIndex = newIndex
-        aiInteractionCoordinator.updateCodebaseIndex(newIndex)
     }
 
     func updateVectorStoreService(_ service: VectorStoreService?) {
-        aiInteractionCoordinator.updateVectorStoreService(service)
         toolProvider.updateVectorStoreService(service)
     }
 
     func updateEmbedder(_ embedder: (any MemoryEmbeddingGenerating)?) {
-        aiInteractionCoordinator.updateEmbedder(embedder)
         toolProvider.updateEmbedder(embedder)
     }
 
@@ -559,8 +501,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         sessionManager.updateProjectRoot(
             newRoot,
             input: &currentInput,
-            livePreview: &liveModelOutputPreview,
-            liveStatusPreview: &liveModelOutputStatusPreview,
             mode: &currentMode
         )
 
@@ -592,7 +532,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !preview.isEmpty {
                 historyCoordinator.updateSubject(preview)
-                sessionManager.saveSnapshot(input: currentInput, livePreview: liveModelOutputPreview, liveStatusPreview: liveModelOutputStatusPreview, mode: currentMode)
+                sessionManager.saveSnapshot(input: currentInput, mode: currentMode)
             }
         }
         publishContextEvent()
@@ -602,17 +542,14 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     private func buildUserMessageContext(context: String?) -> UserMessageContext {
         let userMessageText = currentInput
-        let mediaAttachments = currentMediaAttachments
         let hasSelectionContext = (context?.isEmpty == false)
         let userMessage = ChatMessage(
             role: .user,
             content: currentInput,
-            mediaAttachments: mediaAttachments,
             context: ChatMessageContentContext(codeContext: context)
         )
         return UserMessageContext(
             text: userMessageText,
-            mediaAttachments: mediaAttachments,
             hasSelectionContext: hasSelectionContext,
             message: userMessage
         )
@@ -636,7 +573,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     private func resetInputState() {
         currentInput = ""
-        currentMediaAttachments = []
         isSending = true
         error = nil
         providerIssue = nil
@@ -648,9 +584,8 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         let ceOverride = CustomEndpointSettingsStore().load(includeApiKey: false).contextOverride
         let windowTokens: Int = ceOverride > 0 ? ceOverride : 262_000
         let contextWindowChars: Int? = windowTokens > 0 ? windowTokens * 4 : nil
-        let kvCache4BitEnabled = settingsStore.bool(forKey: "LocalModel.KVCache4BitEnabled", default: false)
-        let isOffline = aiRouter.usesLocalModel
-        let compressionRatio: Double? = (isOffline && kvCache4BitEnabled) ? 8.0 : nil
+        let kvCache4BitEnabled = settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: false)
+        let compressionRatio: Double? = (usesLocalModel && kvCache4BitEnabled) ? 8.0 : nil
         eventBus.publish(ConversationContextEvent(
             totalCharCount: totalChars,
             messageCount: msgs.count,
@@ -659,67 +594,20 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         ))
     }
 
-    // MARK: - Preview Helpers
-
-    private func appendToLiveModelPreview(_ chunk: String) {
-        guard !chunk.isEmpty else { return }
-        liveModelOutputPreview.append(chunk)
-        if liveModelOutputPreview.count > maxPreviewCharacters {
-            liveModelOutputPreview = String(liveModelOutputPreview.suffix(maxPreviewCharacters))
-        }
-    }
-
-    private func setLiveModelPreview(_ text: String) {
-        if text.count > maxPreviewCharacters {
-            liveModelOutputPreview = String(text.suffix(maxPreviewCharacters))
-        } else {
-            liveModelOutputPreview = text
-        }
-    }
-
-    private func appendToLiveModelStatusPreview(_ message: String) {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        if liveModelOutputStatusPreview.isEmpty {
-            liveModelOutputStatusPreview = trimmed
-        } else {
-            liveModelOutputStatusPreview += "\n" + trimmed
-        }
-
-        if liveModelOutputStatusPreview.count > maxStatusPreviewCharacters {
-            liveModelOutputStatusPreview = String(liveModelOutputStatusPreview.suffix(maxStatusPreviewCharacters))
-        }
-    }
-
-    private func setLiveModelStatusPreview(_ text: String) {
-        if text.count > maxStatusPreviewCharacters {
-            liveModelOutputStatusPreview = String(text.suffix(maxStatusPreviewCharacters))
-        } else {
-            liveModelOutputStatusPreview = text
-        }
-    }
-
     // MARK: - State Reset
 
     private func resetStreamingDraftState() {
         activeStreamingRunId = nil
         draftAssistantMessageId = nil
-        draftAssistantText = ""
-        draftReasoningText = ""
         lastRenderedDraftContent = ""
         lastRenderedDraftReasoning = ""
         outputBuffer.clear()
-        streamingRenderTask?.cancel()
-        streamingRenderTask = nil
     }
 
     /// Resets the streaming text buffer without clearing run state.
     /// Used when the local model tool loop needs to start fresh output.
     @MainActor
     func clearStreamingText() {
-        draftAssistantText = ""
-        draftReasoningText = ""
         lastRenderedDraftContent = ""
         lastRenderedDraftReasoning = ""
         outputBuffer.clear()
@@ -763,10 +651,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
                 isDraft: true
             )
             self.draftAssistantMessageId = draftMessage.id
-            self.draftAssistantText = ""
             self.activeStreamingRunId = runId
-            self.setLiveModelPreview("Thinking…")
-            self.setLiveModelStatusPreview("Thinking…")
             await self.historyCoordinator.append(draftMessage)
 
             let tools = self.currentMode.allowedTools(from: self.availableTools)
@@ -780,27 +665,23 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
                 // All modes route through the same graph architecture
                 // (see ConversationSendCoordinator). Mode differences are
                 // the toolsets selected by AIMode.allowedTools(from:).
-                let preservesCache = self.aiService.preservesCache
+                // Local requests preserve the message prefix untouched so the
+                // MLX KV cache stays reusable; cloud requests don't.
+                let preservesCache = self.usesLocalModel
                 try await self.sendCoordinator.send(
                     SendRequest(
                         userInput: userContext.text,
-                        mediaAttachments: userContext.mediaAttachments,
                         mode: self.currentMode,
                         projectRoot: self.projectRoot,
                         conversationId: self.conversationId,
                         runId: runId,
                         availableTools: tools,
                         draftAssistantMessageId: self.draftAssistantMessageId,
-                        usesLocalModel: self.aiRouter.usesLocalModel,
-                        modelID: self.activeModelID,
+                        usesLocalModel: self.usesLocalModel,
                         preservesCache: preservesCache
                     )
                 )
 
-                if let finalAssistantMessage = self.messages.last(where: { $0.role == .assistant && !$0.isDraft }) {
-                    self.setLiveModelPreview(finalAssistantMessage.content)
-                }
-                self.appendToLiveModelStatusPreview("Run completed.")
                 self.resetStreamingDraftState()
                 self.providerIssue = nil
                 self.isSending = false
@@ -816,8 +697,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
                     // cancelled task must not flip isSending while a newer run
                     // is in flight (re-entrancy window).
                     if self.activeRunCounter == runSequence {
-                        self.setLiveModelPreview("Generation cancelled.")
-                        self.appendToLiveModelStatusPreview("Run cancelled.")
                         self.isSending = false
                     }
                     return
@@ -832,12 +711,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
             conversationId: conversationId,
             errorDescription: error.localizedDescription
         )
-        // Keep internal error text OUT of committed history — it would leak
-        // transport details into the model context on the next turn. The user
-        // sees the error via the live preview and the error manager alert.
-        setLiveModelPreview("Error: \(error.localizedDescription)")
-        appendToLiveModelStatusPreview("Run failed: \(error.localizedDescription)")
-
         Task { @MainActor in
             errorManager.handle(.aiServiceError(error.localizedDescription))
             self.error = "Failed to get AI response: \(error.localizedDescription)"
@@ -864,8 +737,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         cancelActiveSendTask()
         resetConversationInteractionState()
         currentInput = ""
-        setLiveModelPreview("")
-        setLiveModelStatusPreview("")
         historyCoordinator.clearConversation()
         updateCancelledToolCallIds { $0.removeAll() }
     }
@@ -875,15 +746,11 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         resetConversationInteractionState()
         saveCurrentSessionSnapshot()
         currentInput = ""
-        setLiveModelPreview("")
-        setLiveModelStatusPreview("")
         historyCoordinator.clearConversation()
 
         let oldConversationId = sessionManager.selectedId
         let newConversationId = sessionManager.startNew(
             input: &currentInput,
-            livePreview: &liveModelOutputPreview,
-            liveStatusPreview: &liveModelOutputStatusPreview,
             mode: &currentMode
         )
         updateCancelledToolCallIds { $0.removeAll() }
@@ -903,8 +770,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         guard sessionManager.switchTo(
             id: id,
             input: &currentInput,
-            livePreview: &liveModelOutputPreview,
-            liveStatusPreview: &liveModelOutputStatusPreview,
             mode: &currentMode
         ) else { return }
     }
@@ -915,8 +780,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         _ = sessionManager.close(
             id: id,
             input: &currentInput,
-            livePreview: &liveModelOutputPreview,
-            liveStatusPreview: &liveModelOutputStatusPreview,
             mode: &currentMode
         )
     }
@@ -929,8 +792,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         _ = sessionManager.recover(
             id: id,
             input: &currentInput,
-            livePreview: &liveModelOutputPreview,
-            liveStatusPreview: &liveModelOutputStatusPreview,
             mode: &currentMode
         )
     }
@@ -954,93 +815,5 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         // ToolExecutionCoordinator). Wiping them here made Stop unable to stop.
         isSending = false
         providerIssue = nil
-        setLiveModelPreview("Generation stopped by user.")
-        appendToLiveModelStatusPreview("Run stopped by user. Ready for next input.")
-    }
-
-    // MARK: - Quick Actions
-
-    func explainCode(_ code: String) {
-        guard !isSending else { return }
-        isSending = true
-        setLiveModelPreview("")
-        setLiveModelStatusPreview("")
-        activeRunCounter += 1
-        let runSequence = activeRunCounter
-        activeSendTask = Task { [weak self] in
-            guard let self = self else { return }
-            defer {
-                // Same teardown contract as startSendTask — only the current
-                // run clears the sending state, so stopGeneration() works.
-                if self.activeRunCounter == runSequence {
-                    self.activeSendTask = nil
-                    if self.isSending { self.isSending = false }
-                }
-            }
-            do {
-                let response = try await aiService.explainCode(code)
-                self.setLiveModelPreview(response)
-                self.appendToLiveModelStatusPreview("Explain code completed.")
-                await self.historyCoordinator.append(
-                    ChatMessage(
-                        role: .user,
-                        content: "Explain this code",
-                        context: ChatMessageContentContext(codeContext: code)
-                    )
-                )
-                await self.historyCoordinator.append(ChatMessage(role: .assistant, content: response))
-                self.resetStreamingDraftState()
-                self.providerIssue = nil
-            } catch {
-                if Task.isCancelled { return }
-                self.error = "Failed to explain code: \(error.localizedDescription)"
-                self.setLiveModelPreview("Error: \(error.localizedDescription)")
-                self.appendToLiveModelStatusPreview("Explain code failed: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    func refactorCode(_ code: String, instructions: String) {
-        guard !isSending else { return }
-        isSending = true
-        setLiveModelPreview("")
-        setLiveModelStatusPreview("")
-        activeRunCounter += 1
-        let runSequence = activeRunCounter
-        activeSendTask = Task { [weak self] in
-            guard let self = self else { return }
-            defer {
-                if self.activeRunCounter == runSequence {
-                    self.activeSendTask = nil
-                    if self.isSending { self.isSending = false }
-                }
-            }
-            do {
-                let response = try await aiService.refactorCode(code, instructions: instructions)
-                self.setLiveModelPreview(response)
-                self.appendToLiveModelStatusPreview("Refactor code completed.")
-                await self.historyCoordinator.append(
-                    ChatMessage(
-                        role: .user,
-                        content: "Refactor this code: \(instructions)",
-                        context: ChatMessageContentContext(codeContext: code)
-                    )
-                )
-                await self.historyCoordinator.append(
-                    ChatMessage(
-                        role: .assistant,
-                        content: "Here's the refactored code:",
-                        context: ChatMessageContentContext(codeContext: response)
-                    )
-                )
-                self.resetStreamingDraftState()
-                self.providerIssue = nil
-            } catch {
-                if Task.isCancelled { return }
-                self.error = "Failed to refactor code: \(error.localizedDescription)"
-                self.setLiveModelPreview("Error: \(error.localizedDescription)")
-                self.appendToLiveModelStatusPreview("Refactor code failed: \(error.localizedDescription)")
-            }
-        }
     }
 }

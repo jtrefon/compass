@@ -44,34 +44,6 @@ actor ModelRoutingAIService: AIService, RemoteAIAccountStatusRefreshing {
         return try await service.sendMessageStreaming(request, runId: runId)
     }
 
-    func explainCode(_ code: String) async throws -> String {
-        guard let service = await selectedService() else {
-            throw AppError.aiServiceError("No AI service available.")
-        }
-        return try await service.explainCode(code)
-    }
-
-    func refactorCode(_ code: String, instructions: String) async throws -> String {
-        guard let service = await selectedService() else {
-            throw AppError.aiServiceError("No AI service available.")
-        }
-        return try await service.refactorCode(code, instructions: instructions)
-    }
-
-    func generateCode(_ prompt: String) async throws -> String {
-        guard let service = await selectedService() else {
-            throw AppError.aiServiceError("No AI service available.")
-        }
-        return try await service.generateCode(prompt)
-    }
-
-    func fixCode(_ code: String, error: String) async throws -> String {
-        guard let service = await selectedService() else {
-            throw AppError.aiServiceError("No AI service available.")
-        }
-        return try await service.fixCode(code, error: error)
-    }
-
     func refreshAccountBalance(runId: String?) async {
         guard let remoteService = await selectedRemoteService() else { return }
         await (remoteService as? RemoteAIAccountStatusRefreshing)?.refreshAccountBalance(runId: runId)

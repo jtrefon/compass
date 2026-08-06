@@ -4,7 +4,6 @@ import Foundation
 final class AIInteractionCoordinator {
     struct SendMessageWithRetryRequest {
         let messages: [ChatMessage]
-        let mediaAttachments: [ChatMessageMediaAttachment]
         let tools: [AITool]
         let mode: AIMode
         let projectRoot: URL
@@ -17,7 +16,6 @@ final class AIInteractionCoordinator {
 
         init(
             messages: [ChatMessage],
-            mediaAttachments: [ChatMessageMediaAttachment] = [],
             tools: [AITool],
             mode: AIMode,
             projectRoot: URL,
@@ -29,7 +27,6 @@ final class AIInteractionCoordinator {
             preservesCache: Bool = false
         ) {
             self.messages = messages
-            self.mediaAttachments = mediaAttachments
             self.tools = tools
             self.mode = mode
             self.projectRoot = projectRoot
@@ -43,26 +40,17 @@ final class AIInteractionCoordinator {
     }
 
     private var aiService: AIService
-    private var codebaseIndex: CodebaseIndexProtocol?
-    private var vectorStoreService: VectorStoreService?
-    private var embedder: (any MemoryEmbeddingGenerating)?
     private let conversationPolicy: ConversationPolicyProtocol
     private let settingsStore: any OpenRouterSettingsLoading
     private let eventBus: any EventBusProtocol
 
     init(
         aiService: AIService,
-        codebaseIndex: CodebaseIndexProtocol?,
-        vectorStoreService: VectorStoreService? = nil,
-        embedder: (any MemoryEmbeddingGenerating)? = nil,
         conversationPolicy: ConversationPolicyProtocol = ConversationPolicy(),
         settingsStore: any OpenRouterSettingsLoading = OpenRouterSettingsStore(),
         eventBus: any EventBusProtocol
     ) {
         self.aiService = aiService
-        self.codebaseIndex = codebaseIndex
-        self.vectorStoreService = vectorStoreService
-        self.embedder = embedder
         self.conversationPolicy = conversationPolicy
         self.settingsStore = settingsStore
         self.eventBus = eventBus
@@ -70,18 +58,6 @@ final class AIInteractionCoordinator {
 
     func updateAIService(_ newService: AIService) {
         aiService = newService
-    }
-
-    func updateCodebaseIndex(_ newIndex: CodebaseIndexProtocol?) {
-        codebaseIndex = newIndex
-    }
-
-    func updateVectorStoreService(_ service: VectorStoreService?) {
-        vectorStoreService = service
-    }
-
-    func updateEmbedder(_ embedder: (any MemoryEmbeddingGenerating)?) {
-        self.embedder = embedder
     }
 
     func sendMessageWithRetry(
@@ -237,7 +213,6 @@ final class AIInteractionCoordinator {
 
             let historyRequest = AIServiceHistoryRequest(
                 messages: retryMessages,
-                mediaAttachments: request.mediaAttachments,
                 tools: filteredTools,
                 mode: request.mode,
                 projectRoot: request.projectRoot,
@@ -255,10 +230,6 @@ final class AIInteractionCoordinator {
 
             // Use streaming in app runtime; disable in tests for deterministic harness telemetry
             if shouldUseStreaming, let runId = request.runId {
-                eventBus.publish(LocalModelStreamingStatusEvent(
-                    runId: runId,
-                    message: "Sending request to inference server…"
-                ))
                 do {
                     let response = try await aiService.sendMessageStreaming(
                         historyRequest, runId: runId)
@@ -325,10 +296,6 @@ final class AIInteractionCoordinator {
                     }
                 }
             } else if let runId = request.runId {
-                eventBus.publish(LocalModelStreamingStatusEvent(
-                    runId: runId,
-                    message: "Sending request to inference server…"
-                ))
                 let result = await aiService.sendMessageResult(historyRequest)
 
                 switch result {
@@ -402,12 +369,7 @@ final class AIInteractionCoordinator {
         if !(response.toolCalls?.isEmpty ?? true) { return false }
         if !(response.malformedToolCalls?.isEmpty ?? true) { return true }
         guard let content = response.content else { return false }
-        let indicators = [
-            "<|tool_call>", "<tool_call>", "<tool_code>",
-            "<invoke ", "<tool name=", "<function=", "<minimax:tool_call>",
-        ]
-        if indicators.contains(where: { content.contains($0) }) { return true }
-        return content.range(of: #"call:[a-zA-Z_][a-zA-Z0-9_]*\s*\{"#, options: .regularExpression) != nil
+        return ToolMarkupStripper.containsToolCallMarkup(content)
     }
 
     private static func isEmptyResponse(_ response: AIServiceResponse) -> Bool {

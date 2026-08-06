@@ -22,6 +22,17 @@ public protocol EventBusProtocol: Sendable {
     func subscribe<E: Event>(to eventType: E.Type, handler: @escaping (E) -> Void) -> AnyCancellable
 }
 
+/// No-op bus for default wiring (test generators, optional event plumbing).
+public struct NoOpEventBus: EventBusProtocol {
+    public init() {}
+
+    public func publish<E: Event>(_ event: E) {}
+
+    public func subscribe<E: Event>(to eventType: E.Type, handler: @escaping (E) -> Void) -> AnyCancellable {
+        AnyCancellable {}
+    }
+}
+
 /// The concrete implementation of the Event Bus using Combine.
 /// This acts as the central nervous system of the IDE.
 /// Thread-safe but NOT isolated to @MainActor to avoid blocking background publishers.
@@ -121,15 +132,6 @@ public struct LocalModelStreamingChunkEvent: Event {
     }
 }
 
-public struct LocalModelStreamingStatusEvent: Event {
-    public let runId: String
-    public let message: String
-
-    public init(runId: String, message: String) {
-        self.runId = runId
-        self.message = message
-    }
-}
 public struct LocalModelStreamingReasoningChunkEvent: Event {
     public let runId: String
     public let chunk: String

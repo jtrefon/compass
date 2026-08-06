@@ -12,7 +12,6 @@ final class AIInteractionCoordinatorMalformedToolCallTests: XCTestCase {
         let mock = MalformedThenValidMockService()
         let coordinator = AIInteractionCoordinator(
             aiService: mock,
-            codebaseIndex: nil,
             eventBus: EventBus()
         )
 
@@ -38,7 +37,6 @@ final class AIInteractionCoordinatorMalformedToolCallTests: XCTestCase {
         let mock = AlwaysValidMockService()
         let coordinator = AIInteractionCoordinator(
             aiService: mock,
-            codebaseIndex: nil,
             eventBus: EventBus()
         )
 
