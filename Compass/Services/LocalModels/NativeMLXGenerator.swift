@@ -32,9 +32,19 @@ final class PromptCacheEntry: @unchecked Sendable {
 }
 
 protocol LocalModelGenerating: Sendable {
-    func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat?, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String?) async throws -> AIServiceResponse
+    func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat?, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String?, prefixCache: PrefixCacheContext?) async throws -> AIServiceResponse
     func preload(modelId: String, modelDirectory: URL, toolCallFormat: ToolCallFormat?) async throws
     func unloadAllModels(reason: String) async
+}
+
+/// Disk-persisted system-prefix KV cache: built once per (project, settings),
+/// loaded into new conversations so only the user message prefills.
+struct PrefixCacheContext: Sendable {
+    let url: URL
+    let hash: String
+    /// System-only input (renders the same system block + tools section as a
+    /// real request, with no user message) used to build the prefix cache.
+    let systemUserInput: UserInput
 }
 
 actor NativeMLXGenerator: LocalModelGenerating {
@@ -48,6 +58,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
     private static let defaultTestingRSSLimitMB = 8 * 1024
     private static let defaultOperationalRSSLimitMB = 10 * 1024
     private var promptCacheByConversation: [String: PromptCacheEntry] = [:]
+    private var savedPrefixCacheHashes: Set<String> = []
     /// LRU access order for eviction — Dictionary key iteration is hash-based,
     /// so a naive keys.first eviction could drop the ACTIVE conversation's
     /// cache while a stale one stays pinned.
@@ -117,7 +128,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         var chunkCount: Int = 0
     }
 
-    func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat? = nil, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String? = nil) async throws -> AIServiceResponse {
+    func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat? = nil, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String? = nil, prefixCache: PrefixCacheContext? = nil) async throws -> AIServiceResponse {
         if Task.isCancelled {
             throw CancellationError()
         }
@@ -145,7 +156,11 @@ actor NativeMLXGenerator: LocalModelGenerating {
             prefillStepSize: inferenceConfiguration.prefillStepSize
         )
         let eventBus = self.eventBus
-        let cacheEntry = resolveCacheEntry(conversationId: conversationId, modelDirectory: modelDirectory)
+        let cacheEntry = resolveCacheEntry(
+            conversationId: conversationId,
+            modelDirectory: modelDirectory,
+            prefixCache: prefixCache
+        )
 
         do {
             let response = try await loadModelAndGenerate(
@@ -157,6 +172,12 @@ actor NativeMLXGenerator: LocalModelGenerating {
 
             generationCount += 1
             logMLXMemorySnapshot()
+            persistPrefixCacheIfNeeded(
+                prefixCache: prefixCache,
+                modelDirectory: modelDirectory,
+                toolCallFormat: toolCallFormat,
+                inferenceConfiguration: inferenceConfiguration
+            )
             if Self.shouldUnloadModelAfterGeneration() {
                 unloadModel(modelDirectory: modelDirectory, reason: "post_generation_env_flag")
             }
@@ -204,7 +225,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         }
     }
 
-    private func resolveCacheEntry(conversationId: String?, modelDirectory: URL) -> PromptCacheEntry? {
+    private func resolveCacheEntry(conversationId: String?, modelDirectory: URL, prefixCache: PrefixCacheContext? = nil) -> PromptCacheEntry? {
         guard let conversationId else { return nil }
         let key = promptCacheKey(conversationId: conversationId, modelDirectory: modelDirectory)
         if let existing = promptCacheByConversation[key] {
@@ -221,7 +242,116 @@ actor NativeMLXGenerator: LocalModelGenerating {
         let entry = PromptCacheEntry()
         promptCacheByConversation[key] = entry
         promptCacheAccessOrder.append(key)
+        // Seed new conversations from the disk-persisted system-prefix cache.
+        // The common-prefix machinery trims it to the system block, so only
+        // the user message prefills.
+        if let prefixCache, FileManager.default.fileExists(atPath: prefixCache.url.path) {
+            if let loaded = Self.loadPrefixCache(prefixCache) {
+                entry.set(cache: loaded.cache, tokenIds: loaded.tokenIds)
+            }
+        }
         return entry
+    }
+
+    /// Loads the disk prefix cache, validating the hash metadata. Returns nil
+    /// (and deletes the stale file) on any mismatch — the caller falls back to
+    /// a fresh prefill, which is always safe.
+    nonisolated private static func loadPrefixCache(_ prefixCache: PrefixCacheContext) -> (cache: [KVCache], tokenIds: [Int])? {
+        guard let (caches, metadata) = try? loadPromptCache(url: prefixCache.url),
+              metadata["systemHash"] == prefixCache.hash,
+              let tokenIdsRaw = metadata["tokenIds"] else {
+            try? FileManager.default.removeItem(at: prefixCache.url)
+            return nil
+        }
+        let tokenIds = tokenIdsRaw.split(separator: ",").compactMap { Int($0) }
+        guard !tokenIds.isEmpty else {
+            try? FileManager.default.removeItem(at: prefixCache.url)
+            return nil
+        }
+        return (caches, tokenIds)
+    }
+
+    /// Builds the system-only prefix cache (attention KV + linear-layer state
+    /// over exactly the system block) and persists it, then evicts old files
+    /// beyond the cap. Runs once per (project, settings) hash, in the
+    /// background after the first generation.
+    private func persistPrefixCacheIfNeeded(
+        prefixCache: PrefixCacheContext?,
+        modelDirectory: URL,
+        toolCallFormat: ToolCallFormat?,
+        inferenceConfiguration: LocalModelInferenceConfiguration
+    ) {
+        guard let prefixCache else { return }
+        if savedPrefixCacheHashes.contains(prefixCache.hash) { return }
+        savedPrefixCacheHashes.insert(prefixCache.hash)
+
+        let capturedInput = UnsafeValue(value: prefixCache.systemUserInput)
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            await MLXInferenceLock.shared.acquire()
+            defer { Task { await MLXInferenceLock.shared.release() } }
+            do {
+                let container = try await self.loadContainerCached(
+                    modelDirectory: modelDirectory, toolCallFormat: toolCallFormat
+                )
+                try await container.perform { context async throws in
+                    let input = try await context.processor.prepare(input: capturedInput.value)
+                    let tokenIds = input.text.tokens.asArray(Int.self)
+                    let parameters = GenerateParameters(
+                        maxTokens: 1,
+                        maxKVSize: inferenceConfiguration.maxKVSize,
+                        kvBits: inferenceConfiguration.kvCache4BitEnabled ? 4 : nil,
+                        temperature: 0,
+                        topP: 1,
+                        prefillStepSize: inferenceConfiguration.prefillStepSize
+                    )
+                    var cache = context.model.newCache(parameters: parameters)
+                    _ = try context.model.prepare(input, cache: cache, windowSize: parameters.prefillStepSize)
+                    eval(cache)
+                    try savePromptCache(
+                        url: prefixCache.url,
+                        cache: cache,
+                        metadata: [
+                            "systemHash": prefixCache.hash,
+                            "tokenIds": tokenIds.map(String.init).joined(separator: ","),
+                        ]
+                    )
+                }
+                Self.evictPrefixCacheFiles(directory: prefixCache.url.deletingLastPathComponent(), keep: Self.maxPrefixCacheFiles)
+            } catch {
+                // Cache building is best-effort; a failure just means the next
+                // conversation pays a normal prefill.
+                await AppLogger.shared.debug(
+                    category: .localModel,
+                    message: "prefix_cache_build_failed",
+                    context: AppLogger.LogCallContext(metadata: [
+                        "hash": prefixCache.hash,
+                        "error": String(describing: error)
+                    ])
+                )
+            }
+        }
+    }
+
+    nonisolated private static let maxPrefixCacheFiles = 8
+
+    nonisolated private static func evictPrefixCacheFiles(directory: URL, keep: Int) {
+        guard let allFiles = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let prefixFiles = allFiles.filter {
+            $0.pathExtension == "safetensors" && $0.lastPathComponent.hasPrefix("kv-prefix-")
+        }
+        let sorted = prefixFiles.sorted { lhs, rhs in
+            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return lhsDate > rhsDate
+        }
+        for file in sorted.dropFirst(keep) {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     private func loadModelAndGenerate(

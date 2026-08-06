@@ -643,7 +643,8 @@ run_benchmark_local() {
                      COMPASS_LOCAL_MODEL_REPETITION_PENALTY COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE \
                      COMPASS_LOCAL_MODEL_CONTEXT_LENGTH COMPASS_LOCAL_MODEL_MAX_KV_SIZE \
                      COMPASS_LOCAL_MODEL_MAX_OUTPUT_TOKENS COMPASS_LOCAL_MODEL_PREFILL_STEP_SIZE \
-                     COMPASS_LOCAL_MODEL_KV_CACHE_4BIT COMPASS_LOCAL_MODEL_MLX_MEMORY_LIMIT_MB; do
+                     COMPASS_LOCAL_MODEL_KV_CACHE_4BIT COMPASS_LOCAL_MODEL_MLX_MEMORY_LIMIT_MB \
+                     COMPASS_LOCAL_MODEL_DISABLE_PREFIX_CACHE; do
         if [ -n "${!bench_key}" ]; then
             echo "${bench_key}=${!bench_key}" >> "$bench_conf"
         fi

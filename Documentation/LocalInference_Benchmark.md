@@ -109,6 +109,26 @@ Diagnostics: `RawMLXBaselineTests` isolates the vendor stack;
 the linear-attention kernel and per-layer timing. FIM inline model
 (Qwen2.5-Coder-1.5B) runs ≈ 8.5 tok/s — same port-level bottleneck.
 
+## System-prefix disk cache (2026-08-06)
+
+New conversations load a disk-persisted KV cache of the system block and
+prefill only the user message:
+
+- Built once per (project, settings) in the background after the first
+  generation (system-only prefill, attention KV + linear-layer state over
+  exactly the system block — linear state is lossy history and cannot be
+  reused across conversations, so the prefix is prefilled standalone).
+- File: `<project>/.ide/cache/kv-prefix-<sha256>.safetensors` (~160MB at
+  3.4K system tokens), LRU keep 8, hash covers systemContent + canonicalized
+  tool schemas + model + KV config. `COMPASS_LOCAL_MODEL_DISABLE_PREFIX_CACHE=1`
+  disables.
+- Measured: new-conversation prefill 9,028ms -> 248-519ms (promptTokens
+  3,478 -> 35-148). The 16K-context fixture still pays its full prefill
+  (context is user content, not covered — by design).
+- Correctness: the loaded cache is validated by token-id common-prefix
+  matching; any mismatch falls back to a fresh prefill (safe). The token-id
+  bookkeeping re-encodes emitted text (3.31.4 dropped stream token ids).
+
 ## Run
 
 ```sh

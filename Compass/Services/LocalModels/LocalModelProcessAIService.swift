@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 import MLX
 @preconcurrency import MLXLLM
 @preconcurrency import MLXLMCommon
@@ -214,6 +215,17 @@ actor LocalModelProcessAIService: AIService {
             messages: rawMessages, images: [], videos: [],
             tools: toolSpecs, additionalContext: additionalContext
         ))
+        // Disk-persisted system-prefix cache: new conversations load the
+        // pre-computed KV of the system block and prefill only the user
+        // message (snappy session/tab startup).
+        let prefixCache = makePrefixCacheContext(
+            projectRoot: request.projectRoot,
+            systemContent: systemContent,
+            toolSpecs: toolSpecs,
+            additionalContext: additionalContext,
+            inferenceConfiguration: safeInferenceConfiguration,
+            model: model
+        )
 
         // Wrap MLX inference with power management to prevent sleep during long generations
         let response: AIServiceResponse
@@ -228,7 +240,8 @@ actor LocalModelProcessAIService: AIService {
                     toolCallFormat: .json,
                     runId: request.runId,
                     inferenceConfiguration: safeInferenceConfiguration,
-                    conversationId: conversationId
+                    conversationId: conversationId,
+                    prefixCache: prefixCache
                 )
             }
         } else {
@@ -240,7 +253,8 @@ actor LocalModelProcessAIService: AIService {
                 toolCallFormat: .json,
                 runId: request.runId,
                 inferenceConfiguration: safeInferenceConfiguration,
-                conversationId: conversationId
+                conversationId: conversationId,
+                prefixCache: prefixCache
             )
         }
         
@@ -362,6 +376,90 @@ actor LocalModelProcessAIService: AIService {
                 ])
             )
         }
+    }
+
+    /// Builds the disk prefix-cache context (nil when disabled, no project
+    /// root, or the system block is empty). The hash covers everything that
+    /// shapes the system prefix: prompt text, tool schemas, and KV-affecting
+    /// config.
+    private func makePrefixCacheContext(
+        projectRoot: URL?,
+        systemContent: String,
+        toolSpecs: [[String: any Sendable]]?,
+        additionalContext: [String: any Sendable]?,
+        inferenceConfiguration: LocalModelInferenceConfiguration,
+        model: LocalModelDefinition
+    ) -> PrefixCacheContext? {
+        guard !prefixCacheDisabled else { return nil }
+        guard let projectRoot else { return nil }
+        guard !systemContent.isEmpty else { return nil }
+
+        var hasher = SHA256()
+        hasher.update(data: Data(systemContent.utf8))
+        if let toolSpecs,
+           let canonicalTools = Self.canonicalJSON(toolSpecs) {
+            hasher.update(data: Data(canonicalTools.utf8))
+        }
+        hasher.update(data: Data(model.id.utf8))
+        hasher.update(data: Data("kv4=\(inferenceConfiguration.kvCache4BitEnabled) kv=\(inferenceConfiguration.maxKVSize) ctx=\(inferenceConfiguration.contextLength) pf=\(inferenceConfiguration.prefillStepSize)".utf8))
+        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        let hash = String(digest.prefix(32))
+
+        let cacheDir = projectRoot
+            .appendingPathComponent(".ide", isDirectory: true)
+            .appendingPathComponent("cache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let url = cacheDir.appendingPathComponent("kv-prefix-\(hash).safetensors")
+
+        // System-only input: same template render (system block + tools
+        // section) as a real request, no user message.
+        let systemOnly = UserInput(
+            messages: [["role": MessageRole.system.rawValue, "content": systemContent]],
+            images: [], videos: [],
+            tools: toolSpecs,
+            additionalContext: additionalContext
+        )
+        return PrefixCacheContext(url: url, hash: hash, systemUserInput: systemOnly)
+    }
+
+    /// Deterministic JSON (recursively sorted keys) so the prefix-cache hash
+    /// is stable across requests — JSONSerialization key order is not.
+    nonisolated private static func canonicalJSON(_ value: Any) -> String? {
+        switch value {
+        case let dict as [String: Any]:
+            let parts = dict.keys.sorted().compactMap { key -> String? in
+                guard let child = canonicalJSON(dict[key] as Any) else { return nil }
+                return "\"\(key)\":\(child)"
+            }
+            return "{\(parts.joined(separator: ","))}"
+        case let array as [Any]:
+            let parts = array.compactMap { canonicalJSON($0) }
+            return "[\("\(parts.joined(separator: ","))")]"
+        case let str as String:
+            let escaped = str.replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escaped)\""
+        case let num as Int:
+            return "\"\(num)\"" // strings keep stable bytes
+        case let flag as Bool:
+            return "\"\(flag)\"" // strings keep stable bytes
+        default:
+            return "\"\(String(describing: value))\""
+        }
+    }
+
+    private var prefixCacheDisabled: Bool {
+        if ProcessInfo.processInfo.environment["COMPASS_LOCAL_MODEL_DISABLE_PREFIX_CACHE"] == "1" {
+            return true
+        }
+        let profileDir = ProcessInfo.processInfo.environment["COMPASS_TEST_PROFILE_DIR"]
+            ?? (try? String(contentsOf: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/compass-test-profile-path"),
+                encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let profileDir,
+              let conf = try? String(contentsOf: URL(fileURLWithPath: profileDir).appendingPathComponent("local-bench.conf"), encoding: .utf8) else {
+            return false
+        }
+        return conf.split(separator: "\n").contains { $0 == "COMPASS_LOCAL_MODEL_DISABLE_PREFIX_CACHE=1" }
     }
 
     private func logToolCallingTelemetry(
