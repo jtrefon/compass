@@ -129,6 +129,20 @@ prefill only the user message:
   matching; any mismatch falls back to a fresh prefill (safe). The token-id
   bookkeeping re-encodes emitted text (3.31.4 dropped stream token ids).
 
+## Speculative decoding — tried and reverted (2026-08-06)
+
+Qwen3.5-0.8B-4bit was verified as a vocab-compatible draft (248,044 ==
+248,044) and wired into the upgraded vendor's SpeculativeTokenIterator.
+Result: **negative** — generation 29 -> 14.7 tps on QA, and the tool-call
+task broke (no call recovered). Root cause is architectural: 24 of 32
+layers are linear-attention whose per-token cost is the forward itself —
+verification offers no amortization, the draft only adds overhead, and the
+MambaCache state (lossy history) cannot roll back rejected draft tokens,
+contaminating the following generation. The upstream guard ("requires
+trimmable KV caches") is correct for this architecture. All experiment
+wiring removed (zero-debt); the ~635MB draft download on disk
+(mlx-community_Qwen3.5-0.8B-4bit_main) is inert and can be deleted.
+
 ## Run
 
 ```sh
