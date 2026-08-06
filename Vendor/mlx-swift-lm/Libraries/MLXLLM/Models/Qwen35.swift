@@ -225,6 +225,7 @@ final class Qwen35GatedDeltaNet: Module {
         super.init()
     }
 
+
     func callAsFunction(
         _ inputs: MLXArray,
         mask: MLXArray? = nil,
@@ -532,6 +533,21 @@ public class Qwen35TextModelInner: Module {
         super.init()
     }
 
+    /// COMPASS_GDN_TIMING=1 (env or local-bench.conf) prints per-layer
+    /// prefill timings — diagnostics only, default off.
+    static func enableLayerTiming() -> Bool {
+        if ProcessInfo.processInfo.environment["COMPASS_GDN_TIMING"] == "1" { return true }
+        let profileDir = ProcessInfo.processInfo.environment["COMPASS_TEST_PROFILE_DIR"]
+            ?? (try? String(contentsOf: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/compass-test-profile-path"),
+                encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let profileDir,
+              let conf = try? String(contentsOf: URL(fileURLWithPath: profileDir).appendingPathComponent("local-bench.conf"), encoding: .utf8) else {
+            return false
+        }
+        return conf.split(separator: "\n").contains { $0 == "COMPASS_GDN_TIMING=1" }
+    }
+
     func callAsFunction(_ inputs: MLXArray, cache: [KVCache?]? = nil) -> MLXArray {
         var hiddenStates = embedTokens(inputs)
 
@@ -545,8 +561,10 @@ public class Qwen35TextModelInner: Module {
 
         let modelDtype = hiddenStates.dtype
         let isPrefill = inputs.dim(1) > 1
+        let layerTimer = Self.enableLayerTiming()
 
         for (i, layer) in layers.enumerated() {
+            let layerStart = layerTimer ? ContinuousClock.now : nil
             let mask = layer.isLinear ? ssmMask : nil
             let attnMask =
                 layer.isLinear
@@ -554,11 +572,14 @@ public class Qwen35TextModelInner: Module {
             hiddenStates = layer(
                 hiddenStates, attentionMask: attnMask, ssmMask: mask, cache: cacheArray?[i])
             hiddenStates = hiddenStates.asType(modelDtype)
-
-            if isPrefill {
+            if let layerStart, layerTimer {
+                // Force GPU execution so the elapsed time reflects compute.
                 eval(hiddenStates)
                 if let c = cacheArray?[i] { eval(c) }
-                Memory.clearCache()
+                let ms = Int(layerStart.duration(to: .now).components.seconds * 1000)
+                if isPrefill && ms > 0 {
+                    print("[LAYER-TIMING] \(i) \(layer.isLinear ? "linear" : "full-attn") \(ms)ms")
+                }
             }
             }
 

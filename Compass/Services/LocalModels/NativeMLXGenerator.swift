@@ -44,8 +44,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
     private var accessOrder: [URL] = []
     private let maxCachedModels = 1
     private var generationCount: Int = 0
-    private static let mlxCacheLimitBytes = 128 * 1024 * 1024
-    private static let mlxMemoryLimitBytes = 3072 * 1024 * 1024
+    private static let mlxCacheLimitBytes = 1024 * 1024 * 1024
     private static let defaultTestingRSSLimitMB = 8 * 1024
     private static let defaultOperationalRSSLimitMB = 10 * 1024
     private var promptCacheByConversation: [String: PromptCacheEntry] = [:]
@@ -70,8 +69,18 @@ actor NativeMLXGenerator: LocalModelGenerating {
 
     init(eventBus: EventBusProtocol) {
         self.eventBus = eventBus
+        // Memory budget: do NOT clamp mlx's memoryLimit to a tiny hard cap —
+        // malloc then blocks on every allocation over it (a 2.5GB model under
+        // a 3GB limit made prefill/generation wait on scheduled tasks, ~4-10x
+        // slower). Default = 1.5x the device's recommended working set, which
+        // is right for a 15GB M-series. Cache limit: 1GB (was 128MB — every
+        // eval flushed and re-allocated Metal buffers). Both knobs stay
+        // tunable for the benchmark (COMPASS_LOCAL_MODEL_* conf transport).
         Memory.cacheLimit = Self.mlxCacheLimitBytes
-        Memory.memoryLimit = Self.mlxMemoryLimitBytes
+        if let configured = ProcessInfo.processInfo.environment["COMPASS_LOCAL_MODEL_MLX_MEMORY_LIMIT_MB"],
+           let limitMB = Int(configured), limitMB > 0 {
+            Memory.memoryLimit = limitMB * 1024 * 1024
+        }
         Task { await Self.logDeviceAndMemoryInfo() }
     }
 

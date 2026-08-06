@@ -66,12 +66,39 @@ Per task-run: one NDJSON row in `<root>/.ide/logs/local-bench.ndjson` with
 config, per-KPI values, and the raw answer. Console prints a `[LOCAL-BENCH]`
 table (per-config aggregates) for quick reads.
 
-## Current baseline (2026-08-06, before tuning)
+## Baseline + findings (2026-08-06)
 
-Measured from a two-turn local chat trace: generation 22.9 → 29.1 tok/s,
-TTFT (incl. load) ≈ 30 s for an 8813-token prompt (prefill ≈ 296 tok/s —
-**the primary tuning target**; generation tps is secondary), RSS ≈ 341-440 MB.
-FIM inline model (Qwen2.5-Coder-1.5B) runs ≈ 8.5 tok/s (0.118 s/token).
+Measured via LocalBenchmarkHarnessTests (real pipeline, Qwen3.5-4B-MLX-4bit):
+
+| Metric | Before | After | Change |
+|---|---|---|---|
+| Prefill (8.8K-token prompt) | ~296 tok/s (~28s) | ~373 tok/s (~24s) | +25% |
+| Generation | 25-31 tps | 25-31 tps | — |
+| GPU peak | 3.0GB (at 3GB hard limit) | ~3.0GB (limit removed) | — |
+
+Wins applied:
+- **MLX memory limit**: the hardcoded 3GB `Memory.memoryLimit` blocked malloc
+  whenever a 2.5GB model + activations exceeded it (mlx-swift: "malloc waits on
+  scheduled tasks if the limit is exceeded"). Removed; default is 1.5x the
+  device recommended working set. Cache limit 128MB → 1GB. Both env-tunable.
+- **Per-layer eval + `Memory.clearCache()` removed** from Qwen35TextModelInner
+  (fork addition, serialized the GPU pipeline 36x per prefill chunk).
+
+Still open (bottleneck is the vendored Qwen3.5 port, not the app — a raw
+MLX baseline bypassing Compass measures the same 30-36 tps / ~350 tok/s):
+- The 24 linear-attention layers run a hand-written Metal kernel (grid
+  32×128×32) — kernel vs ops-fallback measured equal (~32 tps).
+- No `gated_delta_update` fast op exists in mlx-swift (python mlx has one);
+  generation ~30 tps is the port's per-layer cost, context-independent.
+- System prompt is ~6.9K tokens — the largest practical prefill lever
+  (concise tool-prompt mode, fewer tools in .chat).
+- KV-4bit is currently OFF in user settings (2.9GB active); turning it on
+  cuts KV memory ~40%.
+
+Diagnostics: `RawMLXBaselineTests` isolates the vendor stack;
+`COMPASS_GDN_KERNEL=0` / `COMPASS_GDN_TIMING=1` via local-bench.conf toggle
+the linear-attention kernel and per-layer timing. FIM inline model
+(Qwen2.5-Coder-1.5B) runs ≈ 8.5 tok/s — same port-level bottleneck.
 
 ## Run
 

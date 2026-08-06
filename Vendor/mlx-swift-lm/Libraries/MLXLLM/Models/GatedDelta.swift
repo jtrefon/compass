@@ -112,9 +112,22 @@ private final class GatedDeltaKernelManager: Sendable {
     let kernelMasked: MLXFast.MLXFastKernel?
 
     private init() {
-        kernel = makeGatedDeltaKernel(hasMask: false)
-        kernelMasked = makeGatedDeltaKernel(hasMask: true)
-        print("[GDN-INIT] kernel=\(kernel != nil) kernelMasked=\(kernelMasked != nil)")
+        // COMPASS_GDN_KERNEL=0 forces the ops fallback (diagnostics: compares
+        // the custom Metal kernel vs the array-ops path). Read via env or the
+        // benchmark conf transport.
+        var disableKernel = ProcessInfo.processInfo.environment["COMPASS_GDN_KERNEL"] == "0"
+        if !disableKernel {
+            let profileDir = ProcessInfo.processInfo.environment["COMPASS_TEST_PROFILE_DIR"]
+                ?? (try? String(contentsOf: FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Application Support/compass-test-profile-path"),
+                    encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let profileDir,
+               let conf = try? String(contentsOf: URL(fileURLWithPath: profileDir).appendingPathComponent("local-bench.conf"), encoding: .utf8) {
+                disableKernel = conf.split(separator: "\n").contains { $0 == "COMPASS_GDN_KERNEL=0" }
+            }
+        }
+        kernel = disableKernel ? nil : makeGatedDeltaKernel(hasMask: false)
+        kernelMasked = disableKernel ? nil : makeGatedDeltaKernel(hasMask: true)
     }
 }
 
@@ -297,14 +310,7 @@ func gatedDeltaUpdate(
     let state = state ?? MLXArray.zeros([B, Hv, Dv, Dk], dtype: q.dtype)
 
     if GatedDeltaKernelManager.shared.kernel != nil {
-        if B > 0 && q.dim(1) > 1 && q.dim(1) >= 128 {
-            print("[GDN-PATH] kernel T=\(q.dim(1))")
-        }
         return gatedDeltaKernel(q: q, k: k, v: v, g: g, beta: beta, state: state, mask: mask)
-    }
-
-    if B > 0 && q.dim(1) > 1 && q.dim(1) >= 128 {
-        print("[GDN-PATH] ops_fallback T=\(q.dim(1))")
     }
     return gatedDeltaOps(q: q, k: k, v: v, g: g, beta: beta, state: state, mask: mask)
 }
