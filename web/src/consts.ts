@@ -11,6 +11,11 @@ export const INSTALL_BREW = "jtrefon/compass/compass";
 /** Homebrew tap cask, live since v0.6: the fully-qualified token auto-taps */
 export const BREW_AVAILABLE = "Live";
 
+export const INSTALL_CURL =
+  "curl -fsSL https://raw.githubusercontent.com/jtrefon/compass/main/install.sh | bash";
+/** One-line installer lives in the repo root so raw.githubusercontent.com serves it */
+export const INSTALL_SCRIPT_URL = `${REPO}/blob/main/install.sh`;
+
 export const NAV = [
   { label: "Features", href: "/features" },
   { label: "Tech", href: "/tech" },
