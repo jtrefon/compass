@@ -62,7 +62,12 @@ enum LocalModelInferenceOverrides {
             min: 64,
             max: 8_192
         )
-        let kvCache4BitEnabled = envKV4Bit == "0" ? false : defaultKVCache4BitEnabled
+        let kvCache4BitEnabled: Bool
+        if let envKV4Bit {
+            kvCache4BitEnabled = envKV4Bit == "1" ? true : envKV4Bit == "0" ? false : defaultKVCache4BitEnabled
+        } else {
+            kvCache4BitEnabled = defaultKVCache4BitEnabled
+        }
         let prefillStepSize = clamp(
             envPrefill ?? 128,
             min: 64,

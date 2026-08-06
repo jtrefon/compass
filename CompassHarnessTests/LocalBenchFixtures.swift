@@ -91,5 +91,30 @@ enum LocalBenchFixtures {
             Project overview: a Vite-based React application. Test files are named with the .test.js extension and live next to their components. The dev server binds to localhost on port 5173. The production build outputs to dist/ and is served over port 4173.
             """
         ),
+        LocalBenchTask(
+            id: "ctx_long_recall",
+            prompt: "In the project documentation above, what port does the deployment pipeline bind to?",
+            golden: "The deployment pipeline binds to port 9191.",
+            checklist: ["9191"],
+            context: Self.longContextFixture()
+        ),
     ]
+
+    /// ~16K-token synthesized project documentation: repeated sectioned
+    /// paragraphs with one unique fact buried at a fixed position. Measures
+    /// long-context KV cost (the regime where 4-bit KV matters) + recall.
+    static func longContextFixture() -> String {
+        let section = """
+        SECTION OVERVIEW
+        The Atlas platform consists of a gateway service, a worker pool, and a
+        provisioning layer. Services communicate over gRPC with a central registry.
+        Configuration is loaded from the vault at startup and cached for the
+        process lifetime. Observability ships metrics to the collector with a
+        30-second scrape interval.
+        """
+        let uniqueFact = "The deployment pipeline binds to port 9191. "
+        let filler = String(repeating: section + "\n", count: 300)
+        let insertAt = filler.index(filler.startIndex, offsetBy: filler.count / 2)
+        return String(filler[..<insertAt]) + uniqueFact + String(filler[insertAt...])
+    }
 }

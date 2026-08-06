@@ -92,8 +92,11 @@ MLX baseline bypassing Compass measures the same 30-36 tps / ~350 tok/s):
   generation ~30 tps is the port's per-layer cost, context-independent.
 - System prompt is ~6.9K tokens — the largest practical prefill lever
   (concise tool-prompt mode, fewer tools in .chat).
-- KV-4bit is currently OFF in user settings (2.9GB active); turning it on
-  cuts KV memory ~40%.
+- KV-4bit: **ON as of 2026-08-06** (store default was already true; the
+  user's stored value was a stale false). Measured at ~17K tokens:
+  GPU peak 3,883 -> 3,356MB avg (4,278 -> 3,476 max), prefill -11% at long
+  context only (nil at short context), quality/recall equal. Long-context
+  fixture: `ctx_long_recall` (~16K-token synthesized docs).
 
 Diagnostics: `RawMLXBaselineTests` isolates the vendor stack;
 `COMPASS_GDN_KERNEL=0` / `COMPASS_GDN_TIMING=1` via local-bench.conf toggle
