@@ -281,6 +281,26 @@ final class LineCompletionEngineTests: XCTestCase {
         XCTAssertEqual(inference.capturedRequests.count, 1, "no model call on consumption")
     }
 
+    /// Consumption has no time window — only the newline rule. Even a gap far
+    /// beyond the old 500ms accept-verify window must consume without a model
+    /// call (real typing cadence is 2-4s, which the old window never survived).
+    func test_engine_consumptionWorksAfterLongGap() async throws {
+        let inference = TestLineInferenceService()
+        inference.responses = [.immediate("lor: red;")]
+        let engine = makeEngine(inference: inference)
+        let captured = CapturedLineSuggestions()
+        engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
+
+        engine.requestCompletion(for: snapshot(buffer: ".foo { c", cursor: 8), gapMs: 400, typedChar: "c")
+        try await Task.sleep(nanoseconds: 700_000_000)
+
+        captured.reset()
+        engine.requestCompletion(for: snapshot(buffer: ".foo { cl", cursor: 9), gapMs: 400, typedChar: "l")
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(captured.lastSuggestion, "or: red;", "consumption must work regardless of elapsed time")
+        XCTAssertEqual(inference.capturedRequests.count, 1, "no model call on consumption")
+    }
+
     // MARK: - Helpers
 
     private func makeEngine(
@@ -302,74 +322,6 @@ final class LineCompletionEngineTests: XCTestCase {
             selectionLength: 0,
             isComposingText: false,
             triggerReason: .automatic
-        )
-    }
-}
-
-// MARK: - Mocks
-
-@MainActor
-private final class CapturedLineSuggestions: @unchecked Sendable {
-    private(set) var lastSuggestion: String?
-    private(set) var lastPresentation: InlineSuggestionPresentation?
-
-    func set(_ presentation: InlineSuggestionPresentation?) {
-        lastPresentation = presentation
-        lastSuggestion = presentation?.suggestionText
-    }
-
-    func reset() {
-        lastSuggestion = nil
-        lastPresentation = nil
-    }
-}
-
-@MainActor
-private final class TestLineInferenceService: CompletionInferring {
-    enum Response {
-        case immediate(String)
-        case delayed(String, UInt64)
-    }
-
-    var responses: [Response] = []
-    var capturedRequests: [InlineCompletionRequest] = []
-    var firstTokenID: Int?
-
-    var lastRequestMaxTokens: Int? { capturedRequests.last?.maxTokens }
-
-    func lastGeneratedFirstTokenID() async -> Int? {
-        firstTokenID
-    }
-
-    func inferStreaming(for request: InlineCompletionRequest, settings: InlineCompletionSettings) async throws -> AsyncThrowingStream<String, Error>? {
-        capturedRequests.append(request)
-        return AsyncThrowingStream<String, Error> { continuation in
-            guard !self.responses.isEmpty else {
-                continuation.finish()
-                return
-            }
-            let response = self.responses.removeFirst()
-            switch response {
-            case .immediate(let text):
-                continuation.yield(text)
-                continuation.finish()
-            case .delayed(let text, let delay):
-                Task {
-                    try? await Task.sleep(nanoseconds: delay)
-                    continuation.yield(text)
-                    continuation.finish()
-                }
-            }
-        }
-    }
-}
-
-@MainActor
-private final class LineTestSettingsStore: InlineCompletionSettingsStore {
-    override func load() -> InlineCompletionSettings {
-        InlineCompletionSettings(
-            isEnabled: true, debounceMilliseconds: 0, aggressiveness: 0.6,
-            maxSuggestionLength: 200, debugOverlayEnabled: false
         )
     }
 }
