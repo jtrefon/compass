@@ -254,18 +254,20 @@ actor FIMInferenceService {
                     let cachedCache = kvCache
                     let prevCachedOffset = cachedOffset
                     let stateBox = GenerationStateBox()
-                    let tracePromptLen = tokenIds.count
-                    let traceCommon = Self.commonPrefixLength(cachedTokens, tokenIds)
-                    FIMTraceLogger.shared.log("fim.infer", [
-                        "prompt": "\(tracePromptLen)",
-                        "cached": "\(cachedTokens.count)",
-                        "common": "\(traceCommon)",
-                        "delta": "\(tracePromptLen - traceCommon)",
-                        "reuse": "\(cachedCache?.count ?? -1)",
-                        "banned": "\(bannedTokenIDs.count)",
-                        "temp": String(format: "%.1f", temperature),
-                        "maxTokens": "\(maxTokens)"
-                    ])
+                    if FIMTraceLogger.shared.isEnabled {
+                        let tracePromptLen = tokenIds.count
+                        let traceCommon = Self.commonPrefixLength(cachedTokens, tokenIds)
+                        FIMTraceLogger.shared.log("fim.infer", [
+                            "prompt": "\(tracePromptLen)",
+                            "cached": "\(cachedTokens.count)",
+                            "common": "\(traceCommon)",
+                            "delta": "\(tracePromptLen - traceCommon)",
+                            "reuse": "\(cachedCache?.count ?? -1)",
+                            "banned": "\(bannedTokenIDs.count)",
+                            "temp": String(format: "%.1f", temperature),
+                            "maxTokens": "\(maxTokens)"
+                        ])
+                    }
                     let stream = try await container.perform { context in
                         let (cache, effectiveInput) = try Self.resolveKVCache(
                             input: fullInput,

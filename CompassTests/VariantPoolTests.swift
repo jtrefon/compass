@@ -53,7 +53,7 @@ final class VariantPoolStoreTests: XCTestCase {
             anchorCursor: branchBuffer.count,
             variants: [InlineCompletionVariant(
                 id: UUID(), text: "$return", temperature: 0.7,
-                bannedTokenCount: 3, createdAt: Date(), rankScore: 0.5
+                bannedTokenCount: 3, createdAt: Date()
             )],
             lastHitAt: Date(), byteSize: 0
         )

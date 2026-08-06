@@ -53,9 +53,6 @@ class UIStateManager: ObservableObject {
     @Published var inlineCompletionEnabled: Bool = InlineCompletionSettings.default.isEnabled {
         didSet { trackChange("inlineCompletionEnabled", from: oldValue, to: inlineCompletionEnabled) }
     }
-    @Published var inlineCompletionDebounceMilliseconds: Int = InlineCompletionSettings.default.debounceMilliseconds {
-        didSet { trackChange("inlineCompletionDebounceMilliseconds", from: oldValue, to: inlineCompletionDebounceMilliseconds) }
-    }
     @Published var inlineCompletionAggressiveness: Double = InlineCompletionSettings.default.aggressiveness {
         didSet { trackChange("inlineCompletionAggressiveness", from: oldValue, to: inlineCompletionAggressiveness) }
     }
@@ -193,11 +190,6 @@ class UIStateManager: ObservableObject {
         uiService.setInlineCompletionEnabled(enabled)
     }
 
-    func setInlineCompletionDebounceMilliseconds(_ milliseconds: Int) {
-        inlineCompletionDebounceMilliseconds = max(50, min(800, milliseconds))
-        uiService.setInlineCompletionDebounceMilliseconds(inlineCompletionDebounceMilliseconds)
-    }
-
     func setInlineCompletionAggressiveness(_ aggressiveness: Double) {
         inlineCompletionAggressiveness = max(0.05, min(1.0, aggressiveness))
         uiService.setInlineCompletionAggressiveness(inlineCompletionAggressiveness)
@@ -267,7 +259,6 @@ class UIStateManager: ObservableObject {
         wordWrap = settings.wordWrap
         minimapVisible = settings.minimapVisible
         inlineCompletionEnabled = settings.inlineCompletionEnabled
-        inlineCompletionDebounceMilliseconds = settings.inlineCompletionDebounceMilliseconds
         inlineCompletionAggressiveness = settings.inlineCompletionAggressiveness
         inlineCompletionMaxSuggestionLength = settings.inlineCompletionMaxSuggestionLength
         inlineCompletionDebugOverlayEnabled = settings.inlineCompletionDebugOverlayEnabled
@@ -299,7 +290,6 @@ class UIStateManager: ObservableObject {
         wordWrap = false
         minimapVisible = false
         inlineCompletionEnabled = InlineCompletionSettings.default.isEnabled
-        inlineCompletionDebounceMilliseconds = InlineCompletionSettings.default.debounceMilliseconds
         inlineCompletionAggressiveness = InlineCompletionSettings.default.aggressiveness
         inlineCompletionMaxSuggestionLength = InlineCompletionSettings.default.maxSuggestionLength
         inlineCompletionDebugOverlayEnabled = InlineCompletionSettings.default.debugOverlayEnabled

@@ -2,10 +2,10 @@ import XCTest
 @testable import Compass
 
 final class SuggestionConsumptionPolicyTests: XCTestCase {
-    private func variant(_ text: String, rank: Double = 0.5) -> InlineCompletionVariant {
+    private func variant(_ text: String) -> InlineCompletionVariant {
         InlineCompletionVariant(
             id: UUID(), text: text, temperature: 0.1,
-            bannedTokenCount: 0, createdAt: Date(), rankScore: rank
+            bannedTokenCount: 0, createdAt: Date()
         )
     }
 
@@ -38,10 +38,10 @@ final class SuggestionConsumptionPolicyTests: XCTestCase {
         XCTAssertNil(SuggestionConsumptionPolicy.consume(from: [], bufferBeforeCursor: "$p"))
     }
 
-    func testPicksFirstRankedCandidate() {
-        // Both candidates share the head; the higher-ranked one wins.
+    func testPicksFirstCandidateInOrder() {
+        // Both candidates share the head; the first wins.
         let result = SuggestionConsumptionPolicy.consume(
-            from: [variant("lugin->method();", rank: 0.9), variant("lugout();", rank: 0.3)],
+            from: [variant("lugin->method();"), variant("lugout();")],
             bufferBeforeCursor: "    $plu"
         )
         XCTAssertEqual(result?.consumedText, "lugin->method();")

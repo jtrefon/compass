@@ -203,29 +203,6 @@ final class FIMBenchmarkHarnessTests: XCTestCase {
     /// always a single line per suggestion; N suggestions = N sequential
     /// single-line generations. Budget framing: suggestion visible within 2s
     /// of the typing pause.
-    func testFIMMultipleSuggestionCapacity() async throws {
-        let service = try await makeService()
-        let cfg = samplingConfig()
-        let maxSuggestions = env("COMPASS_FIM_MAX_SUGGESTIONS", 5)
-        let charsPerToken = env("COMPASS_FIM_CONTEXT_CHARS_PER_TOKEN", 2.0)
-        let suffix = "    }\n    return total\n}\n"
-
-        _ = await measure(service, prefix: syntheticCode(chars: 800), suffix: suffix, cfg: cfg, label: "capacity-warmup")
-
-        let sizes = [(label: "small", fraction: 0.30), (label: "mid", fraction: 0.60), (label: "large", fraction: 0.90)]
-        for size in sizes {
-            let prefix = syntheticCode(chars: Int(Double(Self.modelContextTokens) * charsPerToken * size.fraction))
-            Swift.print("[FIM-BENCH] capacity @\(size.label)-file (\(Int(size.fraction * 100))% context): \(maxSuggestions) sequential single-line suggestions")
-            var cumulativeMs = 0.0
-            for i in 1...maxSuggestions {
-                let result = await measure(service, prefix: prefix, suffix: suffix, cfg: cfg, label: "\(size.label)-sug-\(i)")
-                cumulativeMs += result.totalMs
-                Swift.print(String(format: "[FIM-BENCH]   #%d total=%6.0fms ttft=%6.0fms (cumulative %7.0fms)",
-                                   i, result.totalMs, result.ttftMs, cumulativeMs))
-            }
-        }
-    }
-
     // MARK: - Language quality matrix
 
     func testFIMLanguageQualityMatrix() async throws {

@@ -83,10 +83,6 @@ final class UIService: UIServiceProtocol {
         settingsStore.set(enabled, forKey: AppConstantsStorage.inlineCompletionEnabledKey)
     }
 
-    func setInlineCompletionDebounceMilliseconds(_ milliseconds: Int) {
-        settingsStore.set(max(50, min(800, milliseconds)), forKey: AppConstantsStorage.inlineCompletionDebounceMsKey)
-    }
-
     func setInlineCompletionAggressiveness(_ aggressiveness: Double) {
         settingsStore.set(max(0.05, min(1.0, aggressiveness)), forKey: AppConstantsStorage.inlineCompletionAggressivenessKey)
     }
@@ -194,7 +190,6 @@ final class UIService: UIServiceProtocol {
             wordWrap: wordWrap,
             minimapVisible: minimapVisible,
             inlineCompletionEnabled: inlineCompletionSettings.isEnabled,
-            inlineCompletionDebounceMilliseconds: inlineCompletionSettings.debounceMilliseconds,
             inlineCompletionAggressiveness: inlineCompletionSettings.aggressiveness,
             inlineCompletionMaxSuggestionLength: inlineCompletionSettings.maxSuggestionLength,
             inlineCompletionDebugOverlayEnabled: inlineCompletionSettings.debugOverlayEnabled,
@@ -223,7 +218,6 @@ final class UIService: UIServiceProtocol {
         setWordWrap(settings.wordWrap)
         setMinimapVisible(settings.minimapVisible)
         setInlineCompletionEnabled(settings.inlineCompletionEnabled)
-        setInlineCompletionDebounceMilliseconds(settings.inlineCompletionDebounceMilliseconds)
         setInlineCompletionAggressiveness(settings.inlineCompletionAggressiveness)
         setInlineCompletionMaxSuggestionLength(settings.inlineCompletionMaxSuggestionLength)
         setInlineCompletionDebugOverlayEnabled(settings.inlineCompletionDebugOverlayEnabled)
@@ -250,7 +244,6 @@ final class UIService: UIServiceProtocol {
             AppConstantsStorage.agentMemoryEnabledKey,
             AppConstantsStorage.agentQAReviewEnabledKey,
             AppConstantsStorage.inlineCompletionEnabledKey,
-            AppConstantsStorage.inlineCompletionDebounceMsKey,
             AppConstantsStorage.inlineCompletionAggressivenessKey,
             AppConstantsStorage.inlineCompletionMaxLengthKey,
             AppConstantsStorage.inlineCompletionDebugOverlayKey
@@ -273,7 +266,6 @@ final class UIService: UIServiceProtocol {
             "wordWrap": settings.wordWrap,
             "minimapVisible": settings.minimapVisible,
             "inlineCompletionEnabled": settings.inlineCompletionEnabled,
-            "inlineCompletionDebounceMilliseconds": settings.inlineCompletionDebounceMilliseconds,
             "inlineCompletionAggressiveness": settings.inlineCompletionAggressiveness,
             "inlineCompletionMaxSuggestionLength": settings.inlineCompletionMaxSuggestionLength,
             "inlineCompletionDebugOverlayEnabled": settings.inlineCompletionDebugOverlayEnabled,
@@ -301,7 +293,6 @@ final class UIService: UIServiceProtocol {
         applyWordWrap(from: settings)
         applyMinimapVisible(from: settings)
         applyInlineCompletionEnabled(from: settings)
-        applyInlineCompletionDebounceMilliseconds(from: settings)
         applyInlineCompletionAggressiveness(from: settings)
         applyInlineCompletionMaxSuggestionLength(from: settings)
         applyInlineCompletionDebugOverlayEnabled(from: settings)
@@ -376,11 +367,6 @@ final class UIService: UIServiceProtocol {
     private func applyInlineCompletionEnabled(from settings: [String: Any]) {
         guard let enabled = settings["inlineCompletionEnabled"] as? Bool else { return }
         setInlineCompletionEnabled(enabled)
-    }
-
-    private func applyInlineCompletionDebounceMilliseconds(from settings: [String: Any]) {
-        guard let milliseconds = settings["inlineCompletionDebounceMilliseconds"] as? Int else { return }
-        setInlineCompletionDebounceMilliseconds(milliseconds)
     }
 
     private func applyInlineCompletionAggressiveness(from settings: [String: Any]) {

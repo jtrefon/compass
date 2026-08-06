@@ -38,7 +38,6 @@ final class CompletionInferenceServiceTests: XCTestCase {
         )
         let settings = InlineCompletionSettings(
             isEnabled: true,
-            debounceMilliseconds: 0,
             aggressiveness: 0.3,
             maxSuggestionLength: 40,
             debugOverlayEnabled: false
@@ -50,29 +49,5 @@ final class CompletionInferenceServiceTests: XCTestCase {
         XCTAssertEqual(recorder.capturedLocallyPrefix, "func foo() {")
         XCTAssertEqual(recorder.capturedLocallySuffix, "\n}")
         XCTAssertEqual(recorder.capturedMaxTokens, 14)
-    }
-}
-
-@MainActor
-private final class PromptRecorder: InlineCompletionProviding {
-    var capturedLocallyPrefix: String?
-    var capturedLocallySuffix: String?
-    var capturedMaxTokens: Int?
-
-    func completeLocallyStreaming(
-        prefix: String,
-        suffix: String,
-        maxTokens: Int,
-        bannedTokenIDs: [Int],
-        variantTemperature: Float?
-    ) async throws -> AsyncThrowingStream<String, Error>? {
-        capturedLocallyPrefix = prefix
-        capturedLocallySuffix = suffix
-        capturedMaxTokens = maxTokens
-        return nil
-    }
-
-    func lastGeneratedFirstTokenID() async -> Int? {
-        nil
     }
 }

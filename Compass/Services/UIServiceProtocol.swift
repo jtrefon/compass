@@ -16,7 +16,6 @@ protocol UIServiceProtocol {
     func setWordWrap(_ wrap: Bool)
     func setMinimapVisible(_ visible: Bool)
     func setInlineCompletionEnabled(_ enabled: Bool)
-    func setInlineCompletionDebounceMilliseconds(_ milliseconds: Int)
     func setInlineCompletionAggressiveness(_ aggressiveness: Double)
     func setInlineCompletionMaxSuggestionLength(_ length: Int)
     func setInlineCompletionDebugOverlayEnabled(_ enabled: Bool)

@@ -13,7 +13,8 @@ final class FIMTraceLogger: @unchecked Sendable {
 
     private let lock = NSLock()
     private var handle: FileHandle?
-    private let isEnabled: Bool
+    /// Internal so callers can skip expensive trace computation when disabled.
+    private(set) var isEnabled: Bool
     private let encoder = JSONEncoder()
     private var projectRoot: URL?
 

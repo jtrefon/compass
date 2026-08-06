@@ -9,7 +9,6 @@ enum AppConstantsStorage {
     static let agentMemoryEnabledKey = "Agent.MemoryEnabled"
     static let agentQAReviewEnabledKey = "Agent.QAReviewEnabled"
     static let inlineCompletionEnabledKey = "Editor.InlineCompletion.Enabled"
-    static let inlineCompletionDebounceMsKey = "Editor.InlineCompletion.DebounceMs"
     static let inlineCompletionAggressivenessKey = "Editor.InlineCompletion.Aggressiveness"
     static let inlineCompletionMaxLengthKey = "Editor.InlineCompletion.MaxLength"
     static let inlineCompletionDebugOverlayKey = "Editor.InlineCompletion.DebugOverlay"

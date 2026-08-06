@@ -1,8 +1,39 @@
 import Foundation
 
+/// Per-pane session state for the completion flow: what was shown, where,
+/// and the buffer context used for consumption (accept-verify) and pool
+/// re-publishing. One value struct per pane keeps the engine's bookkeeping
+/// auditable and testable (no parallel dictionaries).
+struct CompletionSessionState {
+    var lastShownSuggestion: String?
+    var lastShownCursor: Int?
+    var lastBufferBeforeCursor: String?
+    var lastPoolPublishAt: Date?
+}
+
+/// Rate-limits ghost publishes during streaming: the first chunk is published
+/// immediately (perceived latency = TTFT), subsequent chunks at most every
+/// `minIntervalMs` (the eye cannot track faster — fixes the per-token ghost
+/// shake), and the final result on completion.
+struct GhostPublishThrottle {
+    static let minIntervalMs: Double = 100
+    private var lastPublishAt: Date?
+
+    mutating func shouldPublish(force: Bool = false, now: Date = Date()) -> Bool {
+        if force { return true }
+        guard let last = lastPublishAt else { return true }
+        return now.timeIntervalSince(last) * 1000 >= Self.minIntervalMs
+    }
+
+    mutating func didPublish(at now: Date = Date()) {
+        lastPublishAt = now
+    }
+}
+
 @MainActor
 final class LineCompletionEngine {
     typealias SuggestionHandler = @MainActor (InlineSuggestionPresentation?) -> Void
+    typealias PaneID = FileEditorStateManager.PaneID
 
     /// Single source of truth for the output token budget (FIM_Spec.md §4).
     static let maxTokens = 64
@@ -22,19 +53,19 @@ final class LineCompletionEngine {
     private let gate: LineCompletionGate
     private let contextAssembler: LineCompletionContextAssembler
     private let ranker: LineCompletionRanker
-    private let telemetryService: CompletionTelemetryService
     private let variantPoolService: VariantPoolService?
 
-    private var suggestionHandlers: [FileEditorStateManager.PaneID: SuggestionHandler] = [:]
-    private var activeRequestIDs: [FileEditorStateManager.PaneID: UUID] = [:]
-    private var requestTasks: [FileEditorStateManager.PaneID: Task<Void, Never>] = [:]
-    private var lastAcceptedSuggestions: [FileEditorStateManager.PaneID: String] = [:]
-    private var lastAcceptedAt: [FileEditorStateManager.PaneID: Date] = [:]
-    private var recentRejections: [FileEditorStateManager.PaneID: Int] = [:]
-    private var lastShownSuggestion: [FileEditorStateManager.PaneID: String] = [:]
-    private var lastShownCursor: [FileEditorStateManager.PaneID: Int] = [:]
-    private var lastBufferBeforeCursor: [FileEditorStateManager.PaneID: String] = [:]
-    private var lastPoolPublishAt: [FileEditorStateManager.PaneID: Date] = [:]
+    private var suggestionHandlers: [PaneID: SuggestionHandler] = [:]
+    private var activeRequestIDs: [PaneID: UUID] = [:]
+    private var requestTasks: [PaneID: Task<Void, Never>] = [:]
+    private var lastAcceptedSuggestions: [PaneID: String] = [:]
+    private var lastAcceptedAt: [PaneID: Date] = [:]
+    private var recentRejections: [PaneID: Int] = [:]
+    private var sessions: [PaneID: CompletionSessionState] = [:]
+
+    /// Fired whenever the variant pool changes (any append) — the coordinator
+    /// refreshes the dropdown if open. Event-driven; no polling.
+    var onPoolVariantsChanged: (@MainActor (PaneID) -> Void)?
 
     /// Adaptive output budget: pause → full budget; faster typing → fewer
     /// tokens (FIM_Spec.md §5).
@@ -52,7 +83,6 @@ final class LineCompletionEngine {
         gate: LineCompletionGate = LineCompletionGate(),
         contextAssembler: LineCompletionContextAssembler = LineCompletionContextAssembler(),
         ranker: LineCompletionRanker = LineCompletionRanker(),
-        telemetryService: CompletionTelemetryService = CompletionTelemetryService(),
         variantPoolService: VariantPoolService? = nil
     ) {
         self.inferenceService = inferenceService
@@ -60,24 +90,23 @@ final class LineCompletionEngine {
         self.gate = gate
         self.contextAssembler = contextAssembler
         self.ranker = ranker
-        self.telemetryService = telemetryService
         self.variantPoolService = variantPoolService
         variantPoolService?.onVariantsChanged = { [weak self] paneID in
             self?.poolVariantsChanged(paneID: paneID)
         }
     }
 
-    func registerSuggestionHandler(for paneID: FileEditorStateManager.PaneID, handler: @escaping SuggestionHandler) {
+    func registerSuggestionHandler(for paneID: PaneID, handler: @escaping SuggestionHandler) {
         suggestionHandlers[paneID] = handler
     }
 
     /// The pane's variant-pool alternatives (best-first) for the dropdown
     /// (FIM_VariantPools_Arch.md §5). Empty when no pool exists.
-    func poolVariants(for paneID: FileEditorStateManager.PaneID) async -> [InlineCompletionVariant] {
+    func poolVariants(for paneID: PaneID) async -> [InlineCompletionVariant] {
         await variantPoolService?.variants(paneID: paneID) ?? []
     }
 
-    func unregisterSuggestionHandler(for paneID: FileEditorStateManager.PaneID) {
+    func unregisterSuggestionHandler(for paneID: PaneID) {
         suggestionHandlers.removeValue(forKey: paneID)
     }
 
@@ -97,7 +126,7 @@ final class LineCompletionEngine {
             }
 
             let bufferBeforeCursor = String(snapshot.buffer.prefix(snapshot.cursorPosition))
-            self.lastBufferBeforeCursor[snapshot.paneID] = bufferBeforeCursor
+            self.updateSession(snapshot.paneID) { $0.lastBufferBeforeCursor = bufferBeforeCursor }
             let tail40 = String(bufferBeforeCursor.suffix(40))
             let traceChar = typedChar.map { String($0) } ?? "nil"
             FIMTraceLogger.shared.log("keystroke", [
@@ -115,6 +144,7 @@ final class LineCompletionEngine {
             // break means the context moved). A miss here is the deviation
             // signal. Runs BEFORE the gate so fast typing never clears the
             // ghost while the suggestion is being consumed.
+            let session = self.session(for: snapshot.paneID)
             var hadSuggestionContext = false
             var candidates: [InlineCompletionVariant] = []
             var consumptionSource = "lastShown"
@@ -126,15 +156,15 @@ final class LineCompletionEngine {
                     "anchor": String(pool.anchorPrefix.suffix(20)).replacingOccurrences(of: "\n", with: "\\n"),
                     "variants": "\(pool.variants.count)"
                 ])
-                candidates = pool.variants.sorted { $0.rankScore > $1.rankScore }
-            } else if let lastShown = self.lastShownSuggestion[snapshot.paneID],
+                candidates = pool.variants
+            } else if let lastShown = session.lastShownSuggestion,
                       !lastShown.isEmpty,
-                      let shownCursor = self.lastShownCursor[snapshot.paneID],
+                      let shownCursor = session.lastShownCursor,
                       !bufferBeforeCursor.dropFirst(shownCursor).contains("\n") {
                 hadSuggestionContext = true
                 candidates = [InlineCompletionVariant(
                     id: UUID(), text: lastShown, temperature: 0.1,
-                    bannedTokenCount: 0, createdAt: Date(), rankScore: 1
+                    bannedTokenCount: 0, createdAt: Date()
                 )]
             }
 
@@ -158,7 +188,7 @@ final class LineCompletionEngine {
 
             let rejectCount = self.recentRejections[snapshot.paneID] ?? 0
             guard self.gate.shouldRequest(
-                for: snapshot, settings: settings,
+                for: snapshot,
                 gapMs: gapMs, typedChar: typedChar, recentRejectionCount: rejectCount
             ) else {
                 FIMTraceLogger.shared.log("gate", ["decision": "reject", "gapMs": String(format: "%.0f", gapMs)])
@@ -194,8 +224,12 @@ final class LineCompletionEngine {
                     NotificationCenter.default.post(name: .inlineCompletionStatusDidChange, object: InlineCompletionStatus.noSuggestion)
                     return
                 }
+
+                // Ghost publishes are rate-limited: first chunk instantly,
+                // then at most every 100ms, final on completion.
+                var throttle = GhostPublishThrottle()
+                var publishedPartial: InlineSuggestionPresentation?
                 var accumulated = ""
-                var latestAccepted: InlineSuggestionPresentation?
                 for try await chunk in stream {
                     if Task.isCancelled { break }
                     accumulated.append(chunk)
@@ -208,8 +242,11 @@ final class LineCompletionEngine {
                         latencyMs: 0
                     )
                     if let candidate = self.ranker.rank(partial, for: request, aggressiveness: settings.aggressiveness) {
-                        latestAccepted = candidate
-                        self.publish(candidate, for: snapshot.paneID)
+                        publishedPartial = candidate
+                        if throttle.shouldPublish() {
+                            throttle.didPublish()
+                            self.publish(candidate, for: snapshot.paneID)
+                        }
                     }
                 }
                 let result: InlineCompletionResult? = accumulated.isEmpty ? nil : InlineCompletionResult(
@@ -226,8 +263,6 @@ final class LineCompletionEngine {
                 guard !Task.isCancelled else { return }
                 guard self.activeRequestIDs[snapshot.paneID] == requestID else { return }
 
-                await self.telemetryService.recordObservedLatency(result.latencyMs)
-
                 let evaluation = self.ranker.evaluate(result, for: request, aggressiveness: settings.aggressiveness)
                 switch evaluation {
                 case .accepted(let candidate):
@@ -236,12 +271,19 @@ final class LineCompletionEngine {
                         self.publish(nil, for: snapshot.paneID)
                     } else {
                         self.recentRejections[snapshot.paneID] = 0
-                        await self.telemetryService.recordShown(candidate)
-                        self.publish(candidate, for: snapshot.paneID)
+                        // Republish only when the final differs from the last
+                        // shown partial (avoids a redundant ghost refresh).
+                        if candidate.suggestionText != publishedPartial?.suggestionText {
+                            self.publish(candidate, for: snapshot.paneID)
+                        }
                     }
                 case .rejected:
                     self.recentRejections[snapshot.paneID] = (self.recentRejections[snapshot.paneID] ?? 0) + 1
-                    self.publish(nil, for: snapshot.paneID)
+                    // Keep the last partial ghost — never yank a shown
+                    // suggestion on a final ranker rejection.
+                    if publishedPartial == nil {
+                        self.publish(nil, for: snapshot.paneID)
+                    }
                     // The user keeps rejecting the top variant — promote the
                     // second-best as the auto-suggestion.
                     if let poolService = self.variantPoolService {
@@ -281,65 +323,85 @@ final class LineCompletionEngine {
     }
 
     /// The chain appended variants — re-publish the pool's new top suggestion
-    /// if it changed (throttled to avoid ghost flicker).
-    nonisolated private func poolVariantsChanged(paneID: FileEditorStateManager.PaneID) {
+    /// if it changed (throttled to avoid ghost flicker), then notify the
+    /// coordinator (event-driven dropdown refresh).
+    nonisolated private func poolVariantsChanged(paneID: PaneID) {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let now = Date()
-            if let last = self.lastPoolPublishAt[paneID],
+            let session = self.session(for: paneID)
+            if let last = session.lastPoolPublishAt,
                now.timeIntervalSince(last) * 1000 < 150 {
+                self.onPoolVariantsChanged?(paneID)
                 return
             }
             guard let poolService = self.variantPoolService,
-                  let buffer = self.lastBufferBeforeCursor[paneID],
+                  let buffer = session.lastBufferBeforeCursor,
                   let pool = await poolService.activePool(paneID: paneID, bufferBeforeCursor: buffer),
-                  let top = pool.variants.sorted(by: { $0.rankScore > $1.rankScore }).first else {
+                  let top = pool.variants.first else {
+                self.onPoolVariantsChanged?(paneID)
                 return
             }
-            self.lastPoolPublishAt[paneID] = now
-            if top.text != self.lastShownSuggestion[paneID] {
+            self.updateSession(paneID) { $0.lastPoolPublishAt = now }
+            if top.text != session.lastShownSuggestion {
                 self.publish(InlineSuggestionPresentation(
                     requestId: UUID(), suggestionText: top.text,
                     source: .local, confidenceScore: 0.5, latencyMs: 0
                 ), for: paneID)
             }
+            self.onPoolVariantsChanged?(paneID)
         }
     }
 
-    func invalidate(_ paneID: FileEditorStateManager.PaneID) {
+    func invalidate(_ paneID: PaneID) {
         requestTasks[paneID]?.cancel()
         requestTasks[paneID] = nil
         activeRequestIDs.removeValue(forKey: paneID)
-        lastShownSuggestion.removeValue(forKey: paneID)
-        lastShownCursor.removeValue(forKey: paneID)
-        lastPoolPublishAt.removeValue(forKey: paneID)
+        sessions.removeValue(forKey: paneID)
         if let poolService = variantPoolService {
             Task { await poolService.reset(paneID: paneID) }
         }
         publish(nil, for: paneID)
-        Task { await telemetryService.recordCancelled() }
     }
 
-    func markAccepted(on paneID: FileEditorStateManager.PaneID, suggestionText: String?) {
+    func markAccepted(on paneID: PaneID, suggestionText: String?) {
         if let suggestionText, !suggestionText.isEmpty {
             lastAcceptedSuggestions[paneID] = suggestionText
             lastAcceptedAt[paneID] = Date()
-            lastShownSuggestion[paneID] = suggestionText
-            lastShownCursor[paneID] = lastBufferBeforeCursor[paneID]?.count ?? 0
+            let cursor = session(for: paneID).lastBufferBeforeCursor?.count ?? 0
+            updateSession(paneID) {
+                $0.lastShownSuggestion = suggestionText
+                $0.lastShownCursor = cursor
+            }
         }
-        Task { await telemetryService.recordAccepted() }
     }
 
-    func markDismissed() {
-        lastShownSuggestion.removeAll()
-        lastShownCursor.removeAll()
-        Task { await telemetryService.recordDismissed() }
+    func markDismissed(on paneID: PaneID) {
+        updateSession(paneID) {
+            $0.lastShownSuggestion = nil
+            $0.lastShownCursor = nil
+        }
     }
 
-    private func publish(_ presentation: InlineSuggestionPresentation?, for paneID: FileEditorStateManager.PaneID) {
+    // MARK: - Session state
+
+    private func session(for paneID: PaneID) -> CompletionSessionState {
+        sessions[paneID] ?? CompletionSessionState()
+    }
+
+    private func updateSession(_ paneID: PaneID, _ mutate: (inout CompletionSessionState) -> Void) {
+        var state = sessions[paneID] ?? CompletionSessionState()
+        mutate(&state)
+        sessions[paneID] = state
+    }
+
+    private func publish(_ presentation: InlineSuggestionPresentation?, for paneID: PaneID) {
         if let presentation {
-            lastShownSuggestion[paneID] = presentation.suggestionText
-            lastShownCursor[paneID] = lastBufferBeforeCursor[paneID]?.count ?? 0
+            let cursor = session(for: paneID).lastBufferBeforeCursor?.count ?? 0
+            updateSession(paneID) {
+                $0.lastShownSuggestion = presentation.suggestionText
+                $0.lastShownCursor = cursor
+            }
         }
         suggestionHandlers[paneID]?(presentation)
     }

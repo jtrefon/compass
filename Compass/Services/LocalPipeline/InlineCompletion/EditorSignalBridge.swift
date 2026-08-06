@@ -15,7 +15,6 @@ import Foundation
 final class EditorSignalBridge {
     private let paneID: FileEditorStateManager.PaneID
     private let lineEngine: LineCompletionEngine
-    private let settingsStore: InlineCompletionSettingsStore
     private var debounceTask: Task<Void, Never>?
     private var lastTypedAt: Date?
     private var lastBuffer: String?
@@ -29,12 +28,10 @@ final class EditorSignalBridge {
 
     init(
         paneID: FileEditorStateManager.PaneID,
-        lineEngine: LineCompletionEngine,
-        settingsStore: InlineCompletionSettingsStore = InlineCompletionSettingsStore()
+        lineEngine: LineCompletionEngine
     ) {
         self.paneID = paneID
         self.lineEngine = lineEngine
-        self.settingsStore = settingsStore
     }
 
     func scheduleAutomaticRequest(snapshot: InlineCompletionEditorSnapshot) {

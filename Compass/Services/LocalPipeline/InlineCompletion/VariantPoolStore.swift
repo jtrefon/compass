@@ -8,7 +8,6 @@ struct InlineCompletionVariant: Sendable, Equatable {
     let temperature: Float
     let bannedTokenCount: Int
     let createdAt: Date
-    var rankScore: Double
 }
 
 /// A pool of variants generated for one branch point of the typing path.
@@ -83,13 +82,13 @@ actor VariantPoolStore {
         return best
     }
 
-    /// All variants for a pane, ranked best-first across pools (newest pool
-    /// first, then rank order within the pool).
+    /// All variants for a pane, newest pool first, chain order within a pool
+    /// (the seed is the auto-suggestion; alternatives follow).
     func variants(paneID: FileEditorStateManager.PaneID) -> [InlineCompletionVariant] {
         guard let pools = poolsByPane[paneID] else { return [] }
         return pools
             .sorted { $0.lastHitAt > $1.lastHitAt }
-            .flatMap { $0.variants.sorted { $0.rankScore > $1.rankScore } }
+            .flatMap(\.variants)
     }
 
     func appendVariant(

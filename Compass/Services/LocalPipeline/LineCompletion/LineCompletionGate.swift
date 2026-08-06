@@ -27,12 +27,11 @@ struct LineCompletionGate {
 
     func shouldRequest(
         for snapshot: InlineCompletionEditorSnapshot,
-        settings: InlineCompletionSettings,
         gapMs: Double,
         typedChar: Character?,
         recentRejectionCount: Int
     ) -> Bool {
-        guard settings.isEnabled else { return false }
+        // settings.isEnabled is checked by the engine before the gate.
         guard snapshot.triggerReason == .manual || !snapshot.hasSelection else { return false }
         guard snapshot.triggerReason == .manual || !snapshot.isComposingText else { return false }
         guard !snapshot.buffer.isEmpty else { return false }

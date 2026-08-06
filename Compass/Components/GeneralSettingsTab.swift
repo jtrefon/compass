@@ -151,23 +151,6 @@ struct GeneralSettingsTab: View {
                             .accessibilityIdentifier("Settings.InlineCompletion.Enabled")
                     }
 
-                    SettingsRow(
-                        title: NSLocalizedString("settings.inline_completion.debounce.title", comment: ""),
-                        subtitle: NSLocalizedString("settings.inline_completion.debounce.subtitle", comment: ""),
-                        systemImage: "timer"
-                    ) {
-                        Stepper(
-                            value: inlineCompletionDebounceBinding,
-                            in: 50...800,
-                            step: 25
-                        ) {
-                            Text("\(ui.inlineCompletionDebounceMilliseconds) ms")
-                                .font(.body.weight(.semibold).monospaced())
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(width: 180)
-                        .accessibilityIdentifier("Settings.InlineCompletion.Debounce")
-                    }
                     .disabled(!ui.inlineCompletionEnabled)
 
                     SettingsRow(
@@ -337,13 +320,6 @@ struct GeneralSettingsTab: View {
         Binding(
             get: { ui.inlineCompletionEnabled },
             set: { ui.setInlineCompletionEnabled($0) }
-        )
-    }
-
-    private var inlineCompletionDebounceBinding: Binding<Int> {
-        Binding(
-            get: { ui.inlineCompletionDebounceMilliseconds },
-            set: { ui.setInlineCompletionDebounceMilliseconds($0) }
         )
     }
 

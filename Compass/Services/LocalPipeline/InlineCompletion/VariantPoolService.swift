@@ -132,8 +132,7 @@ actor VariantPoolService {
                     text: seededVariantText,
                     temperature: 0.1,
                     bannedTokenCount: 0,
-                    createdAt: Date(),
-                    rankScore: 0.5
+                    createdAt: Date()
                 )
             )
             onVariantsChanged?(paneID)
@@ -211,8 +210,7 @@ actor VariantPoolService {
                     text: text,
                     temperature: temperature,
                     bannedTokenCount: bans.count,
-                    createdAt: Date(),
-                    rankScore: 0.5
+                    createdAt: Date()
                 )
             )
             FIMTraceLogger.shared.log("chain.variant", [

@@ -170,8 +170,15 @@ for the new context (cheap with KV reuse) rather than decoding stale branches.
   0.25s refresh timer while open, repositioned on scroll/layout.
 - **F. Docs + polish** ✅ DONE (2026-08-05): benchmark doc updated with
   variant-pool results; spec non-goal pivoted (dropdown = warm-pool view).
-  Deferred polish (no jank measured, revisit if it appears): cache actor
-  extraction, snapshot building off-main.
+- **G. Tech-debt hardening** ✅ DONE (2026-08-06): ghost-publish throttle
+  (per-token ghost shake fixed — first chunk instant, ≤10/s, final on
+  completion; final-reject keeps the last partial), dead code removed
+  (write-only telemetry service, bridge settingsStore, latestAccepted,
+  rankScore, debounce setting incl. UI row, stale capacity harness test),
+  CompletionSessionState (one per-pane struct instead of 4 dicts),
+  event-driven dropdown refresh (no polling Timer), per-pane markDismissed,
+  gate isEnabled dedup, zero-cost trace gating, maxSuggestionLength default
+  64, three provider mocks consolidated, docs refreshed.
 - **C. Engine integration**: accept-verify generalization, chain trigger,
   demotion, throttle, invalidation; engine tests
 - **D. Pool-recall + chain benchmarks** (quality/feasibility gate)
