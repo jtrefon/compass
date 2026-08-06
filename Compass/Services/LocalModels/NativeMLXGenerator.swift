@@ -289,7 +289,12 @@ actor NativeMLXGenerator: LocalModelGenerating {
             )
 
             if let cacheEntry, let kvCache, !kvCache.isEmpty {
-                let generatedIds = streamResult.completionInfo?.generatedTokenIds ?? []
+                // mlx-swift-lm 3.31.4 removed generatedTokenIds from the
+                // stream's completion info — re-encode the emitted text with
+                // the container's tokenizer. A mismatch can only shorten the
+                // reuse prefix (safe trim + re-prefill), never corrupt.
+                let generatedIds = context.tokenizer.encode(
+                    text: streamResult.output, addSpecialTokens: false)
                 let fullTokenIds = promptTokenIds + generatedIds
                 cacheEntry.set(cache: kvCache, tokenIds: fullTokenIds)
             }

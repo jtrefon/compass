@@ -225,7 +225,6 @@ final class Qwen35GatedDeltaNet: Module {
         super.init()
     }
 
-
     func callAsFunction(
         _ inputs: MLXArray,
         mask: MLXArray? = nil,
@@ -233,8 +232,6 @@ final class Qwen35GatedDeltaNet: Module {
     ) -> MLXArray {
         let B = inputs.dim(0)
         let S = inputs.dim(1)
-
-
 
         var qkv = inProjQKV(inputs)
         let z = inProjZ(inputs).reshaped(B, S, numVHeads, headVDim)
@@ -274,7 +271,6 @@ final class Qwen35GatedDeltaNet: Module {
             MLXArray(invScale).asType(dtype)
             * MLXFast.rmsNorm(k, weight: MLXArray.mlxNone, eps: 1e-6)
 
-
         var out: MLXArray
 
         (out, state) = gatedDeltaUpdate(
@@ -288,7 +284,6 @@ final class Qwen35GatedDeltaNet: Module {
             state: state,
             mask: mask
         )
-
 
         if let cache {
             cache[1] = state
@@ -353,8 +348,6 @@ final class Qwen35Attention: Module {
         let B = x.dim(0)
         let L = x.dim(1)
 
-
-
         let qProjOutput = qProj(x)
         let qSplit = qProjOutput.reshaped(B, L, attentionHeads, -1).split(parts: 2, axis: -1)
         var queries = qSplit[0]
@@ -367,9 +360,9 @@ final class Qwen35Attention: Module {
         keys = kNorm(keys.reshaped(B, L, kvHeads, -1)).transposed(0, 2, 1, 3)
         values = values.reshaped(B, L, kvHeads, -1).transposed(0, 2, 1, 3)
 
-        queries = applyRotaryPosition(rope, to: queries, cache: cache)
-        keys = applyRotaryPosition(rope, to: keys, cache: cache)
-
+        let offset = cache?.ropeOffset
+        queries = applyRotaryPosition(rope, to: queries, offset: offset)
+        keys = applyRotaryPosition(rope, to: keys, offset: offset)
 
         let output = attentionWithCacheUpdate(
             queries: queries,
@@ -381,7 +374,6 @@ final class Qwen35Attention: Module {
         )
         .transposed(0, 2, 1, 3)
         .reshaped(B, L, -1)
-
 
         return oProj(sigmoidMultiply(output, gate))
     }
@@ -432,7 +424,7 @@ final class Qwen35SparseMoeBlock: Module, UnaryLayer {
         }
 
         let y = switchMLP(x, inds)
-        let combined = (y * scores[.ellipsis, .newAxis]).sum(axis: -2)
+        let combined = weightedExpertSum(y, scores)
 
         var sharedY = sharedExpert(x)
         sharedY = sigmoid(sharedExpertGate(x)) * sharedY
@@ -533,21 +525,6 @@ public class Qwen35TextModelInner: Module {
         super.init()
     }
 
-    /// COMPASS_GDN_TIMING=1 (env or local-bench.conf) prints per-layer
-    /// prefill timings — diagnostics only, default off.
-    static func enableLayerTiming() -> Bool {
-        if ProcessInfo.processInfo.environment["COMPASS_GDN_TIMING"] == "1" { return true }
-        let profileDir = ProcessInfo.processInfo.environment["COMPASS_TEST_PROFILE_DIR"]
-            ?? (try? String(contentsOf: FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/compass-test-profile-path"),
-                encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let profileDir,
-              let conf = try? String(contentsOf: URL(fileURLWithPath: profileDir).appendingPathComponent("local-bench.conf"), encoding: .utf8) else {
-            return false
-        }
-        return conf.split(separator: "\n").contains { $0 == "COMPASS_GDN_TIMING=1" }
-    }
-
     func callAsFunction(_ inputs: MLXArray, cache: [KVCache?]? = nil) -> MLXArray {
         var hiddenStates = embedTokens(inputs)
 
@@ -559,30 +536,14 @@ public class Qwen35TextModelInner: Module {
         let faMask = createAttentionMask(h: hiddenStates, cache: cacheArray?[faIdx])
         let ssmMask = createSSMMask(h: hiddenStates, cache: cacheArray?[ssmIdx] as? MambaCache)
 
-        let modelDtype = hiddenStates.dtype
-        let isPrefill = inputs.dim(1) > 1
-        let layerTimer = Self.enableLayerTiming()
-
         for (i, layer) in layers.enumerated() {
-            let layerStart = layerTimer ? ContinuousClock.now : nil
             let mask = layer.isLinear ? ssmMask : nil
             let attnMask =
                 layer.isLinear
                 ? MLXFast.ScaledDotProductAttentionMaskMode.none : faMask
             hiddenStates = layer(
                 hiddenStates, attentionMask: attnMask, ssmMask: mask, cache: cacheArray?[i])
-            hiddenStates = hiddenStates.asType(modelDtype)
-            if let layerStart, layerTimer {
-                // Force GPU execution so the elapsed time reflects compute.
-                eval(hiddenStates)
-                if let c = cacheArray?[i] { eval(c) }
-                let ms = Int(layerStart.duration(to: .now).components.seconds * 1000)
-                if isPrefill && ms > 0 {
-                    print("[LAYER-TIMING] \(i) \(layer.isLinear ? "linear" : "full-attn") \(ms)ms")
-                }
-            }
-            }
-
+        }
 
         return norm(hiddenStates)
     }
@@ -619,20 +580,9 @@ public class Qwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     }
 
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
-        let maxKVSize = parameters?.maxKVSize
-        let kvBits = parameters?.kvBits
         return model.layers.map { layer in
             if layer.isLinear {
                 return MambaCache()
-            }
-            // Create QuantizedKVCache directly when kvBits is set.
-            // maybeQuantizeKVCache is NOT called during prefill chunks, so KVCacheSimple
-            // would stay FP16 and accumulate ~10GB before post-prefill quantization.
-            if let kvBits = kvBits, kvBits < 8 {
-                return QuantizedKVCache(groupSize: 64, bits: kvBits, maxSize: maxKVSize) as KVCache
-            }
-            if let maxKVSize = maxKVSize {
-                return RotatingKVCache(maxSize: maxKVSize, keep: 4) as KVCache
             }
             return KVCacheSimple()
         }

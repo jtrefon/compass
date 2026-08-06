@@ -77,8 +77,9 @@ class MiniMaxAttention: Module {
         var k = keys.reshaped(B, L, numKeyValueHeads, -1).transposed(0, 2, 1, 3)
         let v = values.reshaped(B, L, numKeyValueHeads, -1).transposed(0, 2, 1, 3)
 
-        q = applyRotaryPosition(rope, to: q, cache: cache)
-        k = applyRotaryPosition(rope, to: k, cache: cache)
+        let offset = cache?.ropeOffset
+        q = applyRotaryPosition(rope, to: q, offset: offset)
+        k = applyRotaryPosition(rope, to: k, offset: offset)
 
         let output = attentionWithCacheUpdate(
             queries: q,
@@ -129,7 +130,7 @@ class MiniMaxSparseMoeBlock: Module {
         scores = scores.asType(x.dtype)
 
         let y = switchMLP(x, inds)
-        return (y * scores[.ellipsis, .newAxis]).sum(axis: -2)
+        return weightedExpertSum(y, scores)
     }
 }
 

@@ -169,8 +169,9 @@ class MiMoV2FlashAttention: Module {
         var k = keys.reshaped(B, L, numKeyValueHeads, -1).transposed(0, 2, 1, 3)
         let v = values.reshaped(B, L, numKeyValueHeads, -1).transposed(0, 2, 1, 3)
 
-        q = applyRotaryPosition(rope, to: q, cache: cache)
-        k = applyRotaryPosition(rope, to: k, cache: cache)
+        let offset = cache?.ropeOffset
+        q = applyRotaryPosition(rope, to: q, offset: offset)
+        k = applyRotaryPosition(rope, to: k, offset: offset)
 
         let output = attentionWithCacheUpdateAndSinks(
             queries: q,
@@ -301,7 +302,7 @@ class MiMoV2FlashMoE: Module, UnaryLayer {
     func callAsFunction(_ x: MLXArray) -> MLXArray {
         let (inds, scores) = gate(x)
         var y = switchMLP(x, inds)
-        y = (y * scores[.ellipsis, .newAxis]).sum(axis: -2).asType(y.dtype)
+        y = weightedExpertSum(y, scores).asType(y.dtype)
         if let sharedExperts {
             y = y + sharedExperts(x)
         }

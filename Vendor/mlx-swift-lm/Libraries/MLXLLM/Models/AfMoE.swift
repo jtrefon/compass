@@ -197,8 +197,9 @@ class AfMoEAttention: Module {
 
         // Apply RoPE only for local (sliding window) attention
         if isLocalAttention, let rope = rope {
-            queries = applyRotaryPosition(rope, to: queries, cache: cache)
-            keys = applyRotaryPosition(rope, to: keys, cache: cache)
+            let offset = cache?.ropeOffset
+            queries = applyRotaryPosition(rope, to: queries, offset: offset)
+            keys = applyRotaryPosition(rope, to: keys, offset: offset)
         }
 
         var output = attentionWithCacheUpdate(
@@ -337,7 +338,7 @@ class AfMoEMoE: Module, UnaryLayer {
 
         // Apply experts
         var y = experts(x, inds)
-        y = (y * selectedScores[.ellipsis, .newAxis]).sum(axis: -2).asType(y.dtype)
+        y = weightedExpertSum(y, selectedScores).asType(y.dtype)
 
         // Add shared expert output
         if let sharedExperts = sharedExperts {
