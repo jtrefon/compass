@@ -92,11 +92,17 @@ MLX baseline bypassing Compass measures the same 30-36 tps / ~350 tok/s):
   generation ~30 tps is the port's per-layer cost, context-independent.
 - System prompt is ~6.9K tokens — the largest practical prefill lever
   (concise tool-prompt mode, fewer tools in .chat).
-- KV-4bit: **ON as of 2026-08-06** (store default was already true; the
-  user's stored value was a stale false). Measured at ~17K tokens:
-  GPU peak 3,883 -> 3,356MB avg (4,278 -> 3,476 max), prefill -11% at long
-  context only (nil at short context), quality/recall equal. Long-context
-  fixture: `ctx_long_recall` (~16K-token synthesized docs).
+- KV-4bit: **OFF as the default (2026-08-06)** — measured then reverted:
+  only the 8 full-attention layers' KV is quantizable (the 24 MambaCache
+  layers are state arrays), so the short-context win is ~34MB at 2K tokens
+  (3% of GPU) for nil speed gain, while long-context prefill pays -11% for
+  quantized writes. bf16 KV fits ~65K tokens on this 15GB machine, so the
+  tradeoff only pays beyond that. Re-enable for long-context work:
+  `COMPASS_LOCAL_MODEL_KV_CACHE_4BIT=1 ./run.sh benchmark-local`, and if
+  long context becomes a goal, do it properly with dynamic quantization
+  (bf16 until a token threshold, then quantize — the vendored TokenIterator
+  has the machinery, the Qwen35 port bypasses it). Long-context fixture:
+  `ctx_long_recall` (~16K-token synthesized docs).
 
 Diagnostics: `RawMLXBaselineTests` isolates the vendor stack;
 `COMPASS_GDN_KERNEL=0` / `COMPASS_GDN_TIMING=1` via local-bench.conf toggle
