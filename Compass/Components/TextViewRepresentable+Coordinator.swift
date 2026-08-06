@@ -174,8 +174,14 @@ extension TextViewRepresentable {
             if let codeEditorTextView = textView as? CodeEditorTextView,
                codeEditorTextView.hasInlineSuggestion,
                replacementString != nil {
+                // Typing clears the GHOST visually only. It must NOT call
+                // invalidateInlineCompletion(): that wipes the bridge's
+                // keystroke timestamps (next gap = 0 → gate rejects) and the
+                // engine's consumption state (lastShown → accept-verify can
+                // never fire) — measured as alternating suggestions and no
+                // cache in fim-trace.ndjson. The next request consumes or
+                // re-infers naturally.
                 codeEditorTextView.clearInlineSuggestion()
-                invalidateInlineCompletion()
             }
 
             guard let replacementString else { return true }

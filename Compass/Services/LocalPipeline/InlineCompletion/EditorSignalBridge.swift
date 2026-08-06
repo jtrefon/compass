@@ -42,6 +42,7 @@ final class EditorSignalBridge {
         // dropped entirely (no timestamp update, no new task).
         let signature = (snapshot.buffer, snapshot.cursorPosition)
         if let last = lastSignature, last == signature {
+            FIMTraceLogger.shared.log("bridge.event", ["decision": "dedup-skip"])
             return
         }
         lastSignature = signature
@@ -59,6 +60,10 @@ final class EditorSignalBridge {
                 previous: lastBuffer, current: snapshot.buffer, cursor: snapshot.cursorPosition
             )
             lastBuffer = snapshot.buffer
+            FIMTraceLogger.shared.log("bridge.event", [
+                "decision": "coalesce",
+                "gapMs": String(format: "%.0f", gapMs)
+            ])
             return
         }
 
@@ -70,6 +75,12 @@ final class EditorSignalBridge {
         lastBuffer = snapshot.buffer
         lastTypedAt = now
         isTaskPending = true
+
+        FIMTraceLogger.shared.log("bridge.event", [
+            "decision": "request",
+            "gapMs": String(format: "%.0f", gapMs),
+            "char": pendingTypedChar.map { String($0) } ?? "nil"
+        ])
 
         debounceTask = Task { [weak self] in
             guard let self else { return }
