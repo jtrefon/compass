@@ -46,6 +46,15 @@ struct LocalModelPromptBuilder {
                 "content": message.content,
             ]
 
+            // Reasoning is committed separately (ReasoningSplitter) — the
+            // chat template renders `reasoning_content` back into <think>
+            // for the replay, preserving what the model saw before.
+            if message.role == .assistant,
+               let reasoning = message.reasoning,
+               !reasoning.isEmpty {
+                rawMessage["reasoning_content"] = reasoning
+            }
+
             if message.role == .assistant,
                let toolCalls = message.toolCalls,
                !toolCalls.isEmpty {

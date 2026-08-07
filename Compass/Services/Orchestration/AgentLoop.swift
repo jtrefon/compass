@@ -250,9 +250,11 @@ struct AgentLoop {
         response: AIServiceResponse,
         tools: [AITool]
     ) async -> [ChatMessage] {
+        let commitSplit = ReasoningSplitter.apply(to: response)
         await historyCoordinator.append(
             ChatMessage(role: .assistant,
-                        content: ToolMarkupStripper.assistantContent(response.content, toolCalls: toolCalls),
+                        content: ToolMarkupStripper.assistantContent(commitSplit.content, toolCalls: toolCalls),
+                        context: ChatMessageContentContext(reasoning: commitSplit.reasoning),
                         tool: ChatMessageToolContext(toolCalls: toolCalls))
         )
         let results = await toolExecutor.executeToolCalls(

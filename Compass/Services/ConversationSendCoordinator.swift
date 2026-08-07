@@ -76,9 +76,11 @@ final class ConversationSendCoordinator {
 
         // Commit the assistant message to history and log it. Markup is
         // stripped at this boundary (provider-agnostic) so raw tool-call text
-        // never lands in committed history.
+        // never lands in committed history; think blocks are split into the
+        // reasoning field (single implementation: ReasoningSplitter).
+        let committedSplit = ReasoningSplitter.apply(to: response)
         let finalContent = ToolMarkupStripper
-            .assistantContent(response.content, toolCalls: response.toolCalls)
+            .assistantContent(committedSplit.content, toolCalls: response.toolCalls)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if finalContent.isEmpty {
             // A run that ends with no visible content must not leave an empty
@@ -98,13 +100,13 @@ final class ConversationSendCoordinator {
                 let committed = ChatMessage(
                     id: draft.id, role: .assistant, content: finalContent,
                     timestamp: draft.timestamp,
-                    context: ChatMessageContentContext(reasoning: response.reasoning)
+                    context: ChatMessageContentContext(reasoning: committedSplit.reasoning)
                 )
                 await historyCoordinator.commitDraft(replacingWith: committed)
             }
         } else {
             let msg = ChatMessage(role: .assistant, content: finalContent,
-                context: ChatMessageContentContext(reasoning: response.reasoning))
+                context: ChatMessageContentContext(reasoning: committedSplit.reasoning))
             await historyCoordinator.append(msg)
         }
 
@@ -175,9 +177,11 @@ final class ConversationSendCoordinator {
         // tool-call message is committed first so the request builder keeps
         // the tool results in subsequent passes (blind-loop fix).
         clearStreamingBuffer?()
+        let pass1Split = ReasoningSplitter.apply(to: pass1)
         await historyCoordinator.append(
             ChatMessage(role: .assistant,
-                        content: ToolMarkupStripper.assistantContent(pass1.content, toolCalls: toolCalls),
+                        content: ToolMarkupStripper.assistantContent(pass1Split.content, toolCalls: toolCalls),
+                        context: ChatMessageContentContext(reasoning: pass1Split.reasoning),
                         tool: ChatMessageToolContext(toolCalls: toolCalls))
         )
         let results = await toolExecutionCoordinator.executeToolCalls(
