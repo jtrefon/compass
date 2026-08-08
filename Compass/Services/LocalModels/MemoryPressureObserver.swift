@@ -1,12 +1,17 @@
 import Foundation
 
+enum MemoryPressureLevel: Sendable {
+    case warning
+    case critical
+}
+
 protocol MemoryPressureObserving: Sendable {}
 
 final class MemoryPressureObserver: MemoryPressureObserving, @unchecked Sendable {
     private var source: DispatchSourceMemoryPressure?
-    private let onMemoryPressure: @Sendable () -> Void
+    private let onMemoryPressure: @Sendable (MemoryPressureLevel) -> Void
 
-    init(onMemoryPressure: @escaping @Sendable () -> Void) {
+    init(onMemoryPressure: @escaping @Sendable (MemoryPressureLevel) -> Void) {
         self.onMemoryPressure = onMemoryPressure
         setupObserver()
     }
@@ -20,7 +25,8 @@ final class MemoryPressureObserver: MemoryPressureObserving, @unchecked Sendable
             queue: .global(qos: .utility)
         )
         source.setEventHandler { [weak self] in
-            self?.onMemoryPressure()
+            let level: MemoryPressureLevel = source.data == .critical ? .critical : .warning
+            self?.onMemoryPressure(level)
         }
         source.resume()
         self.source = source

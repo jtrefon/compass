@@ -454,6 +454,22 @@ run_harness() {
             echo "${fim_key}=${!fim_key}" >> "$fim_conf"
         fi
     done
+    # Local chat knobs: forwarded via local-bench.conf (app-hosted test
+    # processes can't see the caller's env; LocalModelInferenceOverrides reads
+    # both direct env and this conf file).
+    local bench_conf="$test_profile_dir/local-bench.conf"
+    : > "$bench_conf"
+    local bench_key
+    for bench_key in COMPASS_LOCAL_MODEL_TEMPERATURE COMPASS_LOCAL_MODEL_TOP_P \
+                     COMPASS_LOCAL_MODEL_REPETITION_PENALTY COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE \
+                     COMPASS_LOCAL_MODEL_CONTEXT_LENGTH COMPASS_LOCAL_MODEL_MAX_KV_SIZE \
+                     COMPASS_LOCAL_MODEL_MAX_OUTPUT_TOKENS COMPASS_LOCAL_MODEL_PREFILL_STEP_SIZE \
+                     COMPASS_LOCAL_MODEL_KV_CACHE_4BIT COMPASS_LOCAL_MODEL_MLX_MEMORY_LIMIT_MB \
+                     COMPASS_LOCAL_MODEL_DISABLE_PREFIX_CACHE; do
+        if [ -n "${!bench_key}" ]; then
+            echo "${bench_key}=${!bench_key}" >> "$bench_conf"
+        fi
+    done
     local prompts_root_default
     prompts_root_default="$(pwd)/Prompts"
     local resolved_prompts_root=""
@@ -487,6 +503,12 @@ run_harness() {
         "COMPASS_LOCAL_MODEL_TOP_P"
         "COMPASS_LOCAL_MODEL_REPETITION_PENALTY"
         "COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE"
+        "COMPASS_LOCAL_MODEL_CONTEXT_LENGTH"
+        "COMPASS_LOCAL_MODEL_MAX_KV_SIZE"
+        "COMPASS_LOCAL_MODEL_MAX_OUTPUT_TOKENS"
+        "COMPASS_LOCAL_MODEL_PREFILL_STEP_SIZE"
+        "COMPASS_LOCAL_MODEL_KV_CACHE_4BIT"
+        "COMPASS_LOCAL_MODEL_DISABLE_PREFIX_CACHE"
         "COMPASS_FIM_TEMPERATURE"
         "COMPASS_FIM_TOP_P"
         "COMPASS_FIM_REPETITION_PENALTY"
@@ -494,6 +516,7 @@ run_harness() {
         "COMPASS_FIM_CONTEXT_CHARS_PER_TOKEN"
         "COMPASS_FIM_MAX_SUGGESTIONS"
         "COMPASS_FIM_REPEAT_ROUNDS"
+        "COMPASS_MINIMAL_TOOLSET"
         "COMPASS_DEGRADE_ON_TRANSPORT_FAILURE"
         "COMPASS_FALLBACK_MODEL_ID"
         "COMPASS_CIRCUIT_FAILURE_THRESHOLD"
@@ -592,6 +615,10 @@ run_harness_offline() {
     else
         echo "Running offline harness suites..."
         run_harness "StripMarkupTest"
+        run_harness "LocalMultiTurnHarnessTests"
+        run_harness "LocalToolExecutionTests"
+        run_harness "LocalPrefixCacheTests"
+        run_harness "LocalChatTwoTurnReproTests"
     fi
 }
 

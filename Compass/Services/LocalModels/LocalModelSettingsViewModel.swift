@@ -28,12 +28,6 @@ final class LocalModelSettingsViewModel: ObservableObject {
         }
     }
 
-    @Published var kvCache4BitEnabled: Bool {
-        didSet {
-            persistKVCache4BitEnabled()
-        }
-    }
-
     @Published var contextLength: Double {
         didSet {
             persistContextLength()
@@ -60,9 +54,10 @@ final class LocalModelSettingsViewModel: ObservableObject {
         self.chatModel = LocalModelCatalog.chatModel
         self.fimModel = LocalModelCatalog.fimModel
         self.offlineModeEnabled = settingsStore.bool(forKey: LocalModelSettingsKeys.offlineModeEnabled, default: false)
-        self.kvCache4BitEnabled = settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: true)
         let ctx = settingsStore.integer(forKey: LocalModelSettingsKeys.contextLength)
-        self.contextLength = ctx > 0 ? Double(ctx) : Double(chatModel.defaultContextLength)
+        self.contextLength = ctx > 0
+            ? Double(min(ctx, chatModel.maxContextLength))
+            : Double(chatModel.defaultContextLength)
         updateOfflineStatusMessage()
     }
 
@@ -114,13 +109,6 @@ final class LocalModelSettingsViewModel: ObservableObject {
             await selectionStore.setOfflineModeEnabled(offlineModeEnabled)
         }
         updateOfflineStatusMessage()
-    }
-
-    private func persistKVCache4BitEnabled() {
-        let kvCache4BitEnabled = self.kvCache4BitEnabled
-        Task {
-            await selectionStore.setKVCache4BitEnabled(kvCache4BitEnabled)
-        }
     }
 
     private func persistContextLength() {

@@ -581,9 +581,23 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     private func publishContextEvent() {
         let msgs = historyCoordinator.messages
         let totalChars = msgs.reduce(0) { $0 + $1.content.count }
-        let ceOverride = CustomEndpointSettingsStore().load(includeApiKey: false).contextOverride
-        let windowTokens: Int = ceOverride > 0 ? ceOverride : 262_000
-        let contextWindowChars: Int? = windowTokens > 0 ? windowTokens * 4 : nil
+        let contextWindowChars: Int?
+        if usesLocalModel {
+            // The local gauge must reflect the LOCAL model's window — the
+            // OpenRouter override / 262_000 fallback is the cloud ceiling and
+            // is meaningless for the local path (a 64K toggle was displayed as
+            // 262K because this branch was never taken).
+            let stored = settingsStore.integer(forKey: LocalModelSettingsKeys.contextLength)
+            let windowTokens = min(
+                stored > 0 ? stored : LocalModelCatalog.chatModel.defaultContextLength,
+                LocalModelCatalog.chatModel.maxContextLength
+            )
+            contextWindowChars = windowTokens > 0 ? windowTokens * 4 : nil
+        } else {
+            let ceOverride = CustomEndpointSettingsStore().load(includeApiKey: false).contextOverride
+            let windowTokens: Int = ceOverride > 0 ? ceOverride : 262_000
+            contextWindowChars = windowTokens > 0 ? windowTokens * 4 : nil
+        }
         let kvCache4BitEnabled = settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: false)
         let compressionRatio: Double? = (usesLocalModel && kvCache4BitEnabled) ? 8.0 : nil
         eventBus.publish(ConversationContextEvent(

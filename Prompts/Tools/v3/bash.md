@@ -1,6 +1,6 @@
 ## bash — Execute a shell command
 
-**When to use:** Running builds, tests, git operations, servers, and long-lived processes. For codebase exploration use `ls`, `read`, `search`, or `glob` instead — they are faster, don't require shell escaping, and return structured output. **Do NOT use bash for `find`, `grep`, `rg`, `ls -R`, or `tree` — the `search`/`glob`/`ls` tools handle those directly.**
+**When to use:** Running builds, tests, git operations, servers, and long-lived processes. For codebase exploration use `read` or `search` instead — they are faster, don't require shell escaping, and return structured output. **Do NOT use bash for `find`, `grep`, `rg`, `ls -R`, or `tree` — the `search` tool handles those directly.**
 
 **Parameters:**
 - command (required, string): The shell command to execute.
@@ -18,4 +18,4 @@
 **Common situations & recovery:**
 - Command not found: Install the dependency first.
 - Non-zero exit code: Check the error output.
-- **Exploratory command blocked** (`find`, `grep`, `rg`, `ls -R`, `tree`, etc.): Switch to `search` (content), `glob` (filenames), or `ls` (directory listings) — they return structured results without shell escaping.
+- **Exploratory command blocked** (`find`, `grep`, `rg`, `ls -R`, `tree`, etc.): Switch to `search` — it covers content, symbols, and filenames and returns structured results without shell escaping.

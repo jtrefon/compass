@@ -26,8 +26,11 @@ actor LocalModelSelectionStore {
         )
     }
 
+    /// Honest default: the fixed chat model does NOT support a quantized KV
+    /// combiner, so 4-bit KV would be silently ignored. Only explicit opt-in
+    /// (or the env knob in the benchmark harness) enables it.
     func isKVCache4BitEnabled() -> Bool {
-        settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: true)
+        settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: false)
     }
 
     func setKVCache4BitEnabled(_ enabled: Bool) {

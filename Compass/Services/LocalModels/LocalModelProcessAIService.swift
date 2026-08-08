@@ -9,7 +9,7 @@ import Tokenizers
 actor LocalModelProcessAIService: AIService {
     nonisolated let preservesCache: Bool = true
 
-    typealias MemoryPressureObserverFactory = @Sendable (@escaping @Sendable () -> Void) -> (any MemoryPressureObserving)?
+    typealias MemoryPressureObserverFactory = @Sendable (@escaping @Sendable (MemoryPressureLevel) -> Void) -> (any MemoryPressureObserving)?
 
     protocol ModelFileStoring: Sendable {
         func isModelInstalled(_ model: LocalModelDefinition) -> Bool
@@ -41,6 +41,9 @@ actor LocalModelProcessAIService: AIService {
     private var lifecycleObservers: [NSObjectProtocol] = []
     private let activityCoordinator: (any AgentActivityCoordinating)?
     private let launchContext: AppLaunchContext
+    /// Latest project root (for the KV cache dir when the pressure handler
+    /// persists conversation caches before a critical eviction).
+    private var lastProjectRoot: URL?
     private var cachedTokenizer: (directory: URL, tokenizer: any Tokenizers.Tokenizer)?
     private var tokenizerLoadInFlight: Task<(URL, any Tokenizers.Tokenizer)?, Never>?
 
@@ -67,27 +70,52 @@ actor LocalModelProcessAIService: AIService {
         self.launchContext = launchContext
         let generatorForPressureHandling = self.generator
 
-        // Chat generator participates in the registry so a single memory-
-        // pressure pass unloads every inference container (chat + FIM).
-        InferenceUnloadRegistry.shared.register {
-            await generatorForPressureHandling.unloadAllModels(reason: "memory_pressure")
-        }
-
-        // Register for memory pressure notifications
-        self.memoryPressureObserver = memoryPressureObserverFactory {
-            Task {
+        // Tiered memory-pressure policy: .warning releases FIM only (fast to
+        // reload; chat + its KV retained); .critical releases everything.
+        // Both run behind MLXInferenceLock so an unload can never evict a
+        // container under a live generation. Detached task: never inherit the
+        // caller's isolation (production fires from a utility queue; unit
+        // tests fire from the MainActor).
+        self.memoryPressureObserver = memoryPressureObserverFactory { level in
+            Task.detached(priority: .utility) {
+                let generationInFlight = await generatorForPressureHandling.hasActiveGeneration()
                 await AppLogger.shared.warning(
                     category: .localModel,
                     message: "memory_pressure_unload",
                     context: AppLogger.LogCallContext(metadata: [
-                        "timestamp": ISO8601DateFormatter().string(from: Date())
+                        "timestamp": ISO8601DateFormatter().string(from: Date()),
+                        "level": level == .critical ? "critical" : "warning",
+                        "generationInFlight": String(generationInFlight)
                     ])
                 )
-                // Chat generator + FIM + any other inference services release
-                // their containers in one pass.
-                await InferenceUnloadRegistry.shared.unloadAll()
+                if Task.isCancelled { return }
+                do {
+                    try await MLXInferenceLock.shared.acquire()
+                    defer { Task { await MLXInferenceLock.shared.release() } }
+                    switch level {
+                    case .warning:
+                        await InferenceUnloadRegistry.shared.unloadAll(labels: [InferenceUnloadRegistry.fimLabel])
+                    case .critical:
+                        await InferenceUnloadRegistry.shared.unloadAll()
+                    }
+                } catch {
+                    // Cancellation (or a transient wait failure): nothing to
+                    // unload safely — the generation that held the lock owns it.
+                }
             }
         }
+
+        // Chat generator participates in the registry so a single memory-
+        // pressure pass unloads every inference container (chat + FIM).
+        InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.chatLabel) { [weak self] in
+            guard let self else { return }
+            let persistDir = await self.lastProjectRoot?
+                .appendingPathComponent(".ide", isDirectory: true)
+                .appendingPathComponent("cache", isDirectory: true)
+            await generatorForPressureHandling.unloadAllModels(
+                reason: "memory_pressure", persistKVTo: persistDir)
+        }
+
         if !launchContext.isTesting {
             Task {
                 await registerLifecycleObservers()
@@ -149,7 +177,6 @@ actor LocalModelProcessAIService: AIService {
                 repetitionContextSize: inferenceConfiguration.repetitionContextSize,
                 kvCache4BitEnabled: false
             )
-        let isTesting = launchContext.isTesting
         let settings = settingsStore.load(includeApiKey: false)
         
         // Build system content for caching
@@ -218,6 +245,9 @@ actor LocalModelProcessAIService: AIService {
         // Disk-persisted system-prefix cache: new conversations load the
         // pre-computed KV of the system block and prefill only the user
         // message (snappy session/tab startup).
+        if let projectRoot = request.projectRoot {
+            lastProjectRoot = projectRoot
+        }
         let prefixCache = makePrefixCacheContext(
             projectRoot: request.projectRoot,
             systemContent: systemContent,
@@ -339,7 +369,7 @@ actor LocalModelProcessAIService: AIService {
             await preloadCurrentModel(unloadExistingModels: true)
             return
         }
-        await generator.unloadAllModels(reason: "offline_mode_disabled")
+        await generator.unloadAllModels(reason: "offline_mode_disabled", persistKVTo: nil)
     }
 
     private func preloadCurrentModel(unloadExistingModels: Bool) async {
@@ -348,7 +378,7 @@ actor LocalModelProcessAIService: AIService {
 
         do {
             if unloadExistingModels {
-                await generator.unloadAllModels(reason: "preload_reload")
+                await generator.unloadAllModels(reason: "preload_reload", persistKVTo: nil)
             }
             let modelDirectory = try fileStore.chatRuntimeModelDirectory()
             if let activityCoordinator {

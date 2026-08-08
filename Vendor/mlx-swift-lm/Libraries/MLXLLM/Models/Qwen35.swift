@@ -265,10 +265,10 @@ final class Qwen35GatedDeltaNet: Module {
         let dtype = q.dtype
         let invScale = pow(Float(headKDim), -0.5)
         let qNormed =
-            MLXArray(pow(invScale, 2)).asType(dtype)
+            MLXArray(pow(invScale, 2), dtype: dtype)
             * MLXFast.rmsNorm(q, weight: MLXArray.mlxNone, eps: 1e-6)
         let kNormed =
-            MLXArray(invScale).asType(dtype)
+            MLXArray(invScale, dtype: dtype)
             * MLXFast.rmsNorm(k, weight: MLXArray.mlxNone, eps: 1e-6)
 
         var out: MLXArray
@@ -580,12 +580,48 @@ public class Qwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     }
 
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
+        let attentionCache = Qwen35TextModel.makeAttentionCache(parameters: parameters)
         return model.layers.map { layer in
             if layer.isLinear {
                 return MambaCache()
             }
-            return KVCacheSimple()
+            return attentionCache.copy()
         }
+    }
+
+    /// Build the attention KV cache for a single full-attention layer, honoring
+    /// ``GenerateParameters`` memory controls. The GatedDelta (linear) recurrent
+    /// states are not windowed or quantized — they are fixed-size per-token states.
+    ///
+    /// Quantization wins over windowing when both are set: the quantized cache
+    /// is unbounded, awarding back the full context, and 4-bit KV at a capped
+    /// context window is small. The rotating-window cache is used when no
+    /// quantization applies (``RotatingKVCache.toQuantized()`` is not
+    /// implemented upstream, so a windowed cache cannot later be quantized).
+    private static func makeAttentionCache(parameters: GenerateParameters?) -> any KVCache {
+        if let (bits, groupSize) = resolveAttentionCacheQuantization(parameters),
+            parameters?.quantizedKVStart == 0
+        {
+            return QuantizedKVCache(groupSize: groupSize, bits: bits)
+        }
+
+        if let maxKVSize = parameters?.maxKVSize {
+            return RotatingKVCache(maxSize: maxKVSize, keep: 4)
+        }
+
+        return KVCacheSimple()
+    }
+
+    private static func resolveAttentionCacheQuantization(_ parameters: GenerateParameters?)
+        -> (bits: Int, groupSize: Int)?
+    {
+        if let scheme = parameters?.kvScheme, let resolved = resolveAffineScheme(scheme) {
+            return resolved
+        }
+        if let bits = parameters?.kvBits {
+            return (bits, parameters?.kvGroupSize ?? 64)
+        }
+        return nil
     }
 
     public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {

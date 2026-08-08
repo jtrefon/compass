@@ -60,7 +60,7 @@ final class LocalBenchmarkHarnessTests: XCTestCase {
         let tasks = LocalBenchFixtures.all.filter { filter.isEmpty || filter.contains($0.id) }
 
         let runtime = try await HarnessRuntime.makeRuntime()
-        let store = LocalModelSelectionStore()
+        let store = LocalModelSelectionStore(settingsStore: runtime.container.settingsStore)
         await store.setOfflineModeEnabled(true)
         runtime.manager.currentMode = .chat
 

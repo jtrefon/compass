@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(SyntaxHighlighting)
+import SyntaxHighlighting
+#endif
 
 public struct ExtractedSymbol: Sendable {
     public let name: String
@@ -13,6 +16,11 @@ public struct ExtractedSymbol: Sendable {
 
 public enum SymbolExtractor {
     public static func extract(from url: URL, content: String) -> [ExtractedSymbol] {
+        // Tree-sitter primary path — precise AST ranges (lineEnd = node end, not definition line)
+        if let tsSymbols = tryTreeSitterExtract(from: url, content: content), !tsSymbols.isEmpty {
+            return tsSymbols
+        }
+        // Regulated fallback — also computes surgical lineEnd via brace/indent scope
         let ext = url.pathExtension.lowercased()
         switch ext {
         case "swift": return extractSwift(content: content, filePath: url.path)
@@ -20,8 +28,22 @@ public enum SymbolExtractor {
         case "ts", "tsx": return extractJSTS(content: content, filePath: url.path)
         case "py": return extractPython(content: content, filePath: url.path)
         case "php": return extractPHP(content: content, filePath: url.path)
-        default: return []
+        case "yaml", "yml": return extractYAML(content: content, filePath: url.path)
+        case "sh", "bash", "zsh": return extractSh(content: content, filePath: url.path)
+        default: return extractGeneric(content: content, filePath: url.path)
         }
+    }
+
+    private static func tryTreeSitterExtract(from url: URL, content: String) -> [ExtractedSymbol]? {
+        #if canImport(SyntaxHighlighting)
+        if let ts = TreeSitterSymbolExtractor.extract(content: content, languageId: url.pathExtension.lowercased()) {
+            return ts.map { s in
+                ExtractedSymbol(name: s.name, kind: s.kind, scope: s.scope, signature: "",
+                                parentName: s.parentName, lineStart: s.lineStart, lineEnd: s.lineEnd, filePath: url.path)
+            }
+        }
+        #endif
+        return nil
     }
 }
 
@@ -66,6 +88,48 @@ private func match(_ text: String, key: String) -> [String]? {
     return groups
 }
 
+// MARK: - Surgical helpers (quality-first, no quick patch)
+
+private func surgicalBraceEnd(from startLine: Int, lines: [String]) -> Int {
+    // Uses BraceAnalyzer semantics to find the matching closing scope.
+    // If no brace scope starts within 5 lines, return startLine (single-line symbol).
+    guard startLine >= 1, startLine <= lines.count else { return startLine }
+    var depth = 0
+    var started = false
+    let analyzer = BraceAnalyzer()
+    for idx in (startLine - 1)..<lines.count {
+        let trimmed = lines[idx].trimmingCharacters(in: .whitespaces)
+        let r = analyzer.analyze(trimmed)
+        if !started {
+            if r.openingCount > 0 {
+                started = true
+                depth += r.openingCount - r.closingCount
+                if depth <= 0 { return idx + 1 }
+            } else if idx - (startLine - 1) > 5 {
+                // No scope opened in reasonable window — single-line symbol
+                return startLine
+            }
+        } else {
+            depth += r.openingCount - r.closingCount
+            if depth <= 0 { return idx + 1 }
+        }
+    }
+    return started ? lines.count : startLine
+}
+
+private func surgicalIndentEnd(from startLine: Int, startIndent: Int, lines: [String]) -> Int {
+    guard startLine >= 1, startLine <= lines.count else { return startLine }
+    var end = startLine
+    for idx in startLine..<lines.count {
+        let line = lines[idx]
+        if line.trimmingCharacters(in: .whitespaces).isEmpty || line.trimmingCharacters(in: .whitespaces).hasPrefix("#") { continue }
+        let indent = line.prefix(while: { $0 == " " || $0 == "\t" }).count
+        if indent <= startIndent { break }
+        end = idx + 1
+    }
+    return end
+}
+
 // MARK: - Swift
 
 private func extractSwift(content: String, filePath: String) -> [ExtractedSymbol] {
@@ -82,8 +146,9 @@ private func extractSwift(content: String, filePath: String) -> [ExtractedSymbol
             let name = groups[2]
             let scope = extractSwiftScope(from: trimmed)
             let parent = kind == "extension" ? name : ""
+            let end = surgicalBraceEnd(from: lineNum, lines: lines)
             let sym = ExtractedSymbol(name: name, kind: kind, scope: scope, signature: "",
-                                      parentName: parent, lineStart: lineNum, lineEnd: lineNum,
+                                      parentName: parent, lineStart: lineNum, lineEnd: end,
                                       filePath: filePath)
             symbols.append(sym)
             if kind != "extension" { lastTypeName = name }
@@ -94,8 +159,9 @@ private func extractSwift(content: String, filePath: String) -> [ExtractedSymbol
             let name = groups[2]
             let scope = extractSwiftScope(from: trimmed)
             let sig = extractSwiftSignature(line: trimmed)
+            let end = surgicalBraceEnd(from: lineNum, lines: lines)
             let sym = ExtractedSymbol(name: name, kind: "method", scope: scope, signature: sig,
-                                      parentName: lastTypeName, lineStart: lineNum, lineEnd: lineNum,
+                                      parentName: lastTypeName, lineStart: lineNum, lineEnd: end,
                                       filePath: filePath)
             symbols.append(sym)
             continue
@@ -145,8 +211,9 @@ private func extractJSTS(content: String, filePath: String) -> [ExtractedSymbol]
         let trimmed = line.trimmingCharacters(in: .whitespaces)
 
         if let groups = match(trimmed, key: "jsts_class") {
+            let end = surgicalBraceEnd(from: lineNum, lines: lines)
             let sym = ExtractedSymbol(name: groups[2], kind: groups[1], scope: extractJSScope(from: trimmed),
-                                      signature: "", parentName: "", lineStart: lineNum, lineEnd: lineNum,
+                                      signature: "", parentName: "", lineStart: lineNum, lineEnd: end,
                                       filePath: filePath)
             symbols.append(sym)
             lastClassName = groups[2]
@@ -155,16 +222,18 @@ private func extractJSTS(content: String, filePath: String) -> [ExtractedSymbol]
 
         if let groups = match(trimmed, key: "jsts_func") {
             let kind = groups[1] == "function" ? "function" : "variable"
+            let end = surgicalBraceEnd(from: lineNum, lines: lines)
             let sym = ExtractedSymbol(name: groups[2], kind: kind, scope: extractJSScope(from: trimmed),
                                       signature: "", parentName: lastClassName, lineStart: lineNum,
-                                      lineEnd: lineNum, filePath: filePath)
+                                      lineEnd: end, filePath: filePath)
             symbols.append(sym)
             continue
         }
 
         if let groups = match(trimmed, key: "jsts_export") {
+            let end = surgicalBraceEnd(from: lineNum, lines: lines)
             let sym = ExtractedSymbol(name: groups[3], kind: groups[2], scope: "export", signature: "",
-                                      parentName: lastClassName, lineStart: lineNum, lineEnd: lineNum,
+                                      parentName: lastClassName, lineStart: lineNum, lineEnd: end,
                                       filePath: filePath)
             symbols.append(sym)
             continue
@@ -194,8 +263,9 @@ private func extractPython(content: String, filePath: String) -> [ExtractedSymbo
         guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
 
         if let groups = match(trimmed, key: "py_class") {
+            let end = surgicalIndentEnd(from: lineNum, startIndent: indent, lines: lines)
             let sym = ExtractedSymbol(name: groups[1], kind: "class", scope: "", signature: "",
-                                      parentName: "", lineStart: lineNum, lineEnd: lineNum,
+                                      parentName: "", lineStart: lineNum, lineEnd: end,
                                       filePath: filePath)
             symbols.append(sym)
             lastClassName = groups[1]
@@ -205,10 +275,11 @@ private func extractPython(content: String, filePath: String) -> [ExtractedSymbo
 
         if let groups = match(trimmed, key: "py_def") {
             let isMethod = indent > lastClassIndent && !lastClassName.isEmpty
+            let end = surgicalIndentEnd(from: lineNum, startIndent: indent, lines: lines)
             let sym = ExtractedSymbol(name: groups[1], kind: isMethod ? "method" : "function",
                                       scope: "", signature: "",
                                       parentName: isMethod ? lastClassName : "",
-                                      lineStart: lineNum, lineEnd: lineNum, filePath: filePath)
+                                      lineStart: lineNum, lineEnd: end, filePath: filePath)
             symbols.append(sym)
             continue
         }
@@ -229,8 +300,9 @@ private func extractPHP(content: String, filePath: String) -> [ExtractedSymbol] 
         guard !trimmed.hasPrefix("//"), !trimmed.hasPrefix("#"), !trimmed.hasPrefix("/*") else { continue }
 
         if let groups = match(trimmed, key: "php_class") {
+            let end = surgicalBraceEnd(from: lineNum, lines: lines)
             let sym = ExtractedSymbol(name: groups[2], kind: groups[1], scope: extractPHPScope(from: trimmed),
-                                      signature: "", parentName: "", lineStart: lineNum, lineEnd: lineNum,
+                                      signature: "", parentName: "", lineStart: lineNum, lineEnd: end,
                                       filePath: filePath)
             symbols.append(sym)
             lastClassName = groups[2]
@@ -239,8 +311,9 @@ private func extractPHP(content: String, filePath: String) -> [ExtractedSymbol] 
 
         if let groups = match(trimmed, key: "php_function") {
             let scope = extractPHPScope(from: trimmed)
+            let end = surgicalBraceEnd(from: lineNum, lines: lines)
             let sym = ExtractedSymbol(name: groups[1], kind: "function", scope: scope, signature: "",
-                                      parentName: lastClassName, lineStart: lineNum, lineEnd: lineNum,
+                                      parentName: lastClassName, lineStart: lineNum, lineEnd: end,
                                       filePath: filePath)
             symbols.append(sym)
             continue
@@ -261,6 +334,58 @@ private func extractPHP(content: String, filePath: String) -> [ExtractedSymbol] 
 private func extractPHPScope(from line: String) -> String {
     guard let groups = match(line, key: "php_scope"), groups.count > 1 else { return "" }
     return groups[1]
+}
+
+// MARK: - YAML / Shell / Generic
+
+private func extractYAML(content: String, filePath: String) -> [ExtractedSymbol] {
+    let lines = content.components(separatedBy: .newlines)
+    var symbols: [ExtractedSymbol] = []
+    for (idx, line) in lines.enumerated() {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+        // Key: value or key:  (mapping)
+        if let colon = trimmed.firstIndex(of: ":") {
+            let key = String(trimmed[..<colon]).trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty, key.range(of: #"^[A-Za-z_][\w\-\.]*$"#, options: .regularExpression) != nil else { continue }
+            let indent = line.prefix(while: { $0 == " " || $0 == "\t" }).count
+            let end = surgicalIndentEnd(from: idx + 1, startIndent: indent, lines: lines)
+            symbols.append(ExtractedSymbol(name: key, kind: "variable", scope: "", signature: "", parentName: "", lineStart: idx + 1, lineEnd: end, filePath: filePath))
+        }
+    }
+    return symbols
+}
+
+private func extractSh(content: String, filePath: String) -> [ExtractedSymbol] {
+    let lines = content.components(separatedBy: .newlines)
+    var symbols: [ExtractedSymbol] = []
+    let funcRegex = try? NSRegularExpression(pattern: #"^\s*(?:function\s+)?([A-Za-z_][\w]*)\s*\(\)"#)
+    for (idx, line) in lines.enumerated() {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+        let ns = trimmed as NSString
+        if let m = funcRegex?.firstMatch(in: trimmed, range: NSRange(location: 0, length: ns.length)), m.numberOfRanges > 1 {
+            let name = ns.substring(with: m.range(at: 1))
+            let end = surgicalBraceEnd(from: idx + 1, lines: lines)
+            symbols.append(ExtractedSymbol(name: name, kind: "function", scope: "", signature: "", parentName: "", lineStart: idx + 1, lineEnd: end, filePath: filePath))
+        }
+    }
+    return symbols
+}
+
+private func extractGeneric(content: String, filePath: String) -> [ExtractedSymbol] {
+    // Fallback for unknown extensions: surface top-level headings as symbols so search still returns surgical ranges
+    let lines = content.components(separatedBy: .newlines)
+    var symbols: [ExtractedSymbol] = []
+    for (idx, line) in lines.enumerated() {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("# ") || trimmed.hasPrefix("## ") {
+            let name = trimmed.replacingOccurrences(of: #"^#+\s*"#, with: "", options: .regularExpression)
+            guard !name.isEmpty else { continue }
+            symbols.append(ExtractedSymbol(name: String(name.prefix(64)), kind: "variable", scope: "", signature: "", parentName: "", lineStart: idx + 1, lineEnd: idx + 1, filePath: filePath))
+        }
+    }
+    return symbols
 }
 
 // MARK: - Repo-map (Context Access Layer L5a)

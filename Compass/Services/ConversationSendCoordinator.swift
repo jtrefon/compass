@@ -159,51 +159,62 @@ final class ConversationSendCoordinator {
         request: SendRequest,
         localTools: [AITool]
     ) async throws -> AIServiceResponse {
-        // Pass 1: Give the model tools and let it decide. Execute any tool calls.
-        let pass1 = try await aiInteractionCoordinator.sendMessageWithRetry(
-            .init(messages: historyCoordinator.requestMessages, tools: localTools,
-                  mode: request.mode, projectRoot: request.projectRoot,
-                  runId: request.runId, stage: nil,
-                  conversationId: request.conversationId, usesLocalModel: true)
-        ).get()
+        // Bounded agent loop: generate → execute tools → append results →
+        // generate again. The loop ends only when the model stops requesting
+        // tools (or the budget is exhausted) — a single tool call never
+        // collapses the turn with an empty final answer.
+        var iteration = 0
+        let maxIterations = 8
 
-        _ = pass1.toolCalls
+        repeat {
+            let response = try await aiInteractionCoordinator.sendMessageWithRetry(
+                .init(messages: historyCoordinator.requestMessages, tools: localTools,
+                      mode: request.mode, projectRoot: request.projectRoot,
+                      runId: request.runId, stage: nil,
+                      conversationId: request.conversationId, usesLocalModel: true)
+            ).get()
 
-        guard let toolCalls = pass1.toolCalls, !toolCalls.isEmpty else {
-            return pass1  // No tools called — return as-is
-        }
-
-        // Execute tool calls and append results to history. The assistant
-        // tool-call message is committed first so the request builder keeps
-        // the tool results in subsequent passes (blind-loop fix).
-        clearStreamingBuffer?()
-        let pass1Split = ReasoningSplitter.apply(to: pass1)
-        await historyCoordinator.append(
-            ChatMessage(role: .assistant,
-                        content: ToolMarkupStripper.assistantContent(pass1Split.content, toolCalls: toolCalls),
-                        context: ChatMessageContentContext(reasoning: pass1Split.reasoning),
-                        tool: ChatMessageToolContext(toolCalls: toolCalls))
-        )
-        let results = await toolExecutionCoordinator.executeToolCalls(
-            toolCalls, availableTools: localTools,
-            conversationId: request.conversationId
-        ) { [self] progressMsg in
-            if progressMsg.toolStatus == .executing {
-                historyCoordinator.setLiveToolMessage(progressMsg)
-            } else {
-                historyCoordinator.clearLiveToolMessage(progressMsg.toolCallId ?? "")
-                historyCoordinator.appendSync(progressMsg)
+            guard let toolCalls = response.toolCalls, !toolCalls.isEmpty else {
+                return response  // No tools called — final answer
             }
-        }
-        for msg in results { await historyCoordinator.append(msg) }
+            iteration += 1
+            guard iteration < maxIterations else {
+                // Budget exhausted while the model still wants tools. Force a
+                // final text answer with NO tools available — the model cannot
+                // defer to another tool call and must produce visible content
+                // (otherwise the commit boundary would strip this turn to an
+                // empty placeholder).
+                return try await aiInteractionCoordinator.sendMessageWithRetry(
+                    .init(messages: historyCoordinator.requestMessages, tools: [],
+                          mode: request.mode, projectRoot: request.projectRoot,
+                          runId: request.runId, stage: nil,
+                          conversationId: request.conversationId, usesLocalModel: true)
+                ).get()
+            }
 
-        // Pass 2: Model has tool results in history — produce final response
-        let pass2 = try await aiInteractionCoordinator.sendMessageWithRetry(
-            .init(messages: historyCoordinator.requestMessages, tools: localTools,
-                  mode: request.mode, projectRoot: request.projectRoot,
-                  runId: request.runId, stage: nil,
-                  conversationId: request.conversationId, usesLocalModel: true)
-        ).get()
-        return pass2
+            // Execute tool calls and append results to history. The assistant
+            // tool-call message is committed first so the request builder
+            // keeps the tool results in subsequent passes (blind-loop fix).
+            clearStreamingBuffer?()
+            let split = ReasoningSplitter.apply(to: response)
+            await historyCoordinator.append(
+                ChatMessage(role: .assistant,
+                            content: ToolMarkupStripper.assistantContent(split.content, toolCalls: toolCalls),
+                            context: ChatMessageContentContext(reasoning: split.reasoning),
+                            tool: ChatMessageToolContext(toolCalls: toolCalls))
+            )
+            let results = await toolExecutionCoordinator.executeToolCalls(
+                toolCalls, availableTools: localTools,
+                conversationId: request.conversationId
+            ) { [self] progressMsg in
+                if progressMsg.toolStatus == .executing {
+                    historyCoordinator.setLiveToolMessage(progressMsg)
+                } else {
+                    historyCoordinator.clearLiveToolMessage(progressMsg.toolCallId ?? "")
+                    historyCoordinator.appendSync(progressMsg)
+                }
+            }
+            for msg in results { await historyCoordinator.append(msg) }
+        } while true
     }
 }

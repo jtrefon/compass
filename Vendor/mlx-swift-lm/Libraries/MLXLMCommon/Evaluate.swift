@@ -4,6 +4,13 @@ import Foundation
 import MLX
 import MLXNN
 
+// Enable generation performance summaries by setting MLX_SWIFT_GEN_SUMMARY=1
+private let MLX_SWIFT_GEN_SUMMARY = ProcessInfo.processInfo.environment["MLX_SWIFT_GEN_SUMMARY"] == "1"
+@inline(__always)
+private func genSummaryLog(_ message: @autoclosure () -> String) {
+    if MLX_SWIFT_GEN_SUMMARY { print("[Gen] \(message())") }
+}
+
 /// A `LogitSampler` is responsible for sampling `logits` produced by
 /// a ``LanguageModel`` to produce a token.
 ///
@@ -1672,7 +1679,7 @@ public func generateTokens(
 ///     `draft_block_size`. Default 4 matches mlx-vlm's example configs.
 ///   - wiredMemoryTicket: optional wired memory ticket.
 /// - Returns: an `AsyncStream<Generation>` yielding chunks and tool calls.
-/// - Throws: an error if the iterator initialization fails.
+/// - Throws: An error if the iterator initialization fails.
 public func generate(
     input: LMInput,
     cache: [KVCache]? = nil,
@@ -1902,6 +1909,12 @@ private func generateLoopTask<Handler: TokenLoopHandler>(
 
             let now = Date.timeIntervalSinceReferenceDate
             let generateTime = now - start
+
+            if MLX_SWIFT_GEN_SUMMARY {
+                let promptTPS = promptTime > 0 ? Double(promptTokenCount) / promptTime : 0
+                let genTPS = generateTime > 0 ? Double(tokenCount) / generateTime : 0
+                genSummaryLog("Prompt: tokens=\(promptTokenCount), t=\(String(format: "%.3f", promptTime))s, tps=\(String(format: "%.2f", promptTPS)); Generation: tokens=\(tokenCount), t=\(String(format: "%.3f", generateTime))s, tps=\(String(format: "%.2f", genTPS))")
+            }
 
             let mtpStats = iterator as? MTPStatsCollecting
             let info = GenerateCompletionInfo(
@@ -2373,3 +2386,4 @@ private struct RawTokenLoopHandler: TokenLoopHandler {
         .info(info)
     }
 }
+

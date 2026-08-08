@@ -49,7 +49,9 @@ enum LocalModelCatalog {
                 artifact("video_preprocessor_config.json"),
                 artifact("vocab.json")
             ],
-            defaultContextLength: 65536
+            defaultContextLength: 65536,
+            maxContextLength: 262_144,
+            supportsQuantizedKVCache: true
         )
     }
 
@@ -71,7 +73,8 @@ enum LocalModelCatalog {
                 artifact("vocab.json"),
                 artifact("merges.txt")
             ],
-            defaultContextLength: 32768
+            defaultContextLength: 32768,
+            maxContextLength: 32_768
         )
     }
 }

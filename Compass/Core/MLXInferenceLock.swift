@@ -8,24 +8,34 @@ actor MLXInferenceLock {
     static let shared = MLXInferenceLock()
 
     private var active = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters = 0
 
-    func acquire() async {
-        if !active {
-            active = true
-            return
+    /// Acquire the inference lock.
+    ///
+    /// Cancellation-aware: if the caller is cancelled while waiting, throws
+    /// `CancellationError` instead of wart-holding a slot and then loading the
+    /// full model + prefill for a generation nobody wants. Polls briefly while
+    /// waiting so a cancelled waiter never wedges the queue.
+    func acquire() async throws {
+        waiters += 1
+        defer { waiters -= 1 }
+        while active {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(2))
         }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
-        }
+        active = true
+    }
+
+    /// Non-blocking acquire for best-effort background work (KV prefix-cache
+    /// persistence). Returns false if the GPU is busy OR another task is queued
+    /// ahead — the caller must skip its work in that case, never wait for it.
+    func tryAcquire() -> Bool {
+        guard !active, waiters == 0 else { return false }
+        active = true
+        return true
     }
 
     func release() {
-        if let next = waiters.first {
-            waiters.removeFirst()
-            next.resume()
-        } else {
-            active = false
-        }
+        active = false
     }
 }

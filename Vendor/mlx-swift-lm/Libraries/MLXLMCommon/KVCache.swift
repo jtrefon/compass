@@ -4,6 +4,13 @@ import Foundation
 import MLX
 import MLXNN
 
+// Enable verbose cache logging by setting MLX_SWIFT_VERBOSE_CACHE=1 in the environment
+private let MLX_SWIFT_VERBOSE_CACHE = ProcessInfo.processInfo.environment["MLX_SWIFT_VERBOSE_CACHE"] == "1"
+@inline(__always)
+private func cacheDebugLog(_ message: @autoclosure () -> String) {
+    if MLX_SWIFT_VERBOSE_CACHE { print("[KVCache] \(message())") }
+}
+
 /// Offset to use with ``applyRotaryPosition(_:to:offset:)``.
 ///
 /// See ``KVCache/ropeOffset``.
@@ -372,7 +379,7 @@ public func createSSMMask(h: MLXArray, cache: MambaCache?) -> MLXArray? {
 public class KVCacheSimple: BaseKVCache, CustomDebugStringConvertible {
     internal var keys: MLXArray?
     internal var values: MLXArray?
-    public var step = 256
+    public var step = 1024
 
     public override init() {
         super.init()
@@ -423,6 +430,8 @@ public class KVCacheSimple: BaseKVCache, CustomDebugStringConvertible {
 
         let returnedKeys = self.keys![.ellipsis, ..<self.offset, 0...]
         let returnedValues = self.values![.ellipsis, ..<self.offset, 0...]
+
+        cacheDebugLog("KVCacheSimple.update: offset=\(self.offset), keys=\(self.keys?.shape.description ?? "-"), values=\(self.values?.shape.description ?? "-")")
 
         return (returnedKeys, returnedValues)
     }
@@ -525,7 +534,7 @@ public class RotatingKVCache: BaseKVCache, CustomDebugStringConvertible {
 
     public override var maxSize: Int? { maxCacheSize }
 
-    public init(maxSize: Int, keep: Int = 0, step: Int = 256) {
+    public init(maxSize: Int, keep: Int = 0, step: Int = 1024) {
         self.maxCacheSize = maxSize
         self.keep = keep
         self.step = step
@@ -589,6 +598,8 @@ public class RotatingKVCache: BaseKVCache, CustomDebugStringConvertible {
         offset += keys.dim(2)
         idx = self.keys!.dim(2)
 
+        cacheDebugLog("RotatingKVCache.updateConcat: offset=\(self.offset), idx=\(self.idx), keys=\(self.keys?.shape.description ?? "-"), values=\(self.values?.shape.description ?? "-")")
+
         return (self.keys!, self.values!)
     }
 
@@ -639,6 +650,8 @@ public class RotatingKVCache: BaseKVCache, CustomDebugStringConvertible {
         self.values![.ellipsis, idx ..< (idx + S), 0...] = values
         offset += S
         idx += S
+
+        cacheDebugLog("RotatingKVCache.updateInPlace: offset=\(self.offset), idx=\(self.idx), keys=\(self.keys?.shape.description ?? "-"), values=\(self.values?.shape.description ?? "-")")
 
         // Return the appropriate cache slice
         if offset < maxCacheSize {
@@ -829,7 +842,7 @@ public class QuantizedKVCache: BaseKVCache, QuantizedKVCacheProtocol {
     public init(groupSize: Int = 64, bits: Int = 8, mode: QuantizationMode = .affine) {
         self.groupSize = groupSize
         self.bits = bits
-        self.step = 256
+        self.step = 1024
         self.mode = mode
         super.init()
     }
@@ -991,6 +1004,8 @@ public class QuantizedKVCache: BaseKVCache, QuantizedKVCacheProtocol {
 
         self.keys = currentKeys
         self.values = currentValues
+
+        cacheDebugLog("QuantizedKVCache.updateQuantized: offset=\(self.offset), kSteps=\(self.keys?.0.dim(-2) ?? -1), vSteps=\(self.values?.0.dim(-2) ?? -1), groupSize=\(self.groupSize), bits=\(self.bits)")
 
         // Return quantized tuples
         let trimmedKeys = treeMap({ $0[.ellipsis, ..<offset, 0...] }, currentKeys)
@@ -2065,4 +2080,23 @@ public func maybeQuantizeKVCache(
         }
         // TODO: RotatingKVCache.toQuantized() is not implemented yet, like in Python.
     }
+}
+
+/// Produce a human-readable summary of a list of KV caches for diagnostics.
+public func debugDescribeCaches(_ caches: [KVCache]) -> String {
+    return caches.enumerated().map { (i, c) in
+        let className: String = {
+            switch c {
+            case is ChunkedKVCache: return "ChunkedKVCache"
+            case is MambaCache: return "MambaCache"
+            case is ArraysCache: return "ArraysCache"
+            case is RotatingKVCache: return "RotatingKVCache"
+            case is QuantizedKVCache: return "QuantizedKVCache"
+            case is KVCacheSimple: return "KVCacheSimple"
+            case is CacheList: return "CacheList"
+            default: return String(describing: type(of: c))
+            }
+        }()
+        return "[#\(i)] \(className) offset=\(c.offset) stateCount=\(c.state.count) meta=\(c.metaState.joined(separator: ","))"
+    }.joined(separator: "\n")
 }

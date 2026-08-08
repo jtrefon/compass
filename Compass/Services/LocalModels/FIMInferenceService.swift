@@ -213,7 +213,11 @@ actor FIMInferenceService {
                 do {
                     // Serialize with the chat engine — concurrent MLX streams
                     // thrash the shared allocator (see MLXInferenceLock).
-                    await MLXInferenceLock.shared.acquire()
+                    try await MLXInferenceLock.shared.acquire()
+                    if Task.isCancelled {
+                        continuation.finish(throwing: CancellationError())
+                        return
+                    }
                     defer { Task { await MLXInferenceLock.shared.release() } }
                     let container = try await ensureLoaded()
                     guard LocalModelCatalog.model(id: modelId) != nil else {

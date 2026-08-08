@@ -12,7 +12,7 @@ final class LocalToolExecutionTests: XCTestCase {
             throw XCTSkip("Local chat model not downloaded")
         }
         let runtime = try await HarnessRuntime.makeRuntime()
-        let store = LocalModelSelectionStore()
+        let store = LocalModelSelectionStore(settingsStore: runtime.container.settingsStore)
         await store.setOfflineModeEnabled(true)
         runtime.manager.currentMode = .coder
         return runtime

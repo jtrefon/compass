@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 import MLX
 @preconcurrency import MLXLLM
 @preconcurrency import MLXLMCommon
@@ -10,6 +11,9 @@ import Darwin
 final class PromptCacheEntry: @unchecked Sendable {
     var cache: [KVCache]?
     var promptTokenIds: [Int] = []
+    /// System-prefix hash the cache was seeded/validated against (for
+    /// conversation-level disk persistence).
+    var systemHash: String?
     private let lock = NSLock()
 
     func set(cache: [KVCache]?, tokenIds: [Int]) {
@@ -34,7 +38,8 @@ final class PromptCacheEntry: @unchecked Sendable {
 protocol LocalModelGenerating: Sendable {
     func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat?, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String?, prefixCache: PrefixCacheContext?) async throws -> AIServiceResponse
     func preload(modelId: String, modelDirectory: URL, toolCallFormat: ToolCallFormat?) async throws
-    func unloadAllModels(reason: String) async
+    func unloadAllModels(reason: String, persistKVTo: URL?) async
+    func hasActiveGeneration() async -> Bool
 }
 
 /// Disk-persisted system-prefix KV cache: built once per (project, settings),
@@ -54,6 +59,10 @@ actor NativeMLXGenerator: LocalModelGenerating {
     private var accessOrder: [URL] = []
     private let maxCachedModels = 1
     private var generationCount: Int = 0
+    /// Generations currently executing; the unload path waits for these
+    /// (defense in depth — the pressure handler already holds
+    /// MLXInferenceLock, this guards the non-locked unload callers).
+    private var activeGenerationCount = 0
     private static let mlxCacheLimitBytes = 1024 * 1024 * 1024
     private static let defaultTestingRSSLimitMB = 8 * 1024
     private static let defaultOperationalRSSLimitMB = 10 * 1024
@@ -126,6 +135,10 @@ actor NativeMLXGenerator: LocalModelGenerating {
         var collectedToolCalls: [AIToolCall] = []
         var completionInfo: GenerateCompletionInfo?
         var chunkCount: Int = 0
+        /// Exact token IDs sampled during this generation (in cache order) —
+        /// used for KV-reuse bookkeeping. NEVER re-derive these from the
+        /// emitted text: tokenization is not round-trip stable.
+        var generatedTokenIds: [Int] = []
     }
 
     func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat? = nil, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String? = nil, prefixCache: PrefixCacheContext? = nil) async throws -> AIServiceResponse {
@@ -133,8 +146,13 @@ actor NativeMLXGenerator: LocalModelGenerating {
             throw CancellationError()
         }
         // Serialize with FIM and other MLX engines — see MLXInferenceLock.
-        await MLXInferenceLock.shared.acquire()
-        defer { Task { await MLXInferenceLock.shared.release() } }
+        try await MLXInferenceLock.shared.acquire()
+        try Task.checkCancellation()
+        activeGenerationCount += 1
+        defer {
+            activeGenerationCount -= 1
+            Task { await MLXInferenceLock.shared.release() }
+        }
         logGenerationStart(
             modelId: modelId, modelDirectory: modelDirectory, userInput: userInput,
             tools: tools, toolCallFormat: toolCallFormat, runId: runId,
@@ -248,9 +266,42 @@ actor NativeMLXGenerator: LocalModelGenerating {
         if let prefixCache, FileManager.default.fileExists(atPath: prefixCache.url.path) {
             if let loaded = Self.loadPrefixCache(prefixCache) {
                 entry.set(cache: loaded.cache, tokenIds: loaded.tokenIds)
+                entry.systemHash = prefixCache.hash
             }
         }
+        // A conversation-level cache (persisted before a critical eviction)
+        // has more history than the system prefix — it wins.
+        if let prefixCache,
+           let loaded = Self.loadConversationCache(
+               directory: prefixCache.url.deletingLastPathComponent(),
+               conversationKey: key,
+               expectedHash: prefixCache.hash
+           ) {
+            entry.set(cache: loaded.cache, tokenIds: loaded.tokenIds)
+            entry.systemHash = prefixCache.hash
+        }
         return entry
+    }
+
+    /// Loads a conversation-level KV cache file, validating the system-hash
+    /// metadata and token ids. Any mismatch falls back to the prefix/fresh
+    /// prefill (safe).
+    nonisolated private static func loadConversationCache(
+        directory: URL,
+        conversationKey: String,
+        expectedHash: String
+    ) -> (cache: [KVCache], tokenIds: [Int])? {
+        let digest = String(SHA256.hash(data: Data(conversationKey.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16))
+        let url = directory.appendingPathComponent("kv-conv-\(digest).safetensors")
+        guard FileManager.default.fileExists(atPath: url.path),
+              let (caches, metadata) = try? loadPromptCache(url: url),
+              metadata["systemHash"] == expectedHash,
+              let tokenIdsRaw = metadata["tokenIds"] else {
+            return nil
+        }
+        let tokenIds = tokenIdsRaw.split(separator: ",").compactMap { Int($0) }
+        guard !tokenIds.isEmpty else { return nil }
+        return (caches, tokenIds)
     }
 
     /// Loads the disk prefix cache, validating the hash metadata. Returns nil
@@ -282,43 +333,52 @@ actor NativeMLXGenerator: LocalModelGenerating {
         inferenceConfiguration: LocalModelInferenceConfiguration
     ) {
         guard let prefixCache else { return }
-        if savedPrefixCacheHashes.contains(prefixCache.hash) { return }
-        savedPrefixCacheHashes.insert(prefixCache.hash)
+        guard !savedPrefixCacheHashes.contains(prefixCache.hash) else { return }
 
         let capturedInput = UnsafeValue(value: prefixCache.systemUserInput)
+        // Best-effort: the persist must NEVER delay a generation. It competes
+        // via tryAcquire (skip instantly if the GPU is busy or a generation is
+        // queued) — previously it took the full lock and blocked the next
+        // tool-pass send for 20-30s while pre-computing the system KV.
+        // savedPrefixCacheHashes is only marked on success, so a skipped
+        // build is retried after a later (idle) generation.
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
-            await MLXInferenceLock.shared.acquire()
-            defer { Task { await MLXInferenceLock.shared.release() } }
             do {
-                let container = try await self.loadContainerCached(
-                    modelDirectory: modelDirectory, toolCallFormat: toolCallFormat
-                )
-                try await container.perform { context async throws in
-                    let input = try await context.processor.prepare(input: capturedInput.value)
-                    let tokenIds = input.text.tokens.asArray(Int.self)
-                    let parameters = GenerateParameters(
-                        maxTokens: 1,
-                        maxKVSize: inferenceConfiguration.maxKVSize,
-                        kvBits: inferenceConfiguration.kvCache4BitEnabled ? 4 : nil,
-                        temperature: 0,
-                        topP: 1,
-                        prefillStepSize: inferenceConfiguration.prefillStepSize
-                    )
-                    var cache = context.model.newCache(parameters: parameters)
-                    _ = try context.model.prepare(input, cache: cache, windowSize: parameters.prefillStepSize)
-                    eval(cache)
-                    try savePromptCache(
-                        url: prefixCache.url,
-                        cache: cache,
-                        metadata: [
-                            "systemHash": prefixCache.hash,
-                            "tokenIds": tokenIds.map(String.init).joined(separator: ","),
-                        ]
-                    )
+                guard await MLXInferenceLock.shared.tryAcquire() else {
+                    return // GPU busy or generation queued — skip, retried later
                 }
-                Self.evictPrefixCacheFiles(directory: prefixCache.url.deletingLastPathComponent(), keep: Self.maxPrefixCacheFiles)
-            } catch {
+                defer { Task { await MLXInferenceLock.shared.release() } }
+do {
+                    let container = try await self.loadContainerCached(
+                        modelDirectory: modelDirectory, toolCallFormat: toolCallFormat
+                    )
+                    try await container.perform { context async throws in
+                        let input = try await context.processor.prepare(input: capturedInput.value)
+                        let tokenIds = input.text.tokens.asArray(Int.self)
+                        let parameters = GenerateParameters(
+                            maxTokens: 1,
+                            maxKVSize: inferenceConfiguration.maxKVSize,
+                            kvBits: inferenceConfiguration.kvCache4BitEnabled ? 4 : nil,
+                            temperature: 0,
+                            topP: 1,
+                            prefillStepSize: inferenceConfiguration.prefillStepSize
+                        )
+                        var cache = context.model.newCache(parameters: parameters)
+                        _ = try context.model.prepare(input, cache: cache, windowSize: parameters.prefillStepSize)
+                        eval(cache)
+                        try savePromptCache(
+                            url: prefixCache.url,
+                            cache: cache,
+                            metadata: [
+                                "systemHash": prefixCache.hash,
+                                "tokenIds": tokenIds.map(String.init).joined(separator: ","),
+                            ]
+                        )
+                    }
+                    await self.markPrefixCacheSaved(prefixCache.hash)
+                    Self.evictPrefixCacheFiles(directory: prefixCache.url.deletingLastPathComponent(), keep: Self.maxPrefixCacheFiles)
+                } catch {
                 // Cache building is best-effort; a failure just means the next
                 // conversation pays a normal prefill.
                 await AppLogger.shared.debug(
@@ -332,8 +392,13 @@ actor NativeMLXGenerator: LocalModelGenerating {
             }
         }
     }
+}
 
-    nonisolated private static let maxPrefixCacheFiles = 8
+private func markPrefixCacheSaved(_ hash: String) {
+        savedPrefixCacheHashes.insert(hash)
+    }
+
+nonisolated private static let maxPrefixCacheFiles = 8
 
     nonisolated private static func evictPrefixCacheFiles(directory: URL, keep: Int) {
         guard let allFiles = try? FileManager.default.contentsOfDirectory(
@@ -419,14 +484,14 @@ actor NativeMLXGenerator: LocalModelGenerating {
             )
 
             if let cacheEntry, let kvCache, !kvCache.isEmpty {
-                // mlx-swift-lm 3.31.4 removed generatedTokenIds from the
-                // stream's completion info — re-encode the emitted text with
-                // the container's tokenizer. A mismatch can only shorten the
-                // reuse prefix (safe trim + re-prefill), never corrupt.
-                let generatedIds = context.tokenizer.encode(
-                    text: streamResult.output, addSpecialTokens: false)
-                let fullTokenIds = promptTokenIds + generatedIds
-                cacheEntry.set(cache: kvCache, tokenIds: fullTokenIds)
+                // Exact token sequence written to the cache: prompt IDs plus the
+                // IDs actually sampled (TokenIDRecorder). Deliberately not
+                // re-encoded from `streamResult.output` — re-encoding can diverge
+                // and desynchronize the next turn's common-prefix trim.
+                cacheEntry.set(
+                    cache: kvCache,
+                    tokenIds: promptTokenIds + streamResult.generatedTokenIds
+                )
             }
 
             return await self.buildGenerationResponse(
@@ -516,11 +581,25 @@ actor NativeMLXGenerator: LocalModelGenerating {
         genStart: ContinuousClock.Instant,
         modelId: String
     ) async throws -> StreamResult {
-        let stream = try MLXLMCommon.generate(
+        // Low-level iterator so we can wrap the sampling pipeline with a
+        // token recorder — the generic generate() covers the docs but hides the
+        // sampled IDs we need for robust KV-cache reuse bookkeeping.
+        let recorder = TokenIDRecorder(upstream: parameters.processor())
+        let iterator = try TokenIterator(
             input: input,
+            model: context.model,
             cache: kvCache,
-            parameters: parameters,
-            context: context
+            processor: recorder,
+            sampler: parameters.sampler(),
+            prefillStepSize: parameters.prefillStepSize,
+            maxTokens: parameters.maxTokens
+        )
+        let (stream, _) = MLXLMCommon.generateTask(
+            promptTokenCount: input.text.tokens.size,
+            modelConfiguration: context.configuration,
+            tokenizer: context.tokenizer,
+            iterator: iterator,
+            tools: nil
         )
         var result = StreamResult()
 
@@ -562,6 +641,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
             }
         }
 
+        result.generatedTokenIds = recorder.tokenIDs
         return result
     }
 
@@ -739,12 +819,53 @@ actor NativeMLXGenerator: LocalModelGenerating {
         return minLen
     }
 
-    func unloadAllModels(reason: String = "unknown") {
+    func hasActiveGeneration() -> Bool {
+        activeGenerationCount > 0
+    }
+
+    /// Unloads every chat container + KV cache. When `persistKVTo` is set
+    /// (critical memory pressure), each conversation's KV cache is written to
+    /// disk first so the next turn restores it instead of re-prefilling the
+    /// full history. Waits (bounded) for in-flight generations.
+    ///
+    /// The wait MUST be async: the in-flight generation's `activeGenerationCount`
+    /// decrement runs on this actor, so a synchronous busy-wait here would block
+    /// the very task that ends the generation (measured as a 30s stall).
+    func unloadAllModels(reason: String = "unknown", persistKVTo: URL? = nil) async {
+        let deadline = ContinuousClock.now + .seconds(30)
+        while activeGenerationCount > 0, ContinuousClock.now < deadline {
+            if Task.isCancelled { break }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
         synchronizeMLXStream()
+        if let persistKVTo {
+            persistConversationCaches(to: persistKVTo)
+        }
         containersByModelDirectory.removeAll()
         inFlightLoads.removeAll()
         accessOrder.removeAll()
         Memory.clearCache()
+    }
+
+    /// Best-effort disk persist of every in-memory conversation KV cache.
+    /// Files: kv-conv-<sha256(conversationKey).prefix(16)>.safetensors with
+    /// tokenIds + systemHash metadata; resolveCacheEntry restores them.
+    private func persistConversationCaches(to dir: URL) {
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (key, entry) in promptCacheByConversation {
+            let (cache, tokenIds) = entry.get()
+            guard let cache, !cache.isEmpty, !tokenIds.isEmpty else { continue }
+            let digest = String(SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16))
+            let url = dir.appendingPathComponent("kv-conv-\(digest).safetensors")
+            try? savePromptCache(
+                url: url,
+                cache: cache,
+                metadata: [
+                    "tokenIds": tokenIds.map(String.init).joined(separator: ","),
+                    "systemHash": entry.systemHash ?? "",
+                ]
+            )
+        }
     }
 
     func unloadModel(modelDirectory: URL, reason: String = "unknown") {

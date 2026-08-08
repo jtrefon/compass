@@ -50,18 +50,15 @@ struct SystemPromptAssembler {
             // schemas at ~3.9K tokens and leaked mutation/terminal tool prose
             // into a mode that cannot use them. Coder/agent keep the v3
             // reference prompts until their own slimming pass.
+            // Nucleus: only registered tools get prose — saves ~2.5K vs old 12-tool set
             if input.mode != .chat {
-                // Load per-tool prompts from the canonical v3 tool prompts directory.
-                // NOTE: the previous v2 prompt set was removed; v3 is authoritative.
+                // Canonical nucleus prompts — no ls/glob/context unless gated
                 let toolPromptKeys = [
                     "Tools/v3/read",
                     "Tools/v3/write",
                     "Tools/v3/edit",
-                    "Tools/v3/ls",
-                    "Tools/v3/glob",
                     "Tools/v3/search",
                     "Tools/v3/rm",
-                    "Tools/v3/context",
                     "Tools/v3/web_search",
                     "Tools/v3/web_fetch",
                     "Tools/v3/bash",
@@ -113,7 +110,21 @@ struct SystemPromptAssembler {
             )
         }
 
-        if input.includeModelReasoning {
+        // The "model reasoning disabled" correction must not co-load with the
+        // stage-independent optional-reasoning protocol below — for reasoning
+        // modes where agent reasoning is on (`.agent`/`.modelAndAgent`), the
+        // disabled correction says "don't narrate your thinking" while the
+        // optional protocol demands a `<thought>` block every turn. When that
+        // protocol would be active for this request, skip the disabled
+        // correction; the enabled correction is kept (it explicitly defers to
+        // a structured reasoning block when one is requested).
+        let optionalReasoningActive = AIRequestStage.reasoningPromptKeyIfNeeded(
+            reasoningMode: input.reasoningMode,
+            mode: input.mode,
+            stage: input.stage
+        ) != nil
+        let skipDisabledCorrection = optionalReasoningActive && !input.reasoningMode.includesModelReasoning
+        if !skipDisabledCorrection {
             sections.append(try PromptRepository.shared.prompt(
                 key: input.reasoningMode.modelReasoningPromptKey,
                 projectRoot: input.projectRoot

@@ -59,7 +59,7 @@ let description =        "Search the codebase: symbols, text, and filenames, gro
             // Semantic search via MLX embeddings removed — RAG handles contextual retrieval
         }
 
-        // 2. Symbol search via index (authoritative for code structure)
+        // 2. Symbol search via index (authoritative for code structure) — surgical ranges from tree-sitter
         if let index {
             let symbolCount: Int
             if let symbols = try? await index.searchSymbolsWithPaths(nameLike: query, limit: fetchLimit) {
@@ -68,11 +68,14 @@ let description =        "Search the codebase: symbols, text, and filenames, gro
                     let kind = classifySymbolKind(symbolResult.symbol.kind)
                     let filePath = symbolResult.filePath ?? "unknown"
                     let line = symbolResult.symbol.lineStart
+                    let endLine = symbolResult.symbol.lineEnd
+                    let surgical = endLine > line ? " [\(line)-\(endLine) ← use read(start_line:\(line), end_line:\(endLine)) for full body]" : ""
                     entries.append(SearchEntry(
                         file: filePath,
                         line: line,
+                        lineEnd: endLine > line ? endLine : nil,
                         matchType: kind,
-                        context: "\(kind) \(symbolResult.symbol.name)"
+                        context: "\(kind) \(symbolResult.symbol.name)\(surgical)"
                     ))
                 }
             } else {
@@ -92,7 +95,7 @@ let description =        "Search the codebase: symbols, text, and filenames, gro
                             let file = String(parts[0])
                             let line = Int(parts[1]) ?? 0
                             let context = String(parts[2]).trimmingCharacters(in: .whitespaces)
-                            entries.append(SearchEntry(file: file, line: line, matchType: "reference", context: context))
+                            entries.append(SearchEntry(file: file, line: line, lineEnd: nil, matchType: "reference", context: context))
                         }
                     }
                 } else {
@@ -182,7 +185,7 @@ let description =        "Search the codebase: symbols, text, and filenames, gro
                 if line.lowercased().contains(query) {
                     let absPath = absolutePath(fileURL)
                     let ctx = line.trimmingCharacters(in: .whitespaces)
-                    results.append(SearchEntry(file: absPath, line: i + 1, matchType: "reference", context: ctx))
+                    results.append(SearchEntry(file: absPath, line: i + 1, lineEnd: nil, matchType: "reference", context: ctx))
                 }
             }
         }
@@ -211,6 +214,7 @@ let description =        "Search the codebase: symbols, text, and filenames, gro
                     results.append(SearchEntry(
                         file: absolutePath(fileURL),
                         line: 0,
+                        lineEnd: nil,
                         matchType: "filename",
                         context: fileURL.lastPathComponent
                     ))
@@ -229,7 +233,16 @@ let description =        "Search the codebase: symbols, text, and filenames, gro
         for (file, fileEntries) in grouped {
             output += "# \(file)\n"
             for entry in fileEntries {
-                let lineInfo = entry.line > 0 ? "\(entry.line): " : ""
+                let lineInfo: String
+                if entry.line > 0 {
+                    if let end = entry.lineEnd, end > entry.line {
+                        lineInfo = "\(entry.line)-\(end): "
+                    } else {
+                        lineInfo = "\(entry.line): "
+                    }
+                } else {
+                    lineInfo = ""
+                }
                 output += "  \(lineInfo)[\(entry.matchType)] \(entry.context)\n"
             }
             output += "\n"
@@ -260,6 +273,7 @@ let description =        "Search the codebase: symbols, text, and filenames, gro
     private struct SearchEntry: Sendable {
         let file: String
         let line: Int
+        let lineEnd: Int?
         let matchType: String
         let context: String
     }

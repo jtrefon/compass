@@ -11,7 +11,7 @@ final class LocalChatTwoTurnReproTests: XCTestCase {
             throw XCTSkip("Local chat model not downloaded — skipping two-turn repro")
         }
         let runtime = try await HarnessRuntime.makeRuntime()
-        let store = LocalModelSelectionStore()
+        let store = LocalModelSelectionStore(settingsStore: runtime.container.settingsStore)
         await store.setOfflineModeEnabled(true)
         runtime.manager.currentMode = .chat
         return runtime

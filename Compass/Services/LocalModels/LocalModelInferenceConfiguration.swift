@@ -17,8 +17,27 @@ struct LocalModelInferenceConfiguration: Sendable, Equatable, Hashable {
 }
 
 enum LocalModelInferenceOverrides {
+    /// Hard ceiling for the chat context window — derived from the model's
+    /// max_position_embeddings (262144 for Qwen3.5-4B). The settings slider
+    /// drives `defaultContextLength` up to here; no lower clamp remains.
+    /// The env knob and the benchmark conf still override, so memory
+    /// experiments remain possible without an app rebuild.
+    static let maxModelContextLength = 262_144
+
+    /// Logs a warning (non-fatal) when the resolved default is above the model's
+    /// capability.
+    static func logIfOverBudget(defaultContextLength: Int) {
+        guard defaultContextLength > Self.maxModelContextLength else { return }
+        Task {
+            await AppLogger.shared.warning(
+                category: .localModel,
+                message: "Local model contextLength \(defaultContextLength) exceeds the model max \(Self.maxModelContextLength); clamped for the chat path (override via COMPASS_LOCAL_MODEL_CONTEXT_LENGTH)"
+            )
+        }
+    }
+
     /// Resolves the inference configuration from env vars / the benchmark
-    /// conf file over production defaults. Env knobs are the experiment
+    /// conf file over defaults. Env knobs are the experiment
     /// surface (run.sh forwards them to the harness process, mirroring the
     /// FIM benchmark conf pattern): direct env wins, then the conf file in
     /// the test-profile dir (harness runs cannot rely on env passthrough),
@@ -34,6 +53,7 @@ enum LocalModelInferenceOverrides {
     ) -> LocalModelInferenceConfiguration {
         let environment = ProcessInfo.processInfo.environment
         let conf = benchmarkConfValues(environment: environment)
+        logIfOverBudget(defaultContextLength: defaultContextLength)
         func value(_ key: String) -> String? {
             environment[key].flatMap { $0.isEmpty ? nil : $0 } ?? conf[key]
         }
@@ -50,7 +70,7 @@ enum LocalModelInferenceOverrides {
         let contextLength = clamp(
             envContext ?? defaultContextLength,
             min: 256,
-            max: 262_144
+            max: Self.maxModelContextLength
         )
         let maxKVSize = clamp(
             envMaxKV ?? contextLength,
@@ -69,7 +89,7 @@ enum LocalModelInferenceOverrides {
             kvCache4BitEnabled = defaultKVCache4BitEnabled
         }
         let prefillStepSize = clamp(
-            envPrefill ?? 128,
+            envPrefill ?? 512,
             min: 64,
             max: 4_096
         )
