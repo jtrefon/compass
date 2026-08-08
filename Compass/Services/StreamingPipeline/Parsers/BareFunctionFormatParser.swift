@@ -22,7 +22,7 @@ public struct BareFunctionFormatParser: ToolCallFormatParser {
                   let fullR = Range(match.range(at: 0), in: text) else { continue }
             lastEnd = fullR.upperBound
 
-            let name = String(text[nameR]).lowercased()
+            let name = ToolAliasRegistry.shared.canonicalName(for: String(text[nameR]))
             let body = String(text[bodyR])
             let paramPattern = #"(?is)<parameter=([^\s>]+)>\s*(.*?)\s*</parameter>"#
             let namedPattern = #"(?is)<parameter\s+name=\"([^\"]+)\"\s*>(.*?)</parameter>"#

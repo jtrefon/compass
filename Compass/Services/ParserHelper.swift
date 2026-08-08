@@ -3,7 +3,7 @@ import Foundation
 enum ParserHelper {
     static func normalizeName(_ rawName: String) -> String {
         let decoded = Self.decodeHTMLEntities(rawName).trimmingCharacters(in: .whitespacesAndNewlines)
-        return decoded.lowercased()
+        return ToolAliasRegistry.shared.canonicalName(for: decoded)
     }
 
     static func decodeHTMLEntities(_ value: String) -> String {

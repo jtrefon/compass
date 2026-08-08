@@ -374,11 +374,13 @@ extension AIToolExecutor {
             return directMatch
         }
 
-        // Nucleus: no alias registry — exact name only (lowercased for tolerance)
-        let canonical = toolCall.name.lowercased()
-        guard canonical != toolCall.name else { return nil }
+        // Resolve via alias registry: models emit legacy names (read_file,
+        // list_files, run_command...) — canonicalize before matching.
+        let canonical = ToolAliasRegistry.shared.canonicalName(for: toolCall.name)
+        guard canonical != toolCall.name.lowercased() else { return nil }
 
-        let candidates = [canonical]
+        // Try exact canonical match first, then the legacy names that map to it
+        let candidates = [canonical] + ToolAliasRegistry.shared.legacyNames(for: canonical)
 
         for candidate in candidates {
             if let resolved = availableTools.first(where: { $0.name == candidate }) {

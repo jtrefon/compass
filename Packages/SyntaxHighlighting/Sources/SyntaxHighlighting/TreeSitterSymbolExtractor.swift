@@ -107,12 +107,18 @@ public enum TreeSitterSymbolExtractor {
         let typeName = node.nodeType ?? ""
 
         if symbolTypes.contains(typeName) {
-            if let extracted = extractSymbol(from: node, content: content, parentStack: parentStack) {
+            if var extracted = extractSymbol(from: node, content: content, parentStack: parentStack) {
                 results.append(extracted)
                 var newParents = parentStack
                 // Push class/interface names for child method parenting
                 if typeName.contains("class") || typeName.contains("interface") || typeName.contains("struct") || typeName.contains("enum") {
                     newParents.append(extracted.name)
+                }
+                // Python methods: function_definition under a class gets "method"
+                if typeName == "function_definition" && !parentStack.isEmpty {
+                    extracted = Symbol(name: extracted.name, kind: "method", lineStart: extracted.lineStart,
+                                       lineEnd: extracted.lineEnd, scope: extracted.scope, parentName: parentStack.last ?? "")
+                    results[results.count - 1] = extracted
                 }
                 for i in 0..<node.childCount {
                     guard let child = node.child(at: i) else { continue }
@@ -136,11 +142,15 @@ public enum TreeSitterSymbolExtractor {
         // Skip unnamed wrappers
         guard name != "unknown" else { return nil }
 
+        // JS/TS: `export function foo` — the declaration sits inside an export_statement
+        let parentType = node.parent?.nodeType ?? ""
+        let scope = parentType == "export_statement" ? "export" : ""
+
         let startRow = Int(node.pointRange.lowerBound.row) + 1
         let endRow = Int(node.pointRange.upperBound.row) + 1
         let clampedEnd = max(startRow, endRow)
 
-        return Symbol(name: name, kind: kind, lineStart: startRow, lineEnd: clampedEnd, scope: "", parentName: parentStack.last ?? "")
+        return Symbol(name: name, kind: kind, lineStart: startRow, lineEnd: clampedEnd, scope: scope, parentName: parentStack.last ?? "")
     }
 
     private static func mapKind(_ nodeType: String) -> String {
@@ -150,7 +160,8 @@ public enum TreeSitterSymbolExtractor {
         if nodeType.contains("protocol") || nodeType.contains("interface") { return "protocol" }
         if nodeType.contains("extension") { return "extension" }
         if nodeType.contains("actor") { return "actor" }
-        if nodeType.contains("function") || nodeType.contains("method") || nodeType.contains("initializer") { return "function" }
+        if nodeType.contains("method") { return "method" }
+        if nodeType.contains("function") || nodeType.contains("initializer") { return "function" }
         if nodeType.contains("variable") || nodeType.contains("lexical") || nodeType.contains("property") { return "variable" }
         if nodeType.contains("typealias") || nodeType.contains("type_alias") { return "typealias" }
         return "unknown"

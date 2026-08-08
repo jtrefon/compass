@@ -110,7 +110,7 @@ public struct JSONToolCallFormatParser: ToolCallFormatParser {
         } else {
             args = "{}"
         }
-        return RawToolCall(name: name.lowercased(), arguments: args)
+        return RawToolCall(name: ToolAliasRegistry.shared.canonicalName(for: name), arguments: args)
     }
 
     private func decodeEnvelope(from text: String) -> [RawToolCall]? {
@@ -130,7 +130,7 @@ public struct JSONToolCallFormatParser: ToolCallFormatParser {
             } else {
                 args = "{}"
             }
-            return RawToolCall(name: name.lowercased(), arguments: args)
+return RawToolCall(name: ToolAliasRegistry.shared.canonicalName(for: name), arguments: args)
         }
         return calls.isEmpty ? nil : calls
     }

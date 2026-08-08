@@ -54,7 +54,7 @@ public struct GemmaFormatParser: ToolCallFormatParser {
             let cleanedArgs = argsText.replacingOccurrences(of: "<|\"|>", with: "\"")
             let jsonText = "{\(cleanedArgs)}"
             let args = parseJSON(text: jsonText) ?? parseFallback(text: cleanedArgs)
-            let normalizedName = name.lowercased()
+            let normalizedName = ToolAliasRegistry.shared.canonicalName(for: name)
             calls.append(RawToolCall(name: normalizedName, arguments: args))
             searchStart = text.index(after: pos)
         }
