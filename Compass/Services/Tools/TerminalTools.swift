@@ -421,7 +421,7 @@ struct RunCommandTool: AITool {
     }
 
     let name = "bash"
-    let description = "Run builds, tests, package management, git operations, and long-running processes. For codebase exploration and file search, use `search` or `glob` instead."
+    let description = "Run builds, tests, package management, git operations, and long-running processes. For codebase exploration and file search, use `search` instead."
 
     var parameters: [String: Any] {
         [
@@ -493,17 +493,7 @@ struct RunCommandTool: AITool {
             guard let command = request.command else {
                 throw AppError.aiServiceError("Missing 'command' argument for run_command action=start")
             }
-            // Redirect codebase-exploration commands to the dedicated tools
-            // (§14 — audit: 49 of 79 tool calls in one session were bash-as-exploration)
-            if isExploratoryCommand(command) {
-                throw AppError.aiServiceError(
-                    "This command is codebase exploration. Use dedicated tools instead:\n" +
-                    "  `find`/`grep`/`rg` → use `search` (content) or `glob` (filenames)\n" +
-                    "  `ls -R`            → use `ls` (directories) or `glob` (recursive file names)\n" +
-                    "  `tree`/`locate`    → use `ls` (directories)\n" +
-                    "These tools are faster and return structured results. The original command was: `\(command)`"
-                )
-            }
+            // Nucleus: bash is the escape hatch — rg/fd/ls are allowed here (search is primary but not exclusive)
             let workingDirectoryURL = request.workingDirectoryURL ?? projectRoot
             let session = try await RunCommandSessionStore.shared.start(
                 command: command,
@@ -607,25 +597,9 @@ struct RunCommandTool: AITool {
         return try pathValidator.validateAndResolve(workingDirectoryArg)
     }
 
-    /// Redirects codebase-exploration commands (find, grep, rg, ls -R, tree, …) to
-    /// the dedicated `search`/`glob`/`ls` tools. This prevents the model from
-    /// burning iterations on shell-based file discovery when purpose-built tools
-    /// are available (§14 — audit: 49/79 tool calls in one session were bash-as-exploration).
-    private func isExploratoryCommand(_ command: String) -> Bool {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let exploratoryPatterns = [
-            #"^find\s"#,
-            #"^rg\s"#,
-            #"^grep\s"#,
-            #"^ag\s"#,
-            #"^fd\s"#,
-            #"^locate\s"#,
-            #"^tree\b"#,
-            #"^git\s+grep"#,
-            #"^ls\s.*-[a-zA-Z]*[Rr]"#,
-        ]
-        return exploratoryPatterns.contains { trimmed.range(of: $0, options: [.regularExpression]) != nil }
-    }
+    // Retired: bash now allows exploration (rg/fd/ls) as escape hatch; search remains primary for surgical ranges.
+    @available(*, deprecated, message: "Nucleus allows bash exploration; search is primary but not exclusive.")
+    private func isExploratoryCommand(_ command: String) -> Bool { false }
 
     /// Strip leading ./ prefix from each line so the model sees clean relative paths
     private func sanitizeBashOutput(_ text: String) -> String {

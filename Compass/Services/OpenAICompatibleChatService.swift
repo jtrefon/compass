@@ -214,16 +214,6 @@ actor OpenAICompatibleChatService: AIService {
                         }
                         if let newToolCalls = delta.toolCalls, !newToolCalls.isEmpty {
                             collector.appendToolCalls(newToolCalls)
-                            for tc in newToolCalls {
-                                if let name = tc.function?.name, !name.isEmpty {
-                                    Task { @MainActor in
-                                        self.eventBus.publish(LocalModelStreamingStatusEvent(
-                                            runId: runId,
-                                            message: "Preparing tool: \(name)"
-                                        ))
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -634,7 +624,7 @@ actor OpenAICompatibleChatService: AIService {
         do {
             return try JSONDecoder().decode(OpenRouterChatResponse.self, from: data)
         } catch {
-            if let errorMessage = decodeOpenRouterErrorMessage(from: data) {
+            if let errorMessage = OpenRouterAIService.decodeErrorMessage(from: data) {
                 await AppLogger.shared.error(category: .ai, message: "openrouter.response_error", context: AppLogger.LogCallContext(metadata: ["requestId": requestId, "error": errorMessage]))
                 throw AppError.aiServiceError(errorMessage)
             }
@@ -713,28 +703,6 @@ actor OpenAICompatibleChatService: AIService {
         case .qa_tool_output_review, .qa_quality_review: return 1024
         case .warmup, .other, .none: return hasTools ? 1024 : 640
         }
-    }
-
-    // MARK: - Code-action endpoints (prompt-based; consumed by ConversationManager)
-
-    func explainCode(_ code: String) async throws -> String {
-        let response = try await sendMessage(AIServiceMessageWithProjectRootRequest(message: "Explain the following code in clear, concise terms:\n\n\(code)", context: nil, tools: nil, mode: nil, projectRoot: nil))
-        return response.content ?? ""
-    }
-
-    func refactorCode(_ code: String, instructions: String) async throws -> String {
-        let response = try await sendMessage(AIServiceMessageWithProjectRootRequest(message: "Refactor this code using the following instructions:\n\(instructions)\n\nCode:\n\(code)", context: nil, tools: nil, mode: nil, projectRoot: nil))
-        return response.content ?? ""
-    }
-
-    func generateCode(_ prompt: String) async throws -> String {
-        let response = try await sendMessage(AIServiceMessageWithProjectRootRequest(message: "Generate code for the following request:\n\(prompt)", context: nil, tools: nil, mode: nil, projectRoot: nil))
-        return response.content ?? ""
-    }
-
-    func fixCode(_ code: String, error: String) async throws -> String {
-        let response = try await sendMessage(AIServiceMessageWithProjectRootRequest(message: "Fix this code. Error message:\n\(error)\n\nCode:\n\(code)", context: nil, tools: nil, mode: nil, projectRoot: nil))
-        return response.content ?? ""
     }
 
     // MARK: - Logging

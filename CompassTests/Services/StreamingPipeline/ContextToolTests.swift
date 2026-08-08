@@ -35,7 +35,7 @@ final class ContextToolTests: XCTestCase {
     func testToolNameAndDescriptionPresent() {
         let tool = ContextTool(vectorStoreService: nil)
         XCTAssertEqual(tool.name, "context")
-        XCTAssertTrue(tool.description.contains("Retrieve prior conversation"))
+        XCTAssertTrue(tool.description.contains("Recall earlier conversation"))
     }
 
     func testParametersDefined() {

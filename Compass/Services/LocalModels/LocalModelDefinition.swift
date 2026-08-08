@@ -24,13 +24,18 @@ struct LocalModelDefinition: Identifiable, Hashable, Sendable {
     let displayName: String
     let artifacts: [LocalModelArtifact]
     let defaultContextLength: Int
+    /// Hard ceiling for the model's context window (config.json
+    /// max_position_embeddings). The settings slider extends up to here; the
+    /// inference layer honors it as the resolved context cap.
+    let maxContextLength: Int
     let supportsQuantizedKVCache: Bool
 
-    init(id: String, displayName: String, artifacts: [LocalModelArtifact], defaultContextLength: Int = 4096, supportsQuantizedKVCache: Bool = true) {
+    init(id: String, displayName: String, artifacts: [LocalModelArtifact], defaultContextLength: Int = 4096, maxContextLength: Int = 262_144, supportsQuantizedKVCache: Bool = false) {
         self.id = id
         self.displayName = displayName
         self.artifacts = artifacts
         self.defaultContextLength = defaultContextLength
+        self.maxContextLength = maxContextLength
         self.supportsQuantizedKVCache = supportsQuantizedKVCache
     }
 }

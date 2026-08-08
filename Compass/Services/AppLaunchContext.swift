@@ -14,6 +14,37 @@ struct AppLaunchContext: Equatable {
     let disableHeavyInit: Bool
     let productionParityHarness: Bool
 
+    init(
+        mode: AppLaunchMode,
+        isTesting: Bool,
+        isUITesting: Bool,
+        testProfilePath: String?,
+        disableHeavyInit: Bool,
+        productionParityHarness: Bool
+    ) {
+        self.mode = mode
+        self.isTesting = isTesting
+        self.isUITesting = isUITesting
+        self.testProfilePath = testProfilePath
+        self.disableHeavyInit = disableHeavyInit
+        self.productionParityHarness = productionParityHarness
+    }
+
+    /// Test-constructed context (pressure-policy unit tests).
+    init(
+        isTesting: Bool,
+        testProfilePath: String? = nil,
+        disableHeavyInit: Bool = false,
+        productionParityHarness: Bool = false
+    ) {
+        self.mode = isTesting ? .unitTest : .app
+        self.isTesting = isTesting
+        self.isUITesting = false
+        self.testProfilePath = testProfilePath
+        self.disableHeavyInit = disableHeavyInit
+        self.productionParityHarness = productionParityHarness
+    }
+
     static func detect(
         processInfo: ProcessInfo = .processInfo,
         environmentOverride: [String: String]? = nil

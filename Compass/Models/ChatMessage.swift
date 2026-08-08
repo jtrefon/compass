@@ -24,7 +24,6 @@ public struct ChatMessage: Identifiable, Codable, Sendable {
     public let id: UUID
     public let role: MessageRole
     public let content: String
-    public let mediaAttachments: [ChatMessageMediaAttachment]
     public let reasoning: String?
     public let codeContext: String?
     public let billing: ChatMessageBillingContext?
@@ -42,7 +41,6 @@ public struct ChatMessage: Identifiable, Codable, Sendable {
     public init(
         role: MessageRole,
         content: String,
-        mediaAttachments: [ChatMessageMediaAttachment] = [],
         context: ChatMessageContentContext = ChatMessageContentContext(),
         billing: ChatMessageBillingContext? = nil,
         tool: ChatMessageToolContext = ChatMessageToolContext(),
@@ -52,7 +50,6 @@ public struct ChatMessage: Identifiable, Codable, Sendable {
         self.id = UUID()
         self.role = role
         self.content = content
-        self.mediaAttachments = mediaAttachments
         self.reasoning = context.reasoning
         self.codeContext = context.codeContext
         self.billing = billing
@@ -70,7 +67,6 @@ public struct ChatMessage: Identifiable, Codable, Sendable {
         id: UUID,
         role: MessageRole,
         content: String,
-        mediaAttachments: [ChatMessageMediaAttachment] = [],
         timestamp: Date,
         context: ChatMessageContentContext = ChatMessageContentContext(),
         billing: ChatMessageBillingContext? = nil,
@@ -81,7 +77,6 @@ public struct ChatMessage: Identifiable, Codable, Sendable {
         self.id = id
         self.role = role
         self.content = content
-        self.mediaAttachments = mediaAttachments
         self.reasoning = context.reasoning
         self.codeContext = context.codeContext
         self.billing = billing
@@ -103,7 +98,7 @@ public struct ChatMessage: Identifiable, Codable, Sendable {
     // MARK: Codable (backward-compat for isCheckpoint)
 
     enum CodingKeys: String, CodingKey {
-        case id, role, content, mediaAttachments, reasoning, codeContext, billing
+        case id, role, content, reasoning, codeContext, billing
         case timestamp, isDraft, isCheckpoint, toolName, toolStatus, targetFile
         case toolCallId, toolCalls
     }
@@ -113,7 +108,6 @@ public struct ChatMessage: Identifiable, Codable, Sendable {
         self.id = try c.decode(UUID.self, forKey: .id)
         self.role = try c.decode(MessageRole.self, forKey: .role)
         self.content = try c.decode(String.self, forKey: .content)
-        self.mediaAttachments = try c.decode([ChatMessageMediaAttachment].self, forKey: .mediaAttachments)
         self.reasoning = try c.decodeIfPresent(String.self, forKey: .reasoning)
         self.codeContext = try c.decodeIfPresent(String.self, forKey: .codeContext)
         self.billing = try c.decodeIfPresent(ChatMessageBillingContext.self, forKey: .billing)

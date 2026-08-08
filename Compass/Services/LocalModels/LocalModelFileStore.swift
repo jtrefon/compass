@@ -423,7 +423,7 @@ public enum LocalModelFileStore {
         {{- tool | tojson }}
     {%- endfor %}
     {{- "\n</tools>" }}
-    {{- '\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>' }}
+    {{- '\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>{"name": "example_function_name", "arguments": {"example_parameter_1": "value_1", "example_parameter_2": "value_2"}}</tool_call>\n\n<IMPORTANT>\nReminder:\n- A function call MUST be a single line of valid JSON placed between <tool_call> and </tool_call> tags\n- The JSON MUST contain exactly the keys "name" (the function name as a string) and "arguments" (an object whose keys are the parameter names and values are the parameter values as strings)\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>' }}
     {%- if messages[0].role == 'system' %}
         {%- set content = render_content(messages[0].content, false, true)|trim %}
         {%- if content %}
@@ -479,22 +479,21 @@ public enum LocalModelFileStore {
                 {%- endif %}
                 {%- if loop.first %}
                     {%- if content|trim %}
-                        {{- '\n\n<tool_call>\n<function=' + tool_call.name + '>\n' }}
+                        {{- '\n\n<tool_call>{"name": ' }}
                     {%- else %}
-                        {{- '<tool_call>\n<function=' + tool_call.name + '>\n' }}
+                        {{- '<tool_call>{"name": ' }}
                     {%- endif %}
                 {%- else %}
-                    {{- '\n<tool_call>\n<function=' + tool_call.name + '>\n' }}
+                    {{- '\n<tool_call>{"name": ' }}
                 {%- endif %}
+                {{- tool_call.name | tojson }}
+                {{- ', "arguments": ' }}
                 {%- if tool_call.arguments is defined %}
-                    {%- for args_name, args_value in tool_call.arguments|items %}
-                        {{- '<parameter=' + args_name + '>\n' }}
-                        {%- set args_value = args_value | tojson | safe if args_value is mapping or (args_value is sequence and args_value is not string) else args_value | string %}
-                        {{- args_value }}
-                        {{- '\n</parameter>\n' }}
-                    {%- endfor %}
+                    {{- tool_call.arguments | tojson }}
+                {%- else %}
+                    {{- '{}' }}
                 {%- endif %}
-                {{- '</function>\n</tool_call>' }}
+                {{- '}</tool_call>' }}
             {%- endfor %}
         {%- endif %}
         {{- '<|im_end|>\n' }}

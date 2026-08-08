@@ -121,7 +121,6 @@ final class ModernFileTreeCoordinator: NSObject, NSOutlineViewDelegate, NSMenuDe
     }
 
     private func applyAppearanceToVisibleRows() {
-        guard let outlineView else { return }
         appearanceCoordinator.applyAppearanceToVisibleRows()
     }
 

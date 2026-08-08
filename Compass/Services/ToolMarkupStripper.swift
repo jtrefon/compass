@@ -1,6 +1,18 @@
 import Foundation
 
 enum ToolMarkupStripper {
+    /// Indicator substrings that a response carries tool-call markup even
+    /// when the structured parser recovered zero calls. Single source of
+    /// truth for the "malformed tool call" retry decision.
+    static func containsToolCallMarkup(_ content: String) -> Bool {
+        let indicators = [
+            "<|tool_call>", "<tool_call>", "<tool_code>",
+            "<invoke ", "<tool name=", "<function=", "<minimax:tool_call>",
+        ]
+        if indicators.contains(where: { content.contains($0) }) { return true }
+        return content.range(of: #"call:[a-zA-Z_][a-zA-Z0-9_]*\s*\{"#, options: .regularExpression) != nil
+    }
+
     static func stripMarkup(from content: String) -> String {
         var output = content
         for pattern in Self.stripPatterns {

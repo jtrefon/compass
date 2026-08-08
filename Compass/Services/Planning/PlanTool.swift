@@ -13,7 +13,7 @@ import Foundation
 ///   - `breakOutCantContinue` — abort the plan
 struct PlanTool: AITool {
     let name = "plan"
-    let description = "Opt into structured planning. Call init to start — research using all tools. Then finishTask ends each phase and advances to the next. During execution, call finishTask after EACH task to record progress and reveal the next task."
+    let description = "Create/update a structured task plan for multi-step work."
     var parameters: [String: Any] {
         [
             "type": "object",

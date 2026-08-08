@@ -11,6 +11,7 @@ public enum ModelFactoryError: LocalizedError {
     case unsupportedProcessorType(String)
     case configurationFileError(String, String, Error)
     case configurationDecodingError(String, String, DecodingError)
+    case invalidConfiguration(String)
     case noModelFactoryAvailable
 
     public var errorDescription: String? {
@@ -21,6 +22,8 @@ public enum ModelFactoryError: LocalizedError {
             return "Unsupported processor type: \(type)"
         case .configurationFileError(let file, let modelName, let error):
             return "Error reading '\(file)' for model '\(modelName)': \(error.localizedDescription)"
+        case .invalidConfiguration(let message):
+            return "Invalid model configuration: \(message)"
         case .noModelFactoryAvailable:
             return "No model factory available via ModelFactoryRegistry"
         case .configurationDecodingError(let file, let modelName, let decodingError):
@@ -53,13 +56,17 @@ public enum ModelFactoryError: LocalizedError {
     }
 }
 
+public protocol ModelConfigurationValidating {
+    func validateModelConfiguration() throws
+}
+
 /// Context of types that work together to provide a ``LanguageModel``.
 ///
 /// A ``ModelContext`` is created by ``GenericModelFactory/load(from:using:configuration:useLatest:progressHandler:)``.
 /// This contains the following:
 ///
 /// - ``ModelConfiguration``: identifier for the model
-/// - ``LanguageModel``: the model itself, see ``generate(input:cache:parameters:context:wiredMemoryTicket:)``
+/// - ``LanguageModel``: the model itself, see ``generate(input:cache:parameters:context:wiredMemoryTicket:tools:)``
 /// - ``UserInputProcessor``: can convert ``UserInput`` into ``LMInput``
 /// - `Tokenizer` -- the tokenizer used by ``UserInputProcessor``
 ///

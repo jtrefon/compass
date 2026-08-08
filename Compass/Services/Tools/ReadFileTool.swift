@@ -10,7 +10,7 @@ import Foundation
 /// Read content of a file
 struct ReadFileTool: AITool {
     let name = "read"
-    let description = "Read a file at path. For large files prefer a RANGED read via start_line/end_line (lines are returned numbered); a continuation footer tells you how to read the next chunk. For minified or single-line files use char_offset/char_limit (0-based character range). Reading an entire large file is discouraged — page through it."
+    let description = "Read a file at path. Large files: use start_line/end_line (numbered, paginated). Minified files: use char_offset/char_limit."
     var parameters: [String: Any] {
         [
             "type": "object",

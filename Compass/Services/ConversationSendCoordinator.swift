@@ -4,7 +4,6 @@ import Foundation
 
 struct SendRequest {
     let userInput: String
-    let mediaAttachments: [ChatMessageMediaAttachment]
     let mode: AIMode
     let projectRoot: URL
     let conversationId: String
@@ -12,12 +11,10 @@ struct SendRequest {
     let availableTools: [AITool]
     let draftAssistantMessageId: UUID?
     let usesLocalModel: Bool
-    let modelID: String?
     let preservesCache: Bool
 
     init(
         userInput: String,
-        mediaAttachments: [ChatMessageMediaAttachment] = [],
         mode: AIMode,
         projectRoot: URL,
         conversationId: String,
@@ -25,11 +22,9 @@ struct SendRequest {
         availableTools: [AITool],
         draftAssistantMessageId: UUID?,
         usesLocalModel: Bool = false,
-        modelID: String? = nil,
         preservesCache: Bool = false
     ) {
         self.userInput = userInput
-        self.mediaAttachments = mediaAttachments
         self.mode = mode
         self.projectRoot = projectRoot
         self.conversationId = conversationId
@@ -37,7 +32,6 @@ struct SendRequest {
         self.availableTools = availableTools
         self.draftAssistantMessageId = draftAssistantMessageId
         self.usesLocalModel = usesLocalModel
-        self.modelID = modelID
         self.preservesCache = preservesCache
     }
 }
@@ -50,8 +44,6 @@ final class ConversationSendCoordinator {
     private let aiInteractionCoordinator: AIInteractionCoordinator
     private let toolExecutionCoordinator: ToolExecutionCoordinator
     var clearStreamingBuffer: (@MainActor () -> Void)?
-    var onToolStatus: (@MainActor (String) -> Void)?
-    var onStatusUpdate: (@MainActor (String) -> Void)?
 
     init(
         historyCoordinator: ChatHistoryCoordinator,
@@ -84,9 +76,11 @@ final class ConversationSendCoordinator {
 
         // Commit the assistant message to history and log it. Markup is
         // stripped at this boundary (provider-agnostic) so raw tool-call text
-        // never lands in committed history.
+        // never lands in committed history; think blocks are split into the
+        // reasoning field (single implementation: ReasoningSplitter).
+        let committedSplit = ReasoningSplitter.apply(to: response)
         let finalContent = ToolMarkupStripper
-            .assistantContent(response.content, toolCalls: response.toolCalls)
+            .assistantContent(committedSplit.content, toolCalls: response.toolCalls)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if finalContent.isEmpty {
             // A run that ends with no visible content must not leave an empty
@@ -106,13 +100,13 @@ final class ConversationSendCoordinator {
                 let committed = ChatMessage(
                     id: draft.id, role: .assistant, content: finalContent,
                     timestamp: draft.timestamp,
-                    context: ChatMessageContentContext(reasoning: response.reasoning)
+                    context: ChatMessageContentContext(reasoning: committedSplit.reasoning)
                 )
                 await historyCoordinator.commitDraft(replacingWith: committed)
             }
         } else {
             let msg = ChatMessage(role: .assistant, content: finalContent,
-                context: ChatMessageContentContext(reasoning: response.reasoning))
+                context: ChatMessageContentContext(reasoning: committedSplit.reasoning))
             await historyCoordinator.append(msg)
         }
 
@@ -165,49 +159,62 @@ final class ConversationSendCoordinator {
         request: SendRequest,
         localTools: [AITool]
     ) async throws -> AIServiceResponse {
-        // Pass 1: Give the model tools and let it decide. Execute any tool calls.
-        let pass1 = try await aiInteractionCoordinator.sendMessageWithRetry(
-            .init(messages: historyCoordinator.requestMessages, tools: localTools,
-                  mode: request.mode, projectRoot: request.projectRoot,
-                  runId: request.runId, stage: nil,
-                  conversationId: request.conversationId, usesLocalModel: true)
-        ).get()
+        // Bounded agent loop: generate → execute tools → append results →
+        // generate again. The loop ends only when the model stops requesting
+        // tools (or the budget is exhausted) — a single tool call never
+        // collapses the turn with an empty final answer.
+        var iteration = 0
+        let maxIterations = 8
 
-        _ = pass1.toolCalls
+        repeat {
+            let response = try await aiInteractionCoordinator.sendMessageWithRetry(
+                .init(messages: historyCoordinator.requestMessages, tools: localTools,
+                      mode: request.mode, projectRoot: request.projectRoot,
+                      runId: request.runId, stage: nil,
+                      conversationId: request.conversationId, usesLocalModel: true)
+            ).get()
 
-        guard let toolCalls = pass1.toolCalls, !toolCalls.isEmpty else {
-            return pass1  // No tools called — return as-is
-        }
-
-        // Execute tool calls and append results to history. The assistant
-        // tool-call message is committed first so the request builder keeps
-        // the tool results in subsequent passes (blind-loop fix).
-        clearStreamingBuffer?()
-        await historyCoordinator.append(
-            ChatMessage(role: .assistant,
-                        content: ToolMarkupStripper.assistantContent(pass1.content, toolCalls: toolCalls),
-                        tool: ChatMessageToolContext(toolCalls: toolCalls))
-        )
-        let results = await toolExecutionCoordinator.executeToolCalls(
-            toolCalls, availableTools: localTools,
-            conversationId: request.conversationId
-        ) { [self] progressMsg in
-            if progressMsg.toolStatus == .executing {
-                historyCoordinator.setLiveToolMessage(progressMsg)
-            } else {
-                historyCoordinator.clearLiveToolMessage(progressMsg.toolCallId ?? "")
-                historyCoordinator.appendSync(progressMsg)
+            guard let toolCalls = response.toolCalls, !toolCalls.isEmpty else {
+                return response  // No tools called — final answer
             }
-        }
-        for msg in results { await historyCoordinator.append(msg) }
+            iteration += 1
+            guard iteration < maxIterations else {
+                // Budget exhausted while the model still wants tools. Force a
+                // final text answer with NO tools available — the model cannot
+                // defer to another tool call and must produce visible content
+                // (otherwise the commit boundary would strip this turn to an
+                // empty placeholder).
+                return try await aiInteractionCoordinator.sendMessageWithRetry(
+                    .init(messages: historyCoordinator.requestMessages, tools: [],
+                          mode: request.mode, projectRoot: request.projectRoot,
+                          runId: request.runId, stage: nil,
+                          conversationId: request.conversationId, usesLocalModel: true)
+                ).get()
+            }
 
-        // Pass 2: Model has tool results in history — produce final response
-        let pass2 = try await aiInteractionCoordinator.sendMessageWithRetry(
-            .init(messages: historyCoordinator.requestMessages, tools: localTools,
-                  mode: request.mode, projectRoot: request.projectRoot,
-                  runId: request.runId, stage: nil,
-                  conversationId: request.conversationId, usesLocalModel: true)
-        ).get()
-        return pass2
+            // Execute tool calls and append results to history. The assistant
+            // tool-call message is committed first so the request builder
+            // keeps the tool results in subsequent passes (blind-loop fix).
+            clearStreamingBuffer?()
+            let split = ReasoningSplitter.apply(to: response)
+            await historyCoordinator.append(
+                ChatMessage(role: .assistant,
+                            content: ToolMarkupStripper.assistantContent(split.content, toolCalls: toolCalls),
+                            context: ChatMessageContentContext(reasoning: split.reasoning),
+                            tool: ChatMessageToolContext(toolCalls: toolCalls))
+            )
+            let results = await toolExecutionCoordinator.executeToolCalls(
+                toolCalls, availableTools: localTools,
+                conversationId: request.conversationId
+            ) { [self] progressMsg in
+                if progressMsg.toolStatus == .executing {
+                    historyCoordinator.setLiveToolMessage(progressMsg)
+                } else {
+                    historyCoordinator.clearLiveToolMessage(progressMsg.toolCallId ?? "")
+                    historyCoordinator.appendSync(progressMsg)
+                }
+            }
+            for msg in results { await historyCoordinator.append(msg) }
+        } while true
     }
 }

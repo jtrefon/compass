@@ -61,7 +61,7 @@ final class AIServiceInlineCompletionProvider: InlineCompletionProviding {
     /// Under memory pressure the chat generator unloads — the FIM container
     /// must too, or the 1GB+ weights keep the process over budget.
     private func registerForPressureUnload() {
-        InferenceUnloadRegistry.shared.register { [weak self] in
+        InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.fimLabel) { [weak self] in
             if let fim = await MainActor.run(body: { self?.fimService }) {
                 await fim.unload()
             }

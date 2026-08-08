@@ -54,7 +54,6 @@ public enum AIRequestStage: String, Codable, Sendable {
 
 public struct AIServiceHistoryRequest: Sendable {
     public let messages: [ChatMessage]
-    public let mediaAttachments: [ChatMessageMediaAttachment]
     public let context: String?
     public let tools: [AITool]?
     public let mode: AIMode?
@@ -65,7 +64,6 @@ public struct AIServiceHistoryRequest: Sendable {
 
     public init(
         messages: [ChatMessage],
-        mediaAttachments: [ChatMessageMediaAttachment] = [],
         context: String? = nil,
         tools: [AITool]?,
         mode: AIMode?,
@@ -75,7 +73,6 @@ public struct AIServiceHistoryRequest: Sendable {
         conversationId: String? = nil
     ) {
         self.messages = messages
-        self.mediaAttachments = mediaAttachments
         self.context = context
         self.tools = tools
         self.mode = mode

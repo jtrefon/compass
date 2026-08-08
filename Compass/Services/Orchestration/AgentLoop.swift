@@ -121,10 +121,26 @@ struct AgentLoop {
                 }
 
             case "leaf_executor":
-                let turn = try await llmCall(tools: request.availableTools, stage: .tool_loop)
+                // Runner-driven closed loop: inject current PlanItem context and hide plan tool during execution
+                let executionTools = taskPlan != nil ? request.availableTools.filter { $0.name != "plan" } : request.availableTools
+                let focusedMessages: [ChatMessage]? = {
+                    guard let plan = taskPlan, planItemIndex > 0, planItemIndex <= plan.items.count else { return nil }
+                    let item = plan.items[planItemIndex - 1]
+                    let focus = """
+                    [Plan Item \(planItemIndex)/\(plan.items.count)] \(item.description)
+                    Purpose: \(item.purpose)
+                    Context: \(item.context.joined(separator: ", "))
+                    Done when: \(item.doneCriteria)
+                    — Execute ONLY this item with surgical tools (read/search + edit/write/bash). Do not call plan tool; runner will advance on completion.
+                    """
+                    var msgs = historyCoordinator.requestMessages
+                    msgs.append(ChatMessage(role: .user, content: focus))
+                    return msgs
+                }()
+                let turn = try await llmCall(tools: executionTools, stage: .tool_loop, messages: focusedMessages)
                 response = turn
                 if let toolCalls = turn.toolCalls, !toolCalls.isEmpty {
-                    let results = await commitAndExecute(toolCalls: toolCalls, response: turn, tools: request.availableTools)
+                    let results = await commitAndExecute(toolCalls: toolCalls, response: turn, tools: executionTools)
                     // A tool that returned an error must be RETRIED with the
                     // error visible in context — otherwise the failed edit
                     // becomes the final answer ("My apologies...").
@@ -160,6 +176,12 @@ struct AgentLoop {
                     leafReworkCount += 1
                     phase = "leaf_executor"
                 } else {
+                    // Runner marks PlanItem completed — model never calls plan.finishTask during execution
+                    if var plan = taskPlan, planItemIndex > 0, planItemIndex <= plan.items.count {
+                        plan.completeItem(at: planItemIndex - 1, summary: String(verdict.prefix(200)))
+                        taskPlan = plan
+                        await ConversationPlanStore.shared.setPlan(conversationId: request.conversationId, plan: plan)
+                    }
                     leafReworkCount = 0
                     phase = "pm"
                 }
@@ -250,9 +272,11 @@ struct AgentLoop {
         response: AIServiceResponse,
         tools: [AITool]
     ) async -> [ChatMessage] {
+        let commitSplit = ReasoningSplitter.apply(to: response)
         await historyCoordinator.append(
             ChatMessage(role: .assistant,
-                        content: ToolMarkupStripper.assistantContent(response.content, toolCalls: toolCalls),
+                        content: ToolMarkupStripper.assistantContent(commitSplit.content, toolCalls: toolCalls),
+                        context: ChatMessageContentContext(reasoning: commitSplit.reasoning),
                         tool: ChatMessageToolContext(toolCalls: toolCalls))
         )
         let results = await toolExecutor.executeToolCalls(

@@ -45,7 +45,7 @@ enum ReasoningIntensity: String, CaseIterable, Equatable {
 
     static var current: ReasoningIntensity {
         ReasoningIntensity(
-            rawValue: UserDefaults.standard.string(forKey: "AI.ReasoningIntensity") ?? ""
+            rawValue: AppRuntimeEnvironment.userDefaults.string(forKey: LocalModelSettingsKeys.reasoningIntensity) ?? ""
         ) ?? .default
     }
 
@@ -84,7 +84,7 @@ struct OpenRouterSettings: Equatable {
         baseURL: "https://openrouter.ai/api/v1",
         systemPrompt: "",
         reasoningMode: .modelAndAgent,
-        toolPromptMode: .fullStatic,
+        toolPromptMode: .concise,
         contextOverride: 0
     )
 }

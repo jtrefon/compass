@@ -130,7 +130,7 @@ public struct JSONToolCallFormatParser: ToolCallFormatParser {
             } else {
                 args = "{}"
             }
-            return RawToolCall(name: ToolAliasRegistry.shared.canonicalName(for: name), arguments: args)
+return RawToolCall(name: ToolAliasRegistry.shared.canonicalName(for: name), arguments: args)
         }
         return calls.isEmpty ? nil : calls
     }

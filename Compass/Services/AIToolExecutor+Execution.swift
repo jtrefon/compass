@@ -374,6 +374,8 @@ extension AIToolExecutor {
             return directMatch
         }
 
+        // Resolve via alias registry: models emit legacy names (read_file,
+        // list_files, run_command...) — canonicalize before matching.
         let canonical = ToolAliasRegistry.shared.canonicalName(for: toolCall.name)
         guard canonical != toolCall.name.lowercased() else { return nil }
 

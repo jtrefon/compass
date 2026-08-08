@@ -7,8 +7,6 @@ final class SessionManager: ObservableObject {
         let messages: [ChatMessage]
         let mode: AIMode
         let input: String
-        let livePreview: String
-        let liveStatusPreview: String
         let subject: String
         let createdAt: Date
         let updatedAt: Date
@@ -22,8 +20,6 @@ final class SessionManager: ObservableObject {
             messages = try c.decode([ChatMessage].self, forKey: .messages)
             mode = try c.decode(AIMode.self, forKey: .mode)
             input = try c.decodeIfPresent(String.self, forKey: .input) ?? ""
-            livePreview = try c.decodeIfPresent(String.self, forKey: .livePreview) ?? ""
-            liveStatusPreview = try c.decodeIfPresent(String.self, forKey: .liveStatusPreview) ?? ""
             subject = try c.decodeIfPresent(String.self, forKey: .subject) ?? ""
             createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
             updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
@@ -34,8 +30,6 @@ final class SessionManager: ObservableObject {
             messages: [ChatMessage],
             mode: AIMode,
             input: String,
-            livePreview: String,
-            liveStatusPreview: String,
             subject: String,
             createdAt: Date,
             updatedAt: Date,
@@ -44,8 +38,6 @@ final class SessionManager: ObservableObject {
             self.messages = messages
             self.mode = mode
             self.input = input
-            self.livePreview = livePreview
-            self.liveStatusPreview = liveStatusPreview
             self.subject = subject
             self.createdAt = createdAt
             self.updatedAt = updatedAt
@@ -106,8 +98,6 @@ final class SessionManager: ObservableObject {
                 messages: historyCoordinator.committedMessages,
                 mode: .chat,
                 input: "",
-                livePreview: "",
-                liveStatusPreview: "",
                 subject: "",
                 createdAt: now,
                 updatedAt: now,
@@ -154,14 +144,12 @@ final class SessionManager: ObservableObject {
 
     // MARK: - Snapshot Management
 
-    func saveSnapshot(input: String, livePreview: String, liveStatusPreview: String, mode: AIMode) {
+    func saveSnapshot(input: String, mode: AIMode) {
         let previous = conversationSessionSnapshots[currentSessionId]
         let snapshot = SessionSnapshot(
             messages: historyCoordinator.committedMessages,
             mode: mode,
             input: input,
-            livePreview: livePreview,
-            liveStatusPreview: liveStatusPreview,
             subject: historyCoordinator.conversationEnvelope.subject,
             createdAt: previous?.createdAt ?? Date(),
             updatedAt: Date(),
@@ -173,14 +161,11 @@ final class SessionManager: ObservableObject {
         Self.saveSelectedId(currentSessionId)
     }
 
-    func restoreSession(_ sessionId: String, input: inout String, livePreview: inout String,
-                        liveStatusPreview: inout String, mode: inout AIMode) {
+    func restoreSession(_ sessionId: String, input: inout String, mode: inout AIMode) {
         let snapshot = conversationSessionSnapshots[sessionId] ?? SessionSnapshot(
             messages: [],
             mode: .chat,
             input: "",
-            livePreview: "",
-            liveStatusPreview: "",
             subject: "",
             createdAt: Date(),
             updatedAt: Date(),
@@ -193,14 +178,11 @@ final class SessionManager: ObservableObject {
 
         mode = snapshot.mode
         input = snapshot.input
-        livePreview = snapshot.livePreview
-        liveStatusPreview = snapshot.liveStatusPreview
     }
 
     // MARK: - Session Lifecycle
 
-    func startNew(input: inout String, livePreview: inout String, liveStatusPreview: inout String,
-                  mode: inout AIMode) -> String {
+    func startNew(input: inout String, mode: inout AIMode) -> String {
         let newConversationId = UUID().uuidString
         conversationSessionOrder.append(newConversationId)
         let now = Date()
@@ -208,8 +190,6 @@ final class SessionManager: ObservableObject {
             messages: [],
             mode: mode,
             input: "",
-            livePreview: "",
-            liveStatusPreview: "",
             subject: "",
             createdAt: now,
             updatedAt: now,
@@ -217,26 +197,22 @@ final class SessionManager: ObservableObject {
         )
         conversationSessionSnapshots[newConversationId] = snapshot
         Self.saveSnapshot(sessionId: newConversationId, snapshot: snapshot, projectRoot: projectRoot)
-        restoreSession(newConversationId, input: &input, livePreview: &livePreview,
-                       liveStatusPreview: &liveStatusPreview, mode: &mode)
+        restoreSession(newConversationId, input: &input, mode: &mode)
         refreshTabs()
         Self.saveSessionOrder(conversationSessionOrder)
         Self.saveSelectedId(currentSessionId)
         return newConversationId
     }
 
-    func switchTo(id: String, input: inout String, livePreview: inout String,
-                  liveStatusPreview: inout String, mode: inout AIMode) -> Bool {
+    func switchTo(id: String, input: inout String, mode: inout AIMode) -> Bool {
         guard id != currentSessionId, conversationSessionSnapshots[id] != nil else { return false }
-        restoreSession(id, input: &input, livePreview: &livePreview,
-                       liveStatusPreview: &liveStatusPreview, mode: &mode)
+        restoreSession(id, input: &input, mode: &mode)
         refreshTabs()
         Self.saveSelectedId(currentSessionId)
         return true
     }
 
-    func close(id: String, input: inout String, livePreview: inout String,
-                liveStatusPreview: inout String, mode: inout AIMode) -> Bool {
+    func close(id: String, input: inout String, mode: inout AIMode) -> Bool {
         guard conversationSessionOrder.count > 1 else { return false }
         guard let closingIndex = conversationSessionOrder.firstIndex(of: id) else { return false }
 
@@ -248,8 +224,6 @@ final class SessionManager: ObservableObject {
                 messages: snapshot.messages,
                 mode: snapshot.mode,
                 input: snapshot.input,
-                livePreview: snapshot.livePreview,
-                liveStatusPreview: snapshot.liveStatusPreview,
                 subject: snapshot.subject,
                 createdAt: snapshot.createdAt,
                 updatedAt: snapshot.updatedAt,
@@ -281,8 +255,7 @@ final class SessionManager: ObservableObject {
         if id == currentSessionId {
             let fallbackIndex = min(closingIndex, conversationSessionOrder.count - 1)
             let fallbackId = conversationSessionOrder[fallbackIndex]
-            restoreSession(fallbackId, input: &input, livePreview: &livePreview,
-                            liveStatusPreview: &liveStatusPreview, mode: &mode)
+            restoreSession(fallbackId, input: &input, mode: &mode)
         }
 
         refreshTabs()
@@ -293,8 +266,7 @@ final class SessionManager: ObservableObject {
 
     /// Reopens a previously closed conversation, restoring it as a live tab.
     @discardableResult
-    func recover(id: String, input: inout String, livePreview: inout String,
-                 liveStatusPreview: inout String, mode: inout AIMode) -> Bool {
+    func recover(id: String, input: inout String, mode: inout AIMode) -> Bool {
         guard let snapshot = conversationSessionSnapshots[id]
                 ?? Self.loadSnapshot(sessionId: id, projectRoot: projectRoot) else {
             return false
@@ -308,8 +280,6 @@ final class SessionManager: ObservableObject {
             messages: snapshot.messages,
             mode: snapshot.mode,
             input: snapshot.input,
-            livePreview: snapshot.livePreview,
-            liveStatusPreview: snapshot.liveStatusPreview,
             subject: snapshot.subject,
             createdAt: snapshot.createdAt,
             updatedAt: snapshot.updatedAt,
@@ -322,8 +292,7 @@ final class SessionManager: ObservableObject {
         saveClosedRegistry()
         refreshClosed()
 
-        restoreSession(id, input: &input, livePreview: &livePreview,
-                       liveStatusPreview: &liveStatusPreview, mode: &mode)
+        restoreSession(id, input: &input, mode: &mode)
         refreshTabs()
         Self.saveSessionOrder(conversationSessionOrder)
         Self.saveSelectedId(currentSessionId)
@@ -339,8 +308,7 @@ final class SessionManager: ObservableObject {
         refreshClosed()
     }
 
-    func updateProjectRoot(_ newRoot: URL, input: inout String, livePreview: inout String,
-                           liveStatusPreview: inout String, mode: inout AIMode) {
+    func updateProjectRoot(_ newRoot: URL, input: inout String, mode: inout AIMode) {
         projectRoot = newRoot
 
         let migratedSessionId = historyCoordinator.currentConversationId
@@ -350,8 +318,6 @@ final class SessionManager: ObservableObject {
             messages: historyCoordinator.committedMessages,
             mode: mode,
             input: input,
-            livePreview: livePreview,
-            liveStatusPreview: liveStatusPreview,
             subject: "",
             createdAt: Date(),
             updatedAt: Date(),

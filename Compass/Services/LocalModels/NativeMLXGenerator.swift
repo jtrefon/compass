@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 import MLX
 @preconcurrency import MLXLLM
 @preconcurrency import MLXLMCommon
@@ -10,6 +11,9 @@ import Darwin
 final class PromptCacheEntry: @unchecked Sendable {
     var cache: [KVCache]?
     var promptTokenIds: [Int] = []
+    /// System-prefix hash the cache was seeded/validated against (for
+    /// conversation-level disk persistence).
+    var systemHash: String?
     private let lock = NSLock()
 
     func set(cache: [KVCache]?, tokenIds: [Int]) {
@@ -32,7 +36,20 @@ final class PromptCacheEntry: @unchecked Sendable {
 }
 
 protocol LocalModelGenerating: Sendable {
-    func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat?, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String?) async throws -> AIServiceResponse
+    func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat?, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String?, prefixCache: PrefixCacheContext?) async throws -> AIServiceResponse
+    func preload(modelId: String, modelDirectory: URL, toolCallFormat: ToolCallFormat?) async throws
+    func unloadAllModels(reason: String, persistKVTo: URL?) async
+    func hasActiveGeneration() async -> Bool
+}
+
+/// Disk-persisted system-prefix KV cache: built once per (project, settings),
+/// loaded into new conversations so only the user message prefills.
+struct PrefixCacheContext: Sendable {
+    let url: URL
+    let hash: String
+    /// System-only input (renders the same system block + tools section as a
+    /// real request, with no user message) used to build the prefix cache.
+    let systemUserInput: UserInput
 }
 
 actor NativeMLXGenerator: LocalModelGenerating {
@@ -42,11 +59,15 @@ actor NativeMLXGenerator: LocalModelGenerating {
     private var accessOrder: [URL] = []
     private let maxCachedModels = 1
     private var generationCount: Int = 0
-    private static let mlxCacheLimitBytes = 128 * 1024 * 1024
-    private static let mlxMemoryLimitBytes = 3072 * 1024 * 1024
+    /// Generations currently executing; the unload path waits for these
+    /// (defense in depth — the pressure handler already holds
+    /// MLXInferenceLock, this guards the non-locked unload callers).
+    private var activeGenerationCount = 0
+    private static let mlxCacheLimitBytes = 1024 * 1024 * 1024
     private static let defaultTestingRSSLimitMB = 8 * 1024
     private static let defaultOperationalRSSLimitMB = 10 * 1024
     private var promptCacheByConversation: [String: PromptCacheEntry] = [:]
+    private var savedPrefixCacheHashes: Set<String> = []
     /// LRU access order for eviction — Dictionary key iteration is hash-based,
     /// so a naive keys.first eviction could drop the ACTIVE conversation's
     /// cache while a stale one stays pinned.
@@ -63,19 +84,23 @@ actor NativeMLXGenerator: LocalModelGenerating {
     }
 
     nonisolated static let sharedTestGenerator: LocalModelGenerating = {
-        struct NoOpEventBus: EventBusProtocol {
-            func publish<E: Event>(_ event: E) {}
-            func subscribe<E: Event>(to eventType: E.Type, handler: @escaping (E) -> Void) -> AnyCancellable {
-                AnyCancellable {}
-            }
-        }
-        return NativeMLXGenerator(eventBus: NoOpEventBus())
+        NativeMLXGenerator(eventBus: NoOpEventBus())
     }()
 
     init(eventBus: EventBusProtocol) {
         self.eventBus = eventBus
+        // Memory budget: do NOT clamp mlx's memoryLimit to a tiny hard cap —
+        // malloc then blocks on every allocation over it (a 2.5GB model under
+        // a 3GB limit made prefill/generation wait on scheduled tasks, ~4-10x
+        // slower). Default = 1.5x the device's recommended working set, which
+        // is right for a 15GB M-series. Cache limit: 1GB (was 128MB — every
+        // eval flushed and re-allocated Metal buffers). Both knobs stay
+        // tunable for the benchmark (COMPASS_LOCAL_MODEL_* conf transport).
         Memory.cacheLimit = Self.mlxCacheLimitBytes
-        Memory.memoryLimit = Self.mlxMemoryLimitBytes
+        if let configured = ProcessInfo.processInfo.environment["COMPASS_LOCAL_MODEL_MLX_MEMORY_LIMIT_MB"],
+           let limitMB = Int(configured), limitMB > 0 {
+            Memory.memoryLimit = limitMB * 1024 * 1024
+        }
         Task { await Self.logDeviceAndMemoryInfo() }
     }
 
@@ -110,18 +135,24 @@ actor NativeMLXGenerator: LocalModelGenerating {
         var collectedToolCalls: [AIToolCall] = []
         var completionInfo: GenerateCompletionInfo?
         var chunkCount: Int = 0
-        var thinkingCharCount: Int = 0
-        var executionCharCount: Int = 0
-        var thinkingEnded: Bool = false
+        /// Exact token IDs sampled during this generation (in cache order) —
+        /// used for KV-reuse bookkeeping. NEVER re-derive these from the
+        /// emitted text: tokenization is not round-trip stable.
+        var generatedTokenIds: [Int] = []
     }
 
-    func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat? = nil, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String? = nil) async throws -> AIServiceResponse {
+    func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat? = nil, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String? = nil, prefixCache: PrefixCacheContext? = nil) async throws -> AIServiceResponse {
         if Task.isCancelled {
             throw CancellationError()
         }
         // Serialize with FIM and other MLX engines — see MLXInferenceLock.
-        await MLXInferenceLock.shared.acquire()
-        defer { Task { await MLXInferenceLock.shared.release() } }
+        try await MLXInferenceLock.shared.acquire()
+        try Task.checkCancellation()
+        activeGenerationCount += 1
+        defer {
+            activeGenerationCount -= 1
+            Task { await MLXInferenceLock.shared.release() }
+        }
         logGenerationStart(
             modelId: modelId, modelDirectory: modelDirectory, userInput: userInput,
             tools: tools, toolCallFormat: toolCallFormat, runId: runId,
@@ -143,7 +174,11 @@ actor NativeMLXGenerator: LocalModelGenerating {
             prefillStepSize: inferenceConfiguration.prefillStepSize
         )
         let eventBus = self.eventBus
-        let cacheEntry = resolveCacheEntry(conversationId: conversationId, modelDirectory: modelDirectory)
+        let cacheEntry = resolveCacheEntry(
+            conversationId: conversationId,
+            modelDirectory: modelDirectory,
+            prefixCache: prefixCache
+        )
 
         do {
             let response = try await loadModelAndGenerate(
@@ -155,6 +190,12 @@ actor NativeMLXGenerator: LocalModelGenerating {
 
             generationCount += 1
             logMLXMemorySnapshot()
+            persistPrefixCacheIfNeeded(
+                prefixCache: prefixCache,
+                modelDirectory: modelDirectory,
+                toolCallFormat: toolCallFormat,
+                inferenceConfiguration: inferenceConfiguration
+            )
             if Self.shouldUnloadModelAfterGeneration() {
                 unloadModel(modelDirectory: modelDirectory, reason: "post_generation_env_flag")
             }
@@ -202,7 +243,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         }
     }
 
-    private func resolveCacheEntry(conversationId: String?, modelDirectory: URL) -> PromptCacheEntry? {
+    private func resolveCacheEntry(conversationId: String?, modelDirectory: URL, prefixCache: PrefixCacheContext? = nil) -> PromptCacheEntry? {
         guard let conversationId else { return nil }
         let key = promptCacheKey(conversationId: conversationId, modelDirectory: modelDirectory)
         if let existing = promptCacheByConversation[key] {
@@ -219,7 +260,163 @@ actor NativeMLXGenerator: LocalModelGenerating {
         let entry = PromptCacheEntry()
         promptCacheByConversation[key] = entry
         promptCacheAccessOrder.append(key)
+        // Seed new conversations from the disk-persisted system-prefix cache.
+        // The common-prefix machinery trims it to the system block, so only
+        // the user message prefills.
+        if let prefixCache, FileManager.default.fileExists(atPath: prefixCache.url.path) {
+            if let loaded = Self.loadPrefixCache(prefixCache) {
+                entry.set(cache: loaded.cache, tokenIds: loaded.tokenIds)
+                entry.systemHash = prefixCache.hash
+            }
+        }
+        // A conversation-level cache (persisted before a critical eviction)
+        // has more history than the system prefix — it wins.
+        if let prefixCache,
+           let loaded = Self.loadConversationCache(
+               directory: prefixCache.url.deletingLastPathComponent(),
+               conversationKey: key,
+               expectedHash: prefixCache.hash
+           ) {
+            entry.set(cache: loaded.cache, tokenIds: loaded.tokenIds)
+            entry.systemHash = prefixCache.hash
+        }
         return entry
+    }
+
+    /// Loads a conversation-level KV cache file, validating the system-hash
+    /// metadata and token ids. Any mismatch falls back to the prefix/fresh
+    /// prefill (safe).
+    nonisolated private static func loadConversationCache(
+        directory: URL,
+        conversationKey: String,
+        expectedHash: String
+    ) -> (cache: [KVCache], tokenIds: [Int])? {
+        let digest = String(SHA256.hash(data: Data(conversationKey.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16))
+        let url = directory.appendingPathComponent("kv-conv-\(digest).safetensors")
+        guard FileManager.default.fileExists(atPath: url.path),
+              let (caches, metadata) = try? loadPromptCache(url: url),
+              metadata["systemHash"] == expectedHash,
+              let tokenIdsRaw = metadata["tokenIds"] else {
+            return nil
+        }
+        let tokenIds = tokenIdsRaw.split(separator: ",").compactMap { Int($0) }
+        guard !tokenIds.isEmpty else { return nil }
+        return (caches, tokenIds)
+    }
+
+    /// Loads the disk prefix cache, validating the hash metadata. Returns nil
+    /// (and deletes the stale file) on any mismatch — the caller falls back to
+    /// a fresh prefill, which is always safe.
+    nonisolated private static func loadPrefixCache(_ prefixCache: PrefixCacheContext) -> (cache: [KVCache], tokenIds: [Int])? {
+        guard let (caches, metadata) = try? loadPromptCache(url: prefixCache.url),
+              metadata["systemHash"] == prefixCache.hash,
+              let tokenIdsRaw = metadata["tokenIds"] else {
+            try? FileManager.default.removeItem(at: prefixCache.url)
+            return nil
+        }
+        let tokenIds = tokenIdsRaw.split(separator: ",").compactMap { Int($0) }
+        guard !tokenIds.isEmpty else {
+            try? FileManager.default.removeItem(at: prefixCache.url)
+            return nil
+        }
+        return (caches, tokenIds)
+    }
+
+    /// Builds the system-only prefix cache (attention KV + linear-layer state
+    /// over exactly the system block) and persists it, then evicts old files
+    /// beyond the cap. Runs once per (project, settings) hash, in the
+    /// background after the first generation.
+    private func persistPrefixCacheIfNeeded(
+        prefixCache: PrefixCacheContext?,
+        modelDirectory: URL,
+        toolCallFormat: ToolCallFormat?,
+        inferenceConfiguration: LocalModelInferenceConfiguration
+    ) {
+        guard let prefixCache else { return }
+        guard !savedPrefixCacheHashes.contains(prefixCache.hash) else { return }
+
+        let capturedInput = UnsafeValue(value: prefixCache.systemUserInput)
+        // Best-effort: the persist must NEVER delay a generation. It competes
+        // via tryAcquire (skip instantly if the GPU is busy or a generation is
+        // queued) — previously it took the full lock and blocked the next
+        // tool-pass send for 20-30s while pre-computing the system KV.
+        // savedPrefixCacheHashes is only marked on success, so a skipped
+        // build is retried after a later (idle) generation.
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            do {
+                guard await MLXInferenceLock.shared.tryAcquire() else {
+                    return // GPU busy or generation queued — skip, retried later
+                }
+                defer { Task { await MLXInferenceLock.shared.release() } }
+do {
+                    let container = try await self.loadContainerCached(
+                        modelDirectory: modelDirectory, toolCallFormat: toolCallFormat
+                    )
+                    try await container.perform { context async throws in
+                        let input = try await context.processor.prepare(input: capturedInput.value)
+                        let tokenIds = input.text.tokens.asArray(Int.self)
+                        let parameters = GenerateParameters(
+                            maxTokens: 1,
+                            maxKVSize: inferenceConfiguration.maxKVSize,
+                            kvBits: inferenceConfiguration.kvCache4BitEnabled ? 4 : nil,
+                            temperature: 0,
+                            topP: 1,
+                            prefillStepSize: inferenceConfiguration.prefillStepSize
+                        )
+                        var cache = context.model.newCache(parameters: parameters)
+                        _ = try context.model.prepare(input, cache: cache, windowSize: parameters.prefillStepSize)
+                        eval(cache)
+                        try savePromptCache(
+                            url: prefixCache.url,
+                            cache: cache,
+                            metadata: [
+                                "systemHash": prefixCache.hash,
+                                "tokenIds": tokenIds.map(String.init).joined(separator: ","),
+                            ]
+                        )
+                    }
+                    await self.markPrefixCacheSaved(prefixCache.hash)
+                    Self.evictPrefixCacheFiles(directory: prefixCache.url.deletingLastPathComponent(), keep: Self.maxPrefixCacheFiles)
+                } catch {
+                // Cache building is best-effort; a failure just means the next
+                // conversation pays a normal prefill.
+                await AppLogger.shared.debug(
+                    category: .localModel,
+                    message: "prefix_cache_build_failed",
+                    context: AppLogger.LogCallContext(metadata: [
+                        "hash": prefixCache.hash,
+                        "error": String(describing: error)
+                    ])
+                )
+            }
+        }
+    }
+}
+
+private func markPrefixCacheSaved(_ hash: String) {
+        savedPrefixCacheHashes.insert(hash)
+    }
+
+nonisolated private static let maxPrefixCacheFiles = 8
+
+    nonisolated private static func evictPrefixCacheFiles(directory: URL, keep: Int) {
+        guard let allFiles = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let prefixFiles = allFiles.filter {
+            $0.pathExtension == "safetensors" && $0.lastPathComponent.hasPrefix("kv-prefix-")
+        }
+        let sorted = prefixFiles.sorted { lhs, rhs in
+            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return lhsDate > rhsDate
+        }
+        for file in sorted.dropFirst(keep) {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     private func loadModelAndGenerate(
@@ -287,9 +484,14 @@ actor NativeMLXGenerator: LocalModelGenerating {
             )
 
             if let cacheEntry, let kvCache, !kvCache.isEmpty {
-                let generatedIds = streamResult.completionInfo?.generatedTokenIds ?? []
-                let fullTokenIds = promptTokenIds + generatedIds
-                cacheEntry.set(cache: kvCache, tokenIds: fullTokenIds)
+                // Exact token sequence written to the cache: prompt IDs plus the
+                // IDs actually sampled (TokenIDRecorder). Deliberately not
+                // re-encoded from `streamResult.output` — re-encoding can diverge
+                // and desynchronize the next turn's common-prefix trim.
+                cacheEntry.set(
+                    cache: kvCache,
+                    tokenIds: promptTokenIds + streamResult.generatedTokenIds
+                )
             }
 
             return await self.buildGenerationResponse(
@@ -317,13 +519,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
         var effectiveInput = input
         var kvCache: [KVCache]? = nil
 
-        // H11: media turns drop the image/video payloads on the reused path
-        // (the suffix input is text-only) — never reuse a KV cache for
-        // multimodal turns.
-        if input.image != nil || input.video != nil {
-            return (nil, input)
-        }
-
         let (cachedCache, cachedTokenIds) = cacheEntry?.get() ?? (nil, [])
         if let cachedCache, !cachedCache.isEmpty, !cachedTokenIds.isEmpty, !promptTokenIds.isEmpty {
             let commonLen = Self.commonPrefixLength(cachedTokenIds, promptTokenIds)
@@ -344,9 +539,16 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 }
 
                 if !skipReuse, commonLen < promptTokenIds.count {
+                    // Suffix must be 1-D: the TokenIterator adds the batch
+                    // axis itself (`step` applies [text: .newAxis]). A 2-D
+                    // suffix produced a 4-D (B,1,S,H) model input, so the
+                    // sequence length was read as 1 and the Qwen3.5 linear
+                    // layers crashed their reshape on the second request.
                     let suffixTokens = Array(promptTokenIds[commonLen...])
-                    let suffixArray = MLXArray(suffixTokens).expandedDimensions(axis: 0)
-                    effectiveInput = LMInput(text: LMInput.Text(tokens: suffixArray), image: nil, video: nil)
+                    effectiveInput = LMInput(
+                        text: LMInput.Text(tokens: MLXArray(suffixTokens)),
+                        image: nil, video: nil
+                    )
                     kvCache = reuseCache
                 } else if !skipReuse, commonLen == promptTokenIds.count {
                     // Exact-prefix case: the cache already holds ALL prompt
@@ -379,20 +581,27 @@ actor NativeMLXGenerator: LocalModelGenerating {
         genStart: ContinuousClock.Instant,
         modelId: String
     ) async throws -> StreamResult {
-        let stream = try MLXLMCommon.generate(
+        // Low-level iterator so we can wrap the sampling pipeline with a
+        // token recorder — the generic generate() covers the docs but hides the
+        // sampled IDs we need for robust KV-cache reuse bookkeeping.
+        let recorder = TokenIDRecorder(upstream: parameters.processor())
+        let iterator = try TokenIterator(
             input: input,
+            model: context.model,
             cache: kvCache,
-            parameters: parameters,
-            context: context
+            processor: recorder,
+            sampler: parameters.sampler(),
+            prefillStepSize: parameters.prefillStepSize,
+            maxTokens: parameters.maxTokens
+        )
+        let (stream, _) = MLXLMCommon.generateTask(
+            promptTokenCount: input.text.tokens.size,
+            modelConfiguration: context.configuration,
+            tokenizer: context.tokenizer,
+            iterator: iterator,
+            tools: nil
         )
         var result = StreamResult()
-        var isInThinking = false
-
-        func publishStatus(_ message: String) {
-            guard let runId else { return }
-            guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            eventBus.publish(LocalModelStreamingStatusEvent(runId: runId, message: message))
-        }
 
         for await generation in stream {
             if Task.isCancelled {
@@ -412,24 +621,9 @@ actor NativeMLXGenerator: LocalModelGenerating {
                     "promptTokensPerSecond": result.chunkCount > 0 ? Double(result.chunkCount) / (Double(prefillMs) / 1000.0) : 0
                 ])
             }
-            if result.chunkCount % 50 == 0 {
-                let elapsedMs = Self.milliseconds(genStart.duration(to: ContinuousClock.now))
-            }
 
             switch generation {
             case .chunk(let text):
-                if text.contains("<think>") {
-                    isInThinking = true
-                }
-                if text.contains("</think>") {
-                    isInThinking = false
-                    result.thinkingEnded = true
-                }
-                if isInThinking {
-                    result.thinkingCharCount += text.count
-                } else {
-                    result.executionCharCount += text.count
-                }
                 result.output.append(text)
                 if let runId, !text.isEmpty {
                     // Always publish the first chunk (short completions may
@@ -444,10 +638,10 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 }
             case .toolCall(let toolCall):
                 result.collectedToolCalls.append(Self.makeAIToolCall(from: toolCall))
-                publishStatus("Structured tool call detected: \(toolCall.function.name)")
             }
         }
 
+        result.generatedTokenIds = recorder.tokenIDs
         return result
     }
 
@@ -512,18 +706,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
             "cacheKind": inferenceConfiguration.cacheKind,
             "hasCompletionInfo": streamResult.completionInfo != nil
         ])
-        Self.logGenerationPerformance(
-            modelId: modelId,
-            inferenceConfiguration: inferenceConfiguration,
-            loadDuration: loadDuration,
-            totalDuration: totalDuration,
-            completionInfo: streamResult.completionInfo,
-            outputCharacterCount: trimmedOutput.count,
-            toolCallCount: streamResult.collectedToolCalls.count,
-            rssBeforeLoadMB: rssBeforeLoadMB,
-            rssAfterLoadMB: rssAfterLoadMB,
-            rssAfterGenerationMB: Self.currentProcessRSSMB()
-        )
         let toolCalls: [AIToolCall]? = streamResult.collectedToolCalls.isEmpty ? nil : streamResult.collectedToolCalls
         return AIServiceResponse(
             content: trimmedOutput.isEmpty ? nil : trimmedOutput,
@@ -588,68 +770,6 @@ actor NativeMLXGenerator: LocalModelGenerating {
         return false
     }
 
-    nonisolated private static func logGenerationPerformance(
-        modelId: String,
-        inferenceConfiguration: LocalModelInferenceConfiguration,
-        loadDuration: Duration,
-        totalDuration: Duration,
-        completionInfo: GenerateCompletionInfo?,
-        outputCharacterCount: Int,
-        toolCallCount: Int,
-        rssBeforeLoadMB: Int,
-        rssAfterLoadMB: Int,
-        rssAfterGenerationMB: Int
-    ) {
-        let loadMS = milliseconds(loadDuration)
-        let totalMS = milliseconds(totalDuration)
-        let snapshot: LocalModelGenerationPerformanceSnapshot
-        if let info = completionInfo {
-            let promptMS = Int((info.promptTime * 1000).rounded())
-            let generateMS = Int((info.generateTime * 1000).rounded())
-            snapshot = LocalModelGenerationPerformanceSnapshot(
-                modelId: modelId,
-                inferenceConfiguration: inferenceConfiguration,
-                loadMilliseconds: loadMS,
-                totalMilliseconds: totalMS,
-                promptTokenCount: info.promptTokenCount,
-                promptMilliseconds: promptMS,
-                promptTokensPerSecond: info.promptTokensPerSecond,
-                generationTokenCount: info.generationTokenCount,
-                generationMilliseconds: generateMS,
-                generationTokensPerSecond: info.tokensPerSecond,
-                toolCallCount: toolCallCount,
-                outputCharacterCount: outputCharacterCount,
-                rssBeforeLoadMB: rssBeforeLoadMB,
-                rssAfterLoadMB: rssAfterLoadMB,
-                rssAfterGenerationMB: rssAfterGenerationMB,
-                timestamp: Date()
-            )
-        } else {
-            snapshot = LocalModelGenerationPerformanceSnapshot(
-                modelId: modelId,
-                inferenceConfiguration: inferenceConfiguration,
-                loadMilliseconds: loadMS,
-                totalMilliseconds: totalMS,
-                promptTokenCount: nil,
-                promptMilliseconds: nil,
-                promptTokensPerSecond: nil,
-                generationTokenCount: nil,
-                generationMilliseconds: nil,
-                generationTokensPerSecond: nil,
-                toolCallCount: toolCallCount,
-                outputCharacterCount: outputCharacterCount,
-                rssBeforeLoadMB: rssBeforeLoadMB,
-                rssAfterLoadMB: rssAfterLoadMB,
-                rssAfterGenerationMB: rssAfterGenerationMB,
-                timestamp: Date()
-            )
-        }
-
-        Task {
-            await LocalModelGenerationPerformanceRecorder.shared.record(snapshot)
-        }
-    }
-
     nonisolated private static func milliseconds(_ duration: Duration) -> Int {
         Int((Double(duration.components.seconds) * 1000) + (Double(duration.components.attoseconds) / 1_000_000_000_000_000))
     }
@@ -699,204 +819,53 @@ actor NativeMLXGenerator: LocalModelGenerating {
         return minLen
     }
 
-    nonisolated static func extractGemmaToolCalls(from content: String) -> [AIToolCall]? {
-        let calls = parseGemmaToolCalls(from: content)
-        guard !calls.isEmpty else { return nil }
-        return calls
+    func hasActiveGeneration() -> Bool {
+        activeGenerationCount > 0
     }
 
-    nonisolated static func parseGemmaToolCalls(from content: String) -> [AIToolCall] {
-        let marker = "call:"
-        var results: [AIToolCall] = []
-        var searchStart = content.startIndex
-
-        while let markerRange = content.range(of: marker, range: searchStart..<content.endIndex) {
-            let afterMarker = markerRange.upperBound
-
-            var nameEnd = afterMarker
-            while nameEnd < content.endIndex, content[nameEnd].isLetter || content[nameEnd].isNumber || content[nameEnd] == "_" {
-                nameEnd = content.index(after: nameEnd)
-            }
-            guard nameEnd > afterMarker else {
-                searchStart = markerRange.upperBound
-                continue
-            }
-            let name = String(content[afterMarker..<nameEnd])
-
-            var braceStart = nameEnd
-            while braceStart < content.endIndex, content[braceStart].isWhitespace {
-                braceStart = content.index(after: braceStart)
-            }
-            guard braceStart < content.endIndex, content[braceStart] == "{" else {
-                searchStart = nameEnd
-                continue
-            }
-
-            var depth = 1
-            var pos = content.index(after: braceStart)
-            while pos < content.endIndex && depth > 0 {
-                let ch = content[pos]
-                if ch == "{" { depth += 1 }
-                else if ch == "}" { depth -= 1 }
-                if depth > 0 {
-                    pos = content.index(after: pos)
-                }
-            }
-            guard depth == 0 else {
-                searchStart = nameEnd
-                continue
-            }
-            let argsText = String(content[content.index(after: braceStart)..<pos])
-
-            let cleanedArgs = argsText.replacingOccurrences(of: "<|\"|>", with: "\"")
-
-            let jsonText = "{\(cleanedArgs)}"
-            var arguments: [String: Any] = [:]
-            if let jsonData = jsonText.data(using: .utf8),
-               let jsonObj = try? JSONSerialization.jsonObject(with: jsonData),
-               let argsDict = jsonObj as? [String: Any] {
-                arguments = argsDict
-            } else {
-                var fallbackArgs: [String: String] = [:]
-                let stripped = cleanedArgs.replacingOccurrences(of: "\"", with: "")
-                let pairPattern = #"(\w+):(.*?)(?:,\s*\w+|$)"#
-                if let pairRegex = try? NSRegularExpression(pattern: pairPattern, options: [.dotMatchesLineSeparators]) {
-                    let pairRange = NSRange(stripped.startIndex..<stripped.endIndex, in: stripped)
-                    let pairMatches = pairRegex.matches(in: stripped, options: [], range: pairRange)
-                    for pair in pairMatches {
-                        guard pair.numberOfRanges >= 3,
-                              let keyRange = Range(pair.range(at: 1), in: stripped),
-                              let valRange = Range(pair.range(at: 2), in: stripped) else { continue }
-                        let key = String(stripped[keyRange])
-                        let val = String(stripped[valRange]).trimmingCharacters(in: .whitespaces)
-                        fallbackArgs[key] = val
-                    }
-                }
-                arguments = fallbackArgs
-            }
-
-            results.append(AIToolCall(
-                id: UUID().uuidString,
-                name: name,
-                arguments: arguments
-            ))
-
-            searchStart = content.index(after: pos)
+    /// Unloads every chat container + KV cache. When `persistKVTo` is set
+    /// (critical memory pressure), each conversation's KV cache is written to
+    /// disk first so the next turn restores it instead of re-prefilling the
+    /// full history. Waits (bounded) for in-flight generations.
+    ///
+    /// The wait MUST be async: the in-flight generation's `activeGenerationCount`
+    /// decrement runs on this actor, so a synchronous busy-wait here would block
+    /// the very task that ends the generation (measured as a 30s stall).
+    func unloadAllModels(reason: String = "unknown", persistKVTo: URL? = nil) async {
+        let deadline = ContinuousClock.now + .seconds(30)
+        while activeGenerationCount > 0, ContinuousClock.now < deadline {
+            if Task.isCancelled { break }
+            try? await Task.sleep(for: .milliseconds(50))
         }
-
-        return results
-    }
-
-    nonisolated static func extractFallbackToolCalls(
-        from content: String,
-        toolsWereProvided: Bool,
-        structuredToolCallsWereDetected: Bool,
-        toolCallFormat: ToolCallFormat?
-    ) -> [AIToolCall]? {
-        guard toolsWereProvided, !structuredToolCallsWereDetected else { return nil }
-        guard !content.isEmpty else { return nil }
-
-        if let directCall = decodeFallbackToolCall(from: content) {
-            return [directCall]
-        }
-
-        if let wrappedCalls = decodeFallbackToolCallsEnvelope(from: content), !wrappedCalls.isEmpty {
-            return wrappedCalls
-        }
-
-        if let fencedJSON = extractFirstJSONCodeBlock(from: content) {
-            if let directCall = decodeFallbackToolCall(from: fencedJSON) {
-                return [directCall]
-            }
-            if let wrappedCalls = decodeFallbackToolCallsEnvelope(from: fencedJSON), !wrappedCalls.isEmpty {
-                return wrappedCalls
-            }
-        }
-
-        return nil
-    }
-
-    nonisolated private static func regexMatches(in text: String, pattern: String) -> [String] {
-        guard let expression = try? NSRegularExpression(
-            pattern: pattern,
-            options: [.dotMatchesLineSeparators, .caseInsensitive]
-        ) else {
-            return []
-        }
-
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return expression.matches(in: text, options: [], range: range).compactMap { match in
-            guard let matchRange = Range(match.range, in: text) else { return nil }
-            return String(text[matchRange])
-        }
-    }
-
-    nonisolated private static func regexCaptureGroups(in text: String, pattern: String) -> [[String]] {
-        guard let expression = try? NSRegularExpression(
-            pattern: pattern,
-            options: [.dotMatchesLineSeparators, .caseInsensitive]
-        ) else {
-            return []
-        }
-
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return expression.matches(in: text, options: [], range: range).map { match in
-            guard match.numberOfRanges > 1 else { return [] }
-            return (1..<match.numberOfRanges).compactMap { index in
-                let groupRange = match.range(at: index)
-                guard groupRange.location != NSNotFound,
-                      let swiftRange = Range(groupRange, in: text) else {
-                    return nil
-                }
-                return String(text[swiftRange])
-            }
-        }
-    }
-
-    nonisolated private static func decodeFallbackToolCall(from raw: String) -> AIToolCall? {
-        guard let data = raw.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode(AIToolCall.self, from: data) else {
-            return nil
-        }
-        return decoded
-    }
-
-    nonisolated private static func decodeFallbackToolCallsEnvelope(from raw: String) -> [AIToolCall]? {
-        guard let data = raw.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rawToolCalls = object["tool_calls"] as? [[String: Any]] else {
-            return nil
-        }
-
-        let decodedToolCalls = rawToolCalls.compactMap { rawCall -> AIToolCall? in
-            guard JSONSerialization.isValidJSONObject(rawCall),
-                  let callData = try? JSONSerialization.data(withJSONObject: rawCall),
-                  let call = try? JSONDecoder().decode(AIToolCall.self, from: callData) else {
-                return nil
-            }
-            return call
-        }
-        return decodedToolCalls.isEmpty ? nil : decodedToolCalls
-    }
-
-    nonisolated private static func extractFirstJSONCodeBlock(from content: String) -> String? {
-        guard let openingRange = content.range(of: "```json") ?? content.range(of: "```") else {
-            return nil
-        }
-        let remainder = content[openingRange.upperBound...]
-        guard let closingRange = remainder.range(of: "```") else {
-            return nil
-        }
-        return remainder[..<closingRange.lowerBound]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    func unloadAllModels(reason: String = "unknown") {
         synchronizeMLXStream()
+        if let persistKVTo {
+            persistConversationCaches(to: persistKVTo)
+        }
         containersByModelDirectory.removeAll()
         inFlightLoads.removeAll()
         accessOrder.removeAll()
         Memory.clearCache()
+    }
+
+    /// Best-effort disk persist of every in-memory conversation KV cache.
+    /// Files: kv-conv-<sha256(conversationKey).prefix(16)>.safetensors with
+    /// tokenIds + systemHash metadata; resolveCacheEntry restores them.
+    private func persistConversationCaches(to dir: URL) {
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (key, entry) in promptCacheByConversation {
+            let (cache, tokenIds) = entry.get()
+            guard let cache, !cache.isEmpty, !tokenIds.isEmpty else { continue }
+            let digest = String(SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16))
+            let url = dir.appendingPathComponent("kv-conv-\(digest).safetensors")
+            try? savePromptCache(
+                url: url,
+                cache: cache,
+                metadata: [
+                    "tokenIds": tokenIds.map(String.init).joined(separator: ","),
+                    "systemHash": entry.systemHash ?? "",
+                ]
+            )
+        }
     }
 
     func unloadModel(modelDirectory: URL, reason: String = "unknown") {
@@ -954,47 +923,50 @@ actor NativeMLXGenerator: LocalModelGenerating {
         configuration _: ModelConfiguration,
         modelDirectory: URL
     ) async throws -> ModelContainer {
-        struct LocalTokenizerLoader: MLXLMCommon.TokenizerLoader {
-            let directory: URL
-            func load(from _: URL) async throws -> any MLXLMCommon.Tokenizer {
-                let upstream = try await AutoTokenizer.from(modelFolder: directory)
-                struct Bridge: MLXLMCommon.Tokenizer {
-                    let upstream: any Tokenizers.Tokenizer
-                    func encode(text: String, addSpecialTokens: Bool) -> [Int] {
-                        upstream.encode(text: text, addSpecialTokens: addSpecialTokens)
-                    }
-                    func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String {
-                        upstream.decode(tokens: tokenIds, skipSpecialTokens: skipSpecialTokens)
-                    }
-                    func convertTokenToId(_ token: String) -> Int? {
-                        upstream.convertTokenToId(token)
-                    }
-                    func convertIdToToken(_ id: Int) -> String? {
-                        upstream.convertIdToToken(id)
-                    }
-                    var bosToken: String? { upstream.bosToken }
-                    var eosToken: String? { upstream.eosToken }
-                    var unknownToken: String? { upstream.unknownToken }
-                    func applyChatTemplate(
-                        messages: [[String: any Sendable]],
-                        tools: [[String: any Sendable]]?,
-                        additionalContext: [String: any Sendable]?
-                    ) throws -> [Int] {
-                        do {
-                            return try upstream.applyChatTemplate(
-                                messages: messages, tools: tools,
-                                additionalContext: additionalContext)
-                        } catch Tokenizers.TokenizerError.missingChatTemplate {
-                            throw MLXLMCommon.TokenizerError.missingChatTemplate
-                        }
-                    }
-                }
-                return Bridge(upstream: upstream)
-            }
-        }
         let tokenizerLoader = LocalTokenizerLoader(directory: modelDirectory)
         // Fixed chat model (Qwen3.5-4B) is text-only — always the LLM factory.
         return try await LLMModelFactory.shared.loadContainer(
             from: modelDirectory, using: tokenizerLoader)
+    }
+}
+
+/// Bridges the huggingface swift-transformers AutoTokenizer into the
+/// MLXLMCommon.Tokenizer protocol (model loading requires it).
+struct LocalTokenizerLoader: MLXLMCommon.TokenizerLoader {
+    let directory: URL
+    func load(from _: URL) async throws -> any MLXLMCommon.Tokenizer {
+        let upstream = try await AutoTokenizer.from(modelFolder: directory)
+        struct Bridge: MLXLMCommon.Tokenizer {
+            let upstream: any Tokenizers.Tokenizer
+            func encode(text: String, addSpecialTokens: Bool) -> [Int] {
+                upstream.encode(text: text, addSpecialTokens: addSpecialTokens)
+            }
+            func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String {
+                upstream.decode(tokens: tokenIds, skipSpecialTokens: skipSpecialTokens)
+            }
+            func convertTokenToId(_ token: String) -> Int? {
+                upstream.convertTokenToId(token)
+            }
+            func convertIdToToken(_ id: Int) -> String? {
+                upstream.convertIdToToken(id)
+            }
+            var bosToken: String? { upstream.bosToken }
+            var eosToken: String? { upstream.eosToken }
+            var unknownToken: String? { upstream.unknownToken }
+            func applyChatTemplate(
+                messages: [[String: any Sendable]],
+                tools: [[String: any Sendable]]?,
+                additionalContext: [String: any Sendable]?
+            ) throws -> [Int] {
+                do {
+                    return try upstream.applyChatTemplate(
+                        messages: messages, tools: tools,
+                        additionalContext: additionalContext)
+                } catch Tokenizers.TokenizerError.missingChatTemplate {
+                    throw MLXLMCommon.TokenizerError.missingChatTemplate
+                }
+            }
+        }
+        return Bridge(upstream: upstream)
     }
 }

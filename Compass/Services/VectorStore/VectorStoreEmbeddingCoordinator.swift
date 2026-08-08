@@ -53,6 +53,7 @@ public actor VectorStoreEmbeddingCoordinator {
     // MARK: - ContextLogEvent
 
     private func handleContextLog(_ event: ContextLogEvent) async {
+        guard Self.isRAGEnabled else { return }
         guard let convId = event.conversationId else { return }
 
         if event.source == "chat.user_message" {
@@ -94,9 +95,16 @@ public actor VectorStoreEmbeddingCoordinator {
     // MARK: - ToolResultEvent
 
     private func handleToolResult(_ event: ToolResultEvent) async {
+        guard Self.isRAGEnabled else { return }
         guard event.type == "execute_success" || event.type == "execute_error",
               let output = event.output, !output.isEmpty else { return }
 
+        // Curated ingestion: only durable signals (edits, writes, bash failures, plan completions) — not ls/search noise
+        let curatedTools: Set<String> = ["edit", "write", "bash", "plan"]
+        let isFailure = event.type == "execute_error"
+        guard curatedTools.contains(event.toolName) || isFailure else { return }
+
+        // Summarize before embed: keep decision, not raw dump (500 char cap still, but curated)
         let text = "Tool \(event.toolName): \(output)"
         let vec = (try? await embedder.generateEmbedding(for: text)) ?? []
         guard !vec.isEmpty else { return }
@@ -108,6 +116,12 @@ public actor VectorStoreEmbeddingCoordinator {
             category: event.conversationId
         )
         scheduleSave()
+    }
+
+    private static var isRAGEnabled: Bool {
+        let env = ProcessInfo.processInfo.environment
+        let raw = env["COMPASS_ENABLE_RAG"] ?? env["TEST_RUNNER_ENV_COMPASS_ENABLE_RAG"]
+        return raw == "1" || raw?.lowercased() == "true"
     }
 
     deinit {

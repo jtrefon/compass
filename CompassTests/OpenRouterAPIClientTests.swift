@@ -36,7 +36,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
         let toolCalls = OpenRouterAIService.extractFallbackToolCalls(from: content)
 
         XCTAssertEqual(toolCalls?.count, 1)
-        XCTAssertEqual(toolCalls?.first?.name, "ls")
+        XCTAssertEqual(toolCalls?.first?.name, "search")
         XCTAssertEqual(toolCalls?.first?.arguments["path"] as? String, "/tmp/project/src/components")
     }
 
@@ -76,7 +76,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
         let toolCalls = OpenRouterAIService.extractFallbackToolCalls(from: content)
 
         XCTAssertEqual(toolCalls?.count, 1)
-        XCTAssertEqual(toolCalls?.first?.name, "ls")
+        XCTAssertEqual(toolCalls?.first?.name, "search")
         XCTAssertEqual(toolCalls?.first?.arguments["path"] as? String, "/tmp/project/src")
     }
 
@@ -91,7 +91,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
         let toolCalls = OpenRouterAIService.extractFallbackToolCalls(from: content)
 
         XCTAssertEqual(toolCalls?.count, 1)
-        XCTAssertEqual(toolCalls?.first?.name, "ls")
+        XCTAssertEqual(toolCalls?.first?.name, "search")
         XCTAssertEqual(toolCalls?.first?.arguments["path"] as? String, "src/services")
     }
 
@@ -128,7 +128,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
         let toolCalls = OpenRouterAIService.extractFallbackToolCalls(from: content)
 
         XCTAssertEqual(toolCalls?.count, 2)
-        XCTAssertEqual(toolCalls?.first?.name, "ls")
+        XCTAssertEqual(toolCalls?.first?.name, "search")
         XCTAssertEqual(toolCalls?.last?.name, "bash")
         XCTAssertEqual(toolCalls?.last?.arguments["command"] as? String, "ls -la")
     }

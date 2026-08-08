@@ -23,28 +23,3 @@ public enum AIProviderID: String, CaseIterable, Sendable, Equatable {
         }
     }
 }
-
-public struct ProviderConfiguration: Sendable, Equatable {
-    public let providerID: AIProviderID
-    public let apiEndpoint: URL
-    public let defaultModel: String
-    public let supportsNativeReasoning: Bool
-    public let requiresReasoningEcho: Bool
-    public let maxOutputTokens: Int
-
-    public init(
-        providerID: AIProviderID,
-        apiEndpoint: URL,
-        defaultModel: String,
-        supportsNativeReasoning: Bool = true,
-        requiresReasoningEcho: Bool = false,
-        maxOutputTokens: Int = 4096
-    ) {
-        self.providerID = providerID
-        self.apiEndpoint = apiEndpoint
-        self.defaultModel = defaultModel
-        self.supportsNativeReasoning = supportsNativeReasoning
-        self.requiresReasoningEcho = requiresReasoningEcho
-        self.maxOutputTokens = maxOutputTokens
-    }
-}

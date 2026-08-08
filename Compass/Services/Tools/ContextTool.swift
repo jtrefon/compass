@@ -10,7 +10,7 @@ import Foundation
 /// rather than having context silently injected.
 struct ContextTool: AITool {
     let name = "context"
-    let description = "Retrieve prior conversation context from the knowledge store. Use after context has been trimmed, when you need to recall findings, decisions, or code patterns from earlier in this session or previous sessions."
+    let description = "Recall earlier conversation context (findings, decisions, code patterns)."
 
     var parameters: [String: Any] {
         [

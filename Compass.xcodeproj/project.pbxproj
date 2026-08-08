@@ -21,50 +21,50 @@
 			containerPortal = 04C2CE012E5C8E9D007A5EF7 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 04C2CE082E5C8E9D007A5EF7;
-			remoteInfo = "Compass";
+			remoteInfo = Compass;
 		};
 		04C2CE222E5C8E9E007A5EF7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 04C2CE012E5C8E9D007A5EF7 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 04C2CE082E5C8E9D007A5EF7;
-			remoteInfo = "Compass";
+			remoteInfo = Compass;
 		};
 		7A11AA012F90000100C0DE01 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 04C2CE012E5C8E9D007A5EF7 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 04C2CE082E5C8E9D007A5EF7;
-			remoteInfo = "Compass";
+			remoteInfo = Compass;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		04C2CE092E5C8E9D007A5EF7 /* Compass.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Compass.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		04C2CE172E5C8E9E007A5EF7 /* CompassTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CompassTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		04C2CE212E5C8E9E007A5EF7 /* CompassUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CompassUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		7A11AA032F90000100C0DE01 /* CompassHarnessTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CompassHarnessTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		04C2CE092E5C8E9D007A5EF7 /* Compass.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Compass.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		04C2CE172E5C8E9E007A5EF7 /* CompassTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CompassTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		04C2CE212E5C8E9E007A5EF7 /* CompassUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CompassUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A11AA032F90000100C0DE01 /* CompassHarnessTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CompassHarnessTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		04C2CE0B2E5C8E9D007A5EF7 /* Compass */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Compass";
+			path = Compass;
 			sourceTree = "<group>";
 		};
 		04C2CE1A2E5C8E9E007A5EF7 /* CompassTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "CompassTests";
+			path = CompassTests;
 			sourceTree = "<group>";
 		};
 		04C2CE242E5C8E9E007A5EF7 /* CompassUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "CompassUITests";
+			path = CompassUITests;
 			sourceTree = "<group>";
 		};
 		7A11AA042F90000100C0DE01 /* CompassHarnessTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "CompassHarnessTests";
+			path = CompassHarnessTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -155,7 +155,7 @@
 			fileSystemSynchronizedGroups = (
 				04C2CE0B2E5C8E9D007A5EF7 /* Compass */,
 			);
-			name = "Compass";
+			name = Compass;
 			packageProductDependencies = (
 				6D2E6F7E2C2F4A7F00A1B2C3 /* MLXLLM */,
 				6E8A1B002F9A000100ABC123 /* MLXVLM */,
@@ -164,7 +164,7 @@
 				9A9A00042C2F4A7F00A1B004 /* Terminal */,
 				9B9B00022C3F5A8F00A1B0C2 /* Markdown */,
 			);
-			productName = "Compass";
+			productName = Compass;
 			productReference = 04C2CE092E5C8E9D007A5EF7 /* Compass.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -184,10 +184,10 @@
 			fileSystemSynchronizedGroups = (
 				04C2CE1A2E5C8E9E007A5EF7 /* CompassTests */,
 			);
-			name = "CompassTests";
+			name = CompassTests;
 			packageProductDependencies = (
 			);
-			productName = "CompassTests";
+			productName = CompassTests;
 			productReference = 04C2CE172E5C8E9E007A5EF7 /* CompassTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
@@ -207,10 +207,10 @@
 			fileSystemSynchronizedGroups = (
 				04C2CE242E5C8E9E007A5EF7 /* CompassUITests */,
 			);
-			name = "CompassUITests";
+			name = CompassUITests;
 			packageProductDependencies = (
 			);
-			productName = "CompassUITests";
+			productName = CompassUITests;
 			productReference = 04C2CE212E5C8E9E007A5EF7 /* CompassUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
@@ -230,10 +230,10 @@
 			fileSystemSynchronizedGroups = (
 				7A11AA042F90000100C0DE01 /* CompassHarnessTests */,
 			);
-			name = "CompassHarnessTests";
+			name = CompassHarnessTests;
 			packageProductDependencies = (
 			);
-			productName = "CompassHarnessTests";
+			productName = CompassHarnessTests;
 			productReference = 7A11AA032F90000100C0DE01 /* CompassHarnessTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
@@ -505,7 +505,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "Compass/Compass.entitlements";
+				CODE_SIGN_ENTITLEMENTS = Compass/Compass.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 601;
@@ -541,9 +541,9 @@
 					"-framework",
 					Accelerate,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "tdc.compass";
-				PRODUCT_NAME = Compass;
+				PRODUCT_BUNDLE_IDENTIFIER = tdc.compass;
 				PRODUCT_MODULE_NAME = Compass;
+				PRODUCT_NAME = Compass;
 				REGISTER_APP_GROUPS = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
@@ -557,7 +557,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "Compass/Compass.entitlements";
+				CODE_SIGN_ENTITLEMENTS = Compass/Compass.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 601;
@@ -594,9 +594,9 @@
 					"-framework",
 					Accelerate,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "tdc.compass";
-				PRODUCT_NAME = Compass;
+				PRODUCT_BUNDLE_IDENTIFIER = tdc.compass;
 				PRODUCT_MODULE_NAME = Compass;
+				PRODUCT_NAME = Compass;
 				REGISTER_APP_GROUPS = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
@@ -615,7 +615,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.6.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "tdc.CompassTests";
+				PRODUCT_BUNDLE_IDENTIFIER = tdc.CompassTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
@@ -634,7 +634,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.6.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "tdc.CompassTests";
+				PRODUCT_BUNDLE_IDENTIFIER = tdc.CompassTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
@@ -652,12 +652,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.6.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "tdc.CompassUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = tdc.CompassUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				SWIFT_VERSION = 6.0;
-				TEST_TARGET_NAME = "Compass";
+				TEST_TARGET_NAME = Compass;
 			};
 			name = Debug;
 		};
@@ -670,12 +670,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.6.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "tdc.CompassUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = tdc.CompassUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				SWIFT_VERSION = 6.0;
-				TEST_TARGET_NAME = "Compass";
+				TEST_TARGET_NAME = Compass;
 			};
 			name = Release;
 		};
@@ -689,7 +689,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.6.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "tdc.CompassHarnessTests";
+				PRODUCT_BUNDLE_IDENTIFIER = tdc.CompassHarnessTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
@@ -708,7 +708,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.6.1;
-				PRODUCT_BUNDLE_IDENTIFIER = "tdc.CompassHarnessTests";
+				PRODUCT_BUNDLE_IDENTIFIER = tdc.CompassHarnessTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;

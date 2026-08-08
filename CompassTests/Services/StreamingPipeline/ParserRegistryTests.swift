@@ -43,7 +43,7 @@ final class JSONToolCallFormatParserTests: XCTestCase {
         let (calls, remaining) = p.parse(json)
         XCTAssertEqual(calls.count, 2)
         XCTAssertEqual(calls[0].name, "read")
-        XCTAssertEqual(calls[1].name, "ls")
+        XCTAssertEqual(calls[1].name, "search")
     }
 
     func testFencedJSON() {

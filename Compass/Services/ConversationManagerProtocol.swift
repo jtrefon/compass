@@ -54,14 +54,10 @@ public protocol ConversationManagerProtocol: AnyObject, StatePublisherProtocol {
     var conversationTabs: [ConversationTabItem] { get }
     var closedConversations: [ClosedConversation] { get }
     var currentInput: String { get set }
-    var currentMediaAttachments: [ChatMessageMediaAttachment] { get set }
     var isSending: Bool { get }
     var error: String? { get }
     var currentMode: AIMode { get set }
     var currentConversationId: String { get }
-    var liveModelOutputPreview: String { get }
-    var liveModelOutputStatusPreview: String { get }
-    var isLiveModelOutputPreviewVisible: Bool { get }
     var providerIssue: ConversationProviderIssueState? { get }
 
     func sendMessage()

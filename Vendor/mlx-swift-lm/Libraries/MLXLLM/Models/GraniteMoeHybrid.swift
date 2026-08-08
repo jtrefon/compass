@@ -124,7 +124,7 @@ class GraniteMoeHybridMamba2Mixer: Module {
         if let cache {
             let end = padded.dim(1)
             let start = max(0, end - (convKernelSize - 1))
-            cache[0] = padded[0..., start ..< end, 0...]
+            cache[0] = contiguous(padded[0..., start ..< end, 0...])
         }
 
         let convOutput = conv1d(padded)
@@ -181,6 +181,7 @@ class GraniteMoeHybridMamba2Mixer: Module {
 
         if let cache {
             cache[1] = nextState
+            cache.advance(hiddenStates.dim(1))
         }
 
         let flattenedY = y.flattened(start: 2)
@@ -245,8 +246,9 @@ class GraniteMoeHybridAttention: Module {
         values = values.reshaped(B, L, args.kvHeads, headDim).transposed(0, 2, 1, 3)
 
         if let rope {
-            queries = applyRotaryPosition(rope, to: queries, cache: cache)
-            keys = applyRotaryPosition(rope, to: keys, cache: cache)
+            let offset = cache?.ropeOffset
+            queries = applyRotaryPosition(rope, to: queries, offset: offset)
+            keys = applyRotaryPosition(rope, to: keys, offset: offset)
         }
 
         let output = attentionWithCacheUpdate(
@@ -314,7 +316,7 @@ class GraniteMoeHybridMoE: Module, UnaryLayer {
     func callAsFunction(_ x: MLXArray) -> MLXArray {
         let (indices, gates) = router(x)
         let expertOutputs = switchMLP(x, indices)
-        return (expertOutputs * gates[.ellipsis, .newAxis]).sum(axis: -2)
+        return weightedExpertSum(expertOutputs, gates)
     }
 }
 

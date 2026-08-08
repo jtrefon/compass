@@ -1,6 +1,6 @@
 ## search — Understand an existing codebase: symbols, text, filenames
 
-**When to use:** The FIRST tool whenever you need to understand code that already exists — before you change it. Use it to map the project's structure, find where a function/class/variable is defined or used, and locate files by content or name. It combines symbol lookup, the full-text index (FTS5), and a filesystem grep fallback. Results come from the project's pre-built index — fast and comprehensive even on large codebases.
+**When to use:** The FIRST tool whenever you need to understand code that already exists — before you change it. Use it to map the project's structure, find where a function/class/variable is defined or used, and locate files by content or name. It combines symbol lookup, the project's pre-built index, and a filesystem grep fallback. Results come from the pre-built index — fast and comprehensive even on large codebases.
 
 **Parameters:**
 - query (required, string): The code, symbol, or text to search for.

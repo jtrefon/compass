@@ -31,7 +31,6 @@ enum HarnessRuntime {
             "OpenRouterBaseURL", "OpenRouterSystemPrompt",
             "OpenRouterReasoningMode", "OpenRouterToolPromptMode",
             "OpenRouterReasoningEnabled", "AI.OfflineModeEnabled",
-            "AI.LocalModel.Enabled", "AI.LocalModel.ContextBudgetTokens",
             "AlibabaApiKey", "DeepSeekAPIKey", "KiloCodeAPIKey",
             "OpenCodeGoApiKey", "OpenCodeGoSubscriptionApiKey",
             "CustomEndpointAPIKey"

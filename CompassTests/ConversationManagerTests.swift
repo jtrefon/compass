@@ -161,25 +161,19 @@ final class ConversationManagerTests: XCTestCase {
         XCTAssertFalse(manager.isSending)
     }
 
-    func testLiveModelOutputPreviewVisibleByDefault() {
-        XCTAssertTrue(manager.isLiveModelOutputPreviewVisible)
-    }
-
-    func testSendMessageUpdatesLiveModelOutputPreviewWithFinalAssistantResponse() async throws {
+    func testSendMessageCommitsFinalAssistantResponse() async throws {
         mockAIService.nextHistoryResponse = AIServiceResponse(content: "Preview-ready assistant response", toolCalls: nil)
         manager.currentInput = "Show me output"
 
         manager.sendMessage()
 
-        let responseExpectation = expectation(description: "Preview updated")
+        let responseExpectation = expectation(description: "Response committed")
         Task { @MainActor in
             let deadline = Date().addingTimeInterval(2.0)
             while Date() < deadline {
-                let finalAssistantMessage = self.manager.messages.last(where: { $0.role == .assistant && !$0.isDraft })
                 if self.manager.isSending == false,
-                   let finalAssistantMessage,
-                   !finalAssistantMessage.content.isEmpty,
-                   self.manager.liveModelOutputPreview == finalAssistantMessage.content {
+                   self.manager.messages.last(where: { $0.role == .assistant && !$0.isDraft })?.content
+                       == "Preview-ready assistant response" {
                     responseExpectation.fulfill()
                     return
                 }
@@ -188,8 +182,10 @@ final class ConversationManagerTests: XCTestCase {
         }
 
         await fulfillment(of: [responseExpectation], timeout: 3.0)
-        let finalAssistantMessage = manager.messages.last(where: { $0.role == .assistant && !$0.isDraft })
-        XCTAssertEqual(manager.liveModelOutputPreview, finalAssistantMessage?.content)
+        XCTAssertEqual(
+            manager.messages.last(where: { $0.role == .assistant && !$0.isDraft })?.content,
+            "Preview-ready assistant response"
+        )
     }
 
     func testSplitReasoningExtractsAndStripsBlock() {
@@ -257,7 +253,7 @@ final class ConversationManagerTests: XCTestCase {
         manager.stopGeneration()
 
         XCTAssertFalse(manager.isSending)
-        XCTAssertEqual(manager.liveModelOutputPreview, "Generation stopped by user.")
+        XCTAssertEqual(manager.error, nil)
     }
 
     func testProviderIssueEventUpdatesConversationState() {

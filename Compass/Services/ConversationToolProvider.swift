@@ -35,7 +35,7 @@ final class ConversationToolProvider {
     }
 
     func availableTools(mode: AIMode, pathValidator: PathValidator) -> [AITool] {
-        mode.allowedTools(from: allTools(pathValidator: pathValidator))
+        return mode.allowedTools(from: allTools(pathValidator: pathValidator))
     }
 
     func allTools(pathValidator: PathValidator) -> [AITool] {
@@ -43,36 +43,38 @@ final class ConversationToolProvider {
         
         var tools: [AITool] = []
 
-        // Core Filesystem Tools
+        // Core Filesystem — surgical, guarded via PathValidator + ToolScheduler
         tools.append(ReadFileTool(fileSystemService: fileSystemService, pathValidator: pathValidator))
-        tools.append(ListFilesTool(pathValidator: pathValidator))
         tools.append(WriteFileTool(fileSystemService: fileSystemService, pathValidator: pathValidator, eventBus: eventBus))
         tools.append(PatchFileToolAdapter(projectRoot: projectRoot))
         tools.append(DeleteFileTool(pathValidator: pathValidator, eventBus: eventBus))
-        
-        // Pinned Rules Tools
-        tools.append(PinnedRuleAddTool(projectRoot: projectRoot))
-        tools.append(PinnedRuleRemoveTool(projectRoot: projectRoot))
-        tools.append(PinnedRuleListTool(projectRoot: projectRoot))
 
-        // Context / Memory Tools
-        tools.append(ContextTool(vectorStoreService: vectorStoreService, embedder: embedder))
-
-        // Index hygiene — agent maintains the dynamic exclusion list
-        tools.append(IndexExclusionTool(projectRoot: projectRoot))
-
-        // Search & Structure Tools
+        // Search — rg + tree-sitter surgical ranges (replaces ls/glob)
         tools.append(SearchProjectTool(index: codebaseIndexProvider(), projectRoot: projectRoot))
+
+        // Web — URLSession fetch (WebKit window retired)
         tools.append(GoogleWebSearchTool())
         tools.append(WebBrowseTool())
-        tools.append(FindFileTool(pathValidator: pathValidator))
 
-        // Terminal & Execution
+        // Context — gated curated RAG (only when COMPASS_ENABLE_RAG=1)
+        if Self.isRAGEnabled {
+            tools.append(ContextTool(vectorStoreService: vectorStoreService, embedder: embedder))
+        }
+
+        // Terminal — the escape hatch (project-root cwd, sessioned)
         tools.append(RunCommandTool(projectRoot: projectRoot, pathValidator: pathValidator))
 
-        // Planning & Task Management
+        // Planning — runner-driven closed loop (not a model tool during execution)
+        // PlanTool remains for init/breakOut only; per-item loop is driven by GraphRunner
         tools.append(PlanTool())
 
         return tools
+    }
+
+    private static var isRAGEnabled: Bool {
+        let env = ProcessInfo.processInfo.environment
+        let raw = env["COMPASS_ENABLE_RAG"] ?? env["TEST_RUNNER_ENV_COMPASS_ENABLE_RAG"]
+        if raw == "1" || raw?.lowercased() == "true" { return true }
+        return false
     }
 }

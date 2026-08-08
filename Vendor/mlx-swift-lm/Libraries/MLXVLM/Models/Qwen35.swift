@@ -16,134 +16,10 @@ private enum Qwen35VLError: Error {
     case featureTokenMismatch(expected: Int, actual: Int)
 }
 
-// MARK: - Gated Delta Helpers
-
-private func computeGatedDeltaG(_ aLog: MLXArray, _ a: MLXArray, _ dtBias: MLXArray)
-    -> MLXArray
-{
-    let decay = exp(-exp(aLog.asType(.float32)) * softplus(a + dtBias))
-    return decay.asType(a.dtype)
-}
-
-private func gatedDeltaStepOps(
-    q: MLXArray,
-    k: MLXArray,
-    v: MLXArray,
-    g: MLXArray,
-    beta: MLXArray,
-    state: MLXArray,
-    mask: MLXArray? = nil
-) -> (MLXArray, MLXArray) {
-    let oldState = state
-    let decay: MLXArray
-    if g.ndim == 2 {
-        decay = expandedDimensions(g, axes: [2, 3])
-    } else if g.ndim == 3 {
-        decay = expandedDimensions(g, axis: -2)
-    } else {
-        fatalError("Unsupported gating shape \(g.shape)")
-    }
-
-    var state = state * decay
-    let kvMem = (state * expandedDimensions(k, axis: -2)).sum(axis: -1)
-    let delta = (v - kvMem) * expandedDimensions(beta, axis: -1)
-    state = state + expandedDimensions(k, axis: -2) * expandedDimensions(delta, axis: -1)
-    let y = (state * expandedDimensions(q, axis: -2)).sum(axis: -1)
-
-    if let mask {
-        let expandedMask: MLXArray
-        if mask.ndim == 1 {
-            expandedMask = expandedDimensions(mask, axes: [1, 2, 3])
-        } else if mask.ndim == 2 {
-            expandedMask = expandedDimensions(mask, axes: [2, 3])
-        } else if mask.ndim == 3 {
-            expandedMask = expandedDimensions(mask, axis: -1)
-        } else {
-            fatalError("Unsupported mask shape \(mask.shape)")
-        }
-        state = MLX.where(expandedMask, state, oldState)
-    }
-
-    return (y, state)
-}
-
-private func gatedDeltaOps(
-    q: MLXArray,
-    k: MLXArray,
-    v: MLXArray,
-    g: MLXArray,
-    beta: MLXArray,
-    state: MLXArray? = nil,
-    mask: MLXArray? = nil
-) -> (MLXArray, MLXArray) {
-    let B = q.dim(0)
-    let T = q.dim(1)
-    let Hk = q.dim(2)
-    let Dk = q.dim(3)
-    let Hv = v.dim(2)
-    let Dv = v.dim(3)
-
-    var q = q
-    var k = k
-
-    let repeatFactor = Hv / Hk
-    if repeatFactor > 1 {
-        q = repeated(q, count: repeatFactor, axis: -2)
-        k = repeated(k, count: repeatFactor, axis: -2)
-    }
-
-    var state = state ?? MLXArray.zeros([B, Hv, Dv, Dk], dtype: q.dtype)
-
-    var ys = [MLXArray]()
-    ys.reserveCapacity(T)
-
-    for t in 0 ..< T {
-        let qT = q[0..., t]
-        let kT = k[0..., t]
-        let vT = v[0..., t]
-        let gT = g[0..., t]
-        let betaT = beta[0..., t]
-        let maskT = mask == nil ? nil : mask![0..., t]
-
-        let (y, newState) = gatedDeltaStepOps(
-            q: qT,
-            k: kT,
-            v: vT,
-            g: gT,
-            beta: betaT,
-            state: state,
-            mask: maskT
-        )
-        ys.append(y)
-        state = newState
-    }
-
-    let y = MLX.stacked(ys, axis: 1)
-    return (y, state)
-}
-
-private func gatedDeltaUpdate(
-    q: MLXArray,
-    k: MLXArray,
-    v: MLXArray,
-    a: MLXArray,
-    b: MLXArray,
-    aLog: MLXArray,
-    dtBias: MLXArray,
-    state: MLXArray? = nil,
-    mask: MLXArray? = nil
-) -> (MLXArray, MLXArray) {
-    let beta = sigmoid(b)
-    let g = computeGatedDeltaG(aLog, a, dtBias)
-
-    let B = q.dim(0)
-    let Dk = q.dim(3)
-    let Hv = v.dim(2)
-    let Dv = v.dim(3)
-
-    let state = state ?? MLXArray.zeros([B, Hv, Dv, Dk], dtype: q.dtype)
-    return gatedDeltaOps(q: q, k: k, v: v, g: g, beta: beta, state: state, mask: mask)
-}
+private let precomputedPositionIdsKey = LMOutput.Key<MLXArray>(
+    "qwen35.precomputedPositionIds")
+private let ropeDeltasKey = LMOutput.Key<MLXArray>(
+    "qwen35.ropeDeltas")
 
 // MARK: - Configuration
 
@@ -662,7 +538,7 @@ enum Qwen35Language {
 
             let convInput = concatenated([convState, mixedQKV], axis: 1)
             if let cache, convKernelSize > 1 {
-                cache[0] = convInput[0..., (-(convKernelSize - 1))...]
+                cache[0] = contiguous(convInput[0..., (-(convKernelSize - 1))..., 0...])
             }
 
             let convOut = silu(conv1d(convInput))
@@ -696,6 +572,7 @@ enum Qwen35Language {
 
             if let cache {
                 cache[1] = state
+                cache.advance(S)
             }
 
             out = norm(out, gate: z)
@@ -746,7 +623,7 @@ enum Qwen35Language {
             }
 
             let y = switchMLP(x, inds)
-            let combined = (y * scores[.ellipsis, .newAxis]).sum(axis: -2)
+            let combined = weightedExpertSum(y, scores)
 
             var sharedY = sharedExpert(x)
             sharedY = sigmoid(sharedExpertGate(x)) * sharedY
@@ -884,9 +761,6 @@ enum Qwen35Language {
         let modelType: String
         let kvHeads: [Int]
 
-        fileprivate var precomputedPositionIds: MLXArray? = nil
-        fileprivate var ropeDeltas: MLXArray? = nil
-
         init(_ config: Qwen35Configuration) {
             self.config = config
             self.textConfig = config.textConfiguration
@@ -906,25 +780,29 @@ enum Qwen35Language {
             super.init()
         }
 
-        func resetPositionState() {
-            precomputedPositionIds = nil
-            ropeDeltas = nil
-        }
-
         func callAsFunction(
             _ inputs: MLXArray,
             inputsEmbeds: MLXArray? = nil,
             cache: [KVCache?]? = nil,
+            state: LMOutput.State?,
             mask: MLXArray? = nil,
             positionIds providedPositionIds: MLXArray? = nil,
             pixelValues: MLXArray? = nil,
             imageGridTHW: [THW]? = nil,
             videoGridTHW: [THW]? = nil
         ) -> LMOutput {
+            var state = state ?? .init()
+
+            // Ensure inputs is 2D [batch, seq]. Text-only callers (e.g.
+            // WiredMemoryUtils, TokenIterator) may pass 1D token arrays.
+            let inputs = inputs.ndim == 1 ? inputs.expandedDimensions(axis: 0) : inputs
+
             if pixelValues != nil {
-                precomputedPositionIds = nil
-                ropeDeltas = nil
+                state[precomputedPositionIdsKey] = nil
+                state[ropeDeltasKey] = nil
             }
+            let precomputedPositionIds = state[precomputedPositionIdsKey]
+            let ropeDeltas = state[ropeDeltasKey]
 
             var cacheOffset = 0
             if let cache, let faCache = cache[model.faIdx] {
@@ -958,8 +836,8 @@ enum Qwen35Language {
                             visionStartTokenId: config.visionStartTokenId,
                             attentionMask: ropeMask)
                         positionIds = computed
-                        precomputedPositionIds = computed
-                        ropeDeltas = deltas
+                        state[precomputedPositionIdsKey] = computed
+                        state[ropeDeltasKey] = deltas
                     }
                 } else {
                     let batchSize = inputs.dim(0)
@@ -1000,7 +878,7 @@ enum Qwen35Language {
                 out = model.embedTokens.asLinear(out)
             }
 
-            return LMOutput(logits: out)
+            return LMOutput(logits: out, state: state)
         }
 
         func makeCache(maxKVSize: Int?) -> [KVCache] {
@@ -1145,38 +1023,42 @@ public class Qwen35: Module, VLMModel {
                 videoTokenIndex: config.videoTokenIndex
             )
             inputEmbeddings = mergedEmbeds
-        } else {
-            languageModel.resetPositionState()
         }
 
         let typedCache = castCache(cache)
-        let output = languageModel(
-            inputIds,
-            inputsEmbeds: inputEmbeddings,
-            cache: typedCache,
-            mask: input.text.mask,
-            positionIds: nil,
-            pixelValues: pixelValues,
-            imageGridTHW: imageFrames,
-            videoGridTHW: videoFrames
-        )
+        let output = withPreparedCache(cache, lengths: input.text.sequenceLengths) {
+            languageModel(
+                inputIds,
+                inputsEmbeds: inputEmbeddings,
+                cache: typedCache,
+                state: nil,
+                mask: input.text.mask,
+                positionIds: nil,
+                pixelValues: pixelValues,
+                imageGridTHW: imageFrames,
+                videoGridTHW: videoFrames
+            )
+        }
 
         return .logits(output)
     }
 
-    public func callAsFunction(_ inputs: MLXArray, cache: [any KVCache]?) -> MLXArray {
+    public func callAsFunction(
+        _ input: LMInput.Text, cache: [any KVCache]?, state: LMOutput.State?
+    ) -> LMOutput {
         let typedCache = castCacheOptional(cache)
         let result = languageModel(
-            inputs,
+            input.tokens,
             inputsEmbeds: nil,
             cache: typedCache,
+            state: state,
             mask: nil,
             positionIds: nil,
             pixelValues: nil,
             imageGridTHW: nil,
             videoGridTHW: nil
         )
-        return result.logits
+        return result
     }
 
     public func sanitize(weights: [String: MLXArray], metadata: [String: String]) -> [String:
@@ -1216,6 +1098,11 @@ public class Qwen35: Module, VLMModel {
                         of: "model.language_model", with: "language_model.model")
                 } else if key.contains("model.visual") {
                     key = key.replacingOccurrences(of: "model.visual", with: "vision_tower")
+                } else if key.hasPrefix("model.") {
+                    // Unified Qwen 3.5 checkpoints (e.g. Qwen3.5-0.8B-MLX-4bit) ship
+                    // language model tensors at bare `model.*` paths instead of
+                    // `model.language_model.*`. Mirror the LLM-side fallback.
+                    key = "language_model." + key
                 }
             } else if key.contains("lm_head") {
                 key = key.replacingOccurrences(of: "lm_head", with: "language_model.lm_head")

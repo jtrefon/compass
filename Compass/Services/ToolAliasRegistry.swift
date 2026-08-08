@@ -1,7 +1,8 @@
 import Foundation
 
-/// Maps legacy tool names to canonical names.
-/// Used by streaming pipeline parsers to normalize model output.
+/// Maps legacy/provider-emitted tool names to canonical tool names.
+/// Used by streaming pipeline parsers and tool resolution to normalize model
+/// output (models trained on older toolsets still emit legacy names).
 struct ToolAliasRegistry {
     static let shared = ToolAliasRegistry()
 
@@ -10,13 +11,13 @@ struct ToolAliasRegistry {
         "write_file": "write", "write_files": "write", "create_file": "write",
         "patch_file": "edit", "replace_in_file": "edit",
         "delete_file": "rm",
-        "list_files": "ls", "list_directory": "ls",
-        "find_file": "glob", "find_files": "glob",
+        "list_files": "search", "list_directory": "search", "ls": "search",
+        "find_file": "search", "find_files": "search", "glob": "search",
         "search_project": "search", "grep": "search", "search_files": "search",
         "run_command": "bash", "run_shell": "bash", "terminal": "bash",
         "cli-mcp-server_run_command": "bash", "cli-mcp-server_read_file": "read",
-        "cli-mcp-server_write_file": "write", "cli-mcp-server_list_directory": "ls",
-        "web_search": "web_search", "web_browse": "web_fetch",
+        "cli-mcp-server_write_file": "write", "cli-mcp-server_list_directory": "search",
+        "web_browse": "web_fetch",
     ]
 
     func canonicalName(for name: String) -> String {

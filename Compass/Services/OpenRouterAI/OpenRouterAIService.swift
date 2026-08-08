@@ -77,11 +77,6 @@ actor OpenRouterAIService: AIService, RemoteAIAccountStatusRefreshing {
         )
     }
 
-    // Test support — preserves backward compat for existing tests
-    func decodeOpenRouterErrorMessage(from data: Data) -> String? {
-        OpenRouterAIService.decodeErrorMessage(from: data)
-    }
-
     nonisolated static func extractFallbackToolCalls(from content: String) -> [AIToolCall]? {
         ParserRegistry.default().decodeToolCalls(from: content)
     }

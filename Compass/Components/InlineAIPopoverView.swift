@@ -59,7 +59,7 @@ final class InlineAIPopoverManager: ObservableObject {
                 messages: [
                     ChatMessage(role: .user, content: userQuestion)
                 ],
-                mediaAttachments: [],
+
                 tools: [],
                 mode: .chat,
                 projectRoot: projectRoot,
