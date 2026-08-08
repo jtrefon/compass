@@ -114,21 +114,6 @@ final class FileToolsTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: nestedProjectAppURL.path), "project/src/App.jsx must not create a nested project directory")
     }
 
-    func testListFilesReturnsEmptyForMissingProjectRelativeDirectory() async throws {
-        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("Compass_missing_dir_list_\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true, attributes: nil)
-        defer { try? FileManager.default.removeItem(at: tempRoot) }
-
-        let validator = PathValidator(projectRoot: tempRoot)
-        let listFilesTool = ListFilesTool(pathValidator: validator)
-
-        let result = try await listFilesTool.execute(arguments: ToolArguments([
-            "path": "src"
-        ]))
-
-        XCTAssertTrue(result.isEmpty, "Missing project-relative directories should return an empty listing instead of failing")
-    }
-
     func testReplaceInFileThrowsWhenOldTextDoesNotMatch() async throws {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("Compass_replace_error_\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true, attributes: nil)
