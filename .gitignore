@@ -98,3 +98,6 @@ xcuserdata/
 
 # Internal working docs — local only
 TECH_DEBT.md
+
+# Personal research attachments — never commit
+.hermes/desktop-attachments/*.docx
