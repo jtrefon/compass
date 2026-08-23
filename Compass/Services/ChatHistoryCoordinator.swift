@@ -120,7 +120,7 @@ final class ChatHistoryCoordinator: ObservableObject {
     }
 
     func restoreCommitted(_ messages: [ChatMessage]) {
-        _committed = messages
+        _committed = messages.filter { !$0.isDraft }
         recompose()
     }
 
@@ -159,8 +159,9 @@ final class ChatHistoryCoordinator: ObservableObject {
     private func recompose() {
         var display = _committed
 
-        // Overlay live tool messages
-        for (_, msg) in liveToolMessages {
+        // Overlay live tool messages in stable order
+        let sortedLive = liveToolMessages.values.sorted { $0.timestamp < $1.timestamp }
+        for msg in sortedLive {
             if let idx = display.firstIndex(where: { $0.toolCallId == msg.toolCallId && $0.toolCallId != nil }) {
                 display[idx] = msg
             } else {
@@ -212,3 +213,7 @@ extension ChatHistoryCoordinator {
         recompose()
     }
 }
+
+// MARK: - ConversationHistoryProviding
+
+extension ChatHistoryCoordinator: ConversationHistoryProviding {}

@@ -340,9 +340,9 @@ extension AIToolExecutor {
         // End tool execution activity
         activityToken?.end()
 
-        Task { @MainActor in
-            request.onProgress(resultMessage)
-        }
+        // Note: onProgress is fired by the caller (ToolExecutionCoordinator.executeToolCalls)
+        // after this method returns. Do NOT fire it here — that causes double-append of
+        // tool results to committed history. See LOCAL_TOOL_LOOP_FIX_TRACKER.md Fix 0A.
 
         return resultMessage
     }

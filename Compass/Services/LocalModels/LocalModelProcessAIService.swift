@@ -237,6 +237,22 @@ actor LocalModelProcessAIService: AIService {
             explicitContext: request.context,
             systemContent: systemContent
         )
+
+        // TELEMETRY: Log raw message structure for "what did the model see" diagnosis
+        let rawMessageSummary = rawMessages.map { dict -> [String: any Sendable] in
+            [
+                "role": dict["role"] ?? "",
+                "contentLength": (dict["content"] as? String)?.count ?? 0,
+                "hasToolCalls": dict["tool_calls"] != nil,
+                "toolCallId": dict["tool_call_id"] ?? "",
+            ]
+        }
+        await AIToolTraceLogger.shared.log(type: "mlx.raw_messages", data: [
+            "runId": request.runId ?? "",
+            "messageCount": rawMessages.count,
+            "messages": rawMessageSummary as [any Sendable],
+        ])
+
         // Local inference is text-only (single-model policy) — no media payloads.
         let capturedUserInput = UnsafeValue(value: UserInput(
             messages: rawMessages, images: [], videos: [],
