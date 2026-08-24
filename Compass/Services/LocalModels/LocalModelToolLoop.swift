@@ -18,6 +18,10 @@ import Foundation
 /// inside those services. This class coordinates, it does not compute.
 @MainActor
 final class LocalModelToolLoop {
+    /// Identical-batch repeats tolerated (with corrective guidance) before
+    /// the loop force-finalizes instead of burning remaining budget.
+    private static let maxConsecutiveRepetitions = 2
+
     private let history: any ConversationHistoryProviding
     private let aiInteractionCoordinator: AIInteractionCoordinator
     private let toolExecutionCoordinator: ToolExecutionCoordinator
@@ -70,6 +74,8 @@ final class LocalModelToolLoop {
     ) async throws -> AIServiceResponse {
         var iteration = 0
         var allToolCalls: [AIToolCall] = []
+        var previousBatch: [AIToolCall]?
+        var consecutiveRepetitions = 0
 
         repeat {
             let stage: AIRequestStage? = iteration > 0 ? .tool_loop : nil
@@ -95,42 +101,44 @@ final class LocalModelToolLoop {
             iteration += 1
             allToolCalls.append(contentsOf: toolCalls)
 
-            // Check for repetition before executing
-            if let previousCalls = allToolCalls.count > toolCalls.count
-                ? Array(allToolCalls.dropLast(toolCalls.count))
-                : nil,
-               let lastPrevious = previousCalls.last,
-               let current = toolCalls.first,
-               let repetition = guide.detectRepetition(
-                   current: current,
-                   previousToolCalls: previousCalls
-               ) {
-                let identical: Bool
-                switch repetition {
-                case .identicalCall: identical = true
-                default: identical = false
-                }
+            // Detect repetition against the previous batch BEFORE executing.
+            // A detected identical batch increments the streak; any novel
+            // call resets it.
+            let repetition = previousBatch.flatMap {
+                guide.detectBatchRepetition(current: toolCalls, previous: $0)
+            }
+            if let repetition {
+                consecutiveRepetitions += 1
                 await logger.logRepetition(
                     iteration: iteration,
-                    currentCall: current,
-                    previousCall: lastPrevious,
-                    identicalArguments: identical
+                    currentCall: toolCalls[0],
+                    previousCall: previousBatch?.last ?? toolCalls[0],
+                    identicalArguments: {
+                        if case .identicalCall = repetition { return true }
+                        return false
+                    }()
                 )
+            } else {
+                consecutiveRepetitions = 0
             }
 
             guard iteration < configuration.maxIterations else {
-                // Budget exhausted — force a final text answer with NO tools
+                // Budget exhausted — force a final text answer with NO tools,
+                // and tell the model WHY so the summary is grounded instead
+                // of a blind cliff.
                 await logger.logBudgetExhaustion(
                     iteration: iteration,
                     maxIterations: configuration.maxIterations,
                     totalToolCalls: allToolCalls.count
                 )
-                return try await aiInteractionCoordinator.sendMessageWithRetry(
-                    .init(messages: history.requestMessages, tools: [],
-                          mode: configuration.mode, projectRoot: configuration.projectRoot,
-                          runId: configuration.runId, stage: .tool_loop,
-                          conversationId: configuration.conversationId, usesLocalModel: true)
-                ).get()
+                await history.append(ChatMessage(
+                    role: .user,
+                    content: guide.finalizeMessage(
+                        completedIterations: iteration,
+                        totalToolCalls: allToolCalls.count
+                    )
+                ))
+                return try await finalResponse(configuration: configuration)
             }
 
             // Commit assistant tool-call message FIRST so the request builder
@@ -142,6 +150,20 @@ final class LocalModelToolLoop {
                             context: ChatMessageContentContext(reasoning: split.reasoning),
                             tool: ChatMessageToolContext(toolCalls: toolCalls))
             )
+
+            if consecutiveRepetitions >= Self.maxConsecutiveRepetitions {
+                // Stuck loop: the model keeps re-issuing identical calls.
+                // Stop executing, demand a grounded final summary instead of
+                // burning the remaining budget.
+                await history.append(ChatMessage(
+                    role: .user,
+                    content: guide.finalizeMessage(
+                        completedIterations: iteration,
+                        totalToolCalls: allToolCalls.count
+                    )
+                ))
+                return try await finalResponse(configuration: configuration)
+            }
 
             let toolResults = await toolExecutionCoordinator.executeToolCalls(
                 toolCalls, availableTools: tools,
@@ -164,8 +186,15 @@ final class LocalModelToolLoop {
                 generationTokens: 0
             )
 
-            // Inject guidance if the model might be stuck
-            if toolResults.allSatisfy({ $0.content.isEmpty }) {
+            // Inject guidance AFTER results so the next pass sees result +
+            // instruction together. Repetition gets a targeted correction;
+            // fully empty results get generic continuation guidance.
+            if let repetition {
+                await history.append(ChatMessage(
+                    role: .user,
+                    content: guide.correctiveMessage(for: repetition, iteration: iteration)
+                ))
+            } else if toolResults.allSatisfy({ $0.content.isEmpty }) {
                 let guidance = guide.continueGuidance(
                     toolCalls: toolCalls,
                     toolResults: toolResults,
@@ -173,6 +202,18 @@ final class LocalModelToolLoop {
                 )
                 await history.append(ChatMessage(role: .user, content: guidance))
             }
+
+            previousBatch = toolCalls
         } while true
+    }
+
+    /// The forced no-tools send that terminates the loop.
+    private func finalResponse(configuration: Configuration) async throws -> AIServiceResponse {
+        try await aiInteractionCoordinator.sendMessageWithRetry(
+            .init(messages: history.requestMessages, tools: [],
+                  mode: configuration.mode, projectRoot: configuration.projectRoot,
+                  runId: configuration.runId, stage: .tool_loop,
+                  conversationId: configuration.conversationId, usesLocalModel: true)
+        ).get()
     }
 }

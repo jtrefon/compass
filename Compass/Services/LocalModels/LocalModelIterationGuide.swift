@@ -16,24 +16,43 @@ struct LocalModelIterationGuide {
     // MARK: - Repetition detection
 
     /// Detects if the current tool call is a repeat of the previous one.
+    /// Convenience wrapper over `detectBatchRepetition`.
     func detectRepetition(
         current: AIToolCall,
         previousToolCalls: [AIToolCall]
     ) -> RepetitionKind? {
-        guard let previous = previousToolCalls.last else { return nil }
+        detectBatchRepetition(current: [current], previous: previousToolCalls)
+    }
 
-        guard current.name == previous.name else { return nil }
-
-        let currentArgs = Self.canonicalizeArguments(current.arguments)
-        let previousArgs = Self.canonicalizeArguments(previous.arguments)
-
-        if currentArgs == previousArgs {
-            return .identicalCall(name: current.name, arguments: current.arguments)
+    /// Detects if the current tool-call batch repeats the previous batch.
+    ///
+    /// Compares canonicalized signatures of the FULL batches (order-
+    /// insensitive within a batch), so a repeated call inside an otherwise
+    /// larger batch is caught — comparing only `first` vs `last` misses that
+    /// case (`[read:a]` followed by `[read:a, read:b]`).
+    func detectBatchRepetition(
+        current: [AIToolCall],
+        previous: [AIToolCall]
+    ) -> RepetitionKind? {
+        guard let lastPrevious = previous.last else { return nil }
+        guard let currentFirst = current.first else { return nil }
+        guard currentFirst.name == lastPrevious.name || batchNamesOverlap(current, previous) else {
+            return nil
         }
 
-        // Same tool name, different arguments — likely a legitimate
-        // follow-up (e.g., reading a different file). Not a repeat.
+        let currentSignature = Self.canonicalBatchSignature(current)
+        let previousSignature = Self.canonicalBatchSignature(previous)
+
+        if currentSignature == previousSignature {
+            return .identicalCall(name: currentFirst.name, arguments: currentFirst.arguments)
+        }
+
+        // Same tools, different arguments — likely a legitimate follow-up.
         return nil
+    }
+
+    private func batchNamesOverlap(_ a: [AIToolCall], _ b: [AIToolCall]) -> Bool {
+        Set(a.map(\.name)).intersection(b.map(\.name)) != []
     }
 
     // MARK: - Corrective guidance
@@ -94,6 +113,13 @@ struct LocalModelIterationGuide {
     }
 
     // MARK: - Argument canonicalization
+
+    /// Order-insensitive signature of a whole tool-call batch.
+    private static func canonicalBatchSignature(_ calls: [AIToolCall]) -> [String] {
+        calls
+            .map { "\($0.name)#\(canonicalizeArguments($0.arguments))" }
+            .sorted()
+    }
 
     /// Canonicalizes tool call arguments for comparison.
     /// Handles the JSON round-tripping that produces Double/Int/String

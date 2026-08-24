@@ -120,6 +120,57 @@ final class LocalModelIterationGuideTests: XCTestCase {
         XCTAssertTrue(message.contains("5"))
         XCTAssertTrue(message.contains("12"))
     }
+
+    // MARK: - Batch repetition detection
+
+    func testBatchRepetitionDetectsIdenticalBatches() {
+        let previous = [
+            AIToolCall(id: "1", name: "bash", arguments: ["command": "ls"]),
+            AIToolCall(id: "2", name: "read", arguments: ["path": "a.swift"]),
+        ]
+        let current = [
+            AIToolCall(id: "3", name: "bash", arguments: ["command": "ls"]),
+            AIToolCall(id: "4", name: "read", arguments: ["path": "a.swift"]),
+        ]
+        let result = guide.detectBatchRepetition(current: current, previous: previous)
+        XCTAssertNotNil(result)
+    }
+
+    /// Regression: comparing only first-vs-last misses a repeated call inside
+    /// a grown batch (`[read:a]` → `[read:a, read:b]`). Full-batch signature
+    /// comparison must NOT flag it as identical (it isn't one), but the
+    /// single-call repeat case still must be.
+    func testGrownBatchWithRepeatedPrefixIsNotIdentical() {
+        let previous = [AIToolCall(id: "1", name: "read", arguments: ["path": "a"])]
+        let current = [
+            AIToolCall(id: "2", name: "read", arguments: ["path": "a"]),
+            AIToolCall(id: "3", name: "read", arguments: ["path": "b"]),
+        ]
+        XCTAssertNil(guide.detectBatchRepetition(current: current, previous: previous))
+    }
+
+    func testBatchOrderInsensitivity() {
+        let previous = [
+            AIToolCall(id: "1", name: "bash", arguments: ["command": "ls"]),
+            AIToolCall(id: "2", name: "read", arguments: ["path": "a"]),
+        ]
+        let current = [
+            AIToolCall(id: "3", name: "read", arguments: ["path": "a"]),
+            AIToolCall(id: "4", name: "bash", arguments: ["command": "ls"]),
+        ]
+        XCTAssertNotNil(guide.detectBatchRepetition(current: current, previous: previous))
+    }
+
+    func testBatchWithDifferentArgumentsIsNotRepetition() {
+        let previous = [AIToolCall(id: "1", name: "read", arguments: ["path": "a"])]
+        let current = [AIToolCall(id: "2", name: "read", arguments: ["path": "b"])]
+        XCTAssertNil(guide.detectBatchRepetition(current: current, previous: previous))
+    }
+
+    func testBatchDetectionWithoutPreviousReturnsNil() {
+        let current = [AIToolCall(id: "1", name: "read", arguments: ["path": "a"])]
+        XCTAssertNil(guide.detectBatchRepetition(current: current, previous: []))
+    }
 }
 
 // MARK: - LocalModelToolLoop Configuration Tests
