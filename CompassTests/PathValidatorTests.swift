@@ -93,13 +93,4 @@ final class PathValidatorTests: XCTestCase {
         XCTAssertNoThrow(try validator.validateAndResolve("nonexistent.php"))
     }
 
-    // MARK: - normalizePseudoRootPath
-
-    func testPseudoRootNormalization() {
-        let validator = PathValidator(projectRoot: tempRoot)
-        // Accessing private method via mirror
-        let mirror = Mirror(reflecting: validator)
-        let normalizeFn = mirror.children.first { $0.label == "normalizePseudoRootPath" }?.value
-        // Private method — tested indirectly via validateAndResolve above
-    }
 }
