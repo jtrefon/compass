@@ -501,6 +501,9 @@ final class AIInteractionCoordinator {
     }
 
     // MARK: - Retry classification (network vs rate-limit vs generic)
+    //
+    // Predicates delegate to `TransportFailureClassifier` — typed sources
+    // first, phrase heuristics demoted to last-resort fallback.
 
     private enum RetryAction {
         case cancel
@@ -512,16 +515,14 @@ final class AIInteractionCoordinator {
         case surrender
     }
 
-    private func isRateLimitError(_ error: Error) -> Bool {
-        let errStr = String(describing: error).lowercased()
-        return errStr.contains("429") || errStr.contains("rate-limit")
-            || errStr.contains("rate_limit")
+    func isRateLimitError(_ error: Error) -> Bool {
+        if case .rateLimit = TransportFailureClassifier.classify(error) { return true }
+        return false
     }
 
-    private func isInsufficientBalanceError(_ error: Error) -> Bool {
-        let errStr = String(describing: error).lowercased()
-        return errStr.contains("402") || errStr.contains("insufficient balance")
-            || errStr.contains("more credits")
+    func isInsufficientBalanceError(_ error: Error) -> Bool {
+        if case .paymentRequired = TransportFailureClassifier.classify(error) { return true }
+        return false
     }
 
     private func classifyRetry(
@@ -617,49 +618,12 @@ final class AIInteractionCoordinator {
         return .retry(UInt64(delay * 1_000_000_000))
     }
 
-    private func isNetworkConnectivityError(_ error: Error) -> Bool {
-        if let urlError = error as? URLError {
-            return Self.isTransientNetworkURLError(urlError.errorCode)
-        }
-        if let appErr = error as? AppError {
-            switch appErr {
-            case .networkError:
-                return true
-            case .aiServiceError(let message):
-                return Self.networkPhraseSet.contains { message.localizedCaseInsensitiveContains($0) }
-            default:
-                return false
-            }
-        }
-        let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain {
-            return Self.isTransientNetworkURLError(nsError.code)
-        }
-        let description = error.localizedDescription.lowercased()
-        return Self.networkPhraseSet.contains { description.contains($0) }
+    func isNetworkConnectivityError(_ error: Error) -> Bool {
+        if case .network = TransportFailureClassifier.classify(error) { return true }
+        return false
     }
 
-    private static let networkPhraseSet: Set<String> = [
-        "offline", "internet connection appears to be offline", "network connection was lost",
-        "timed out", "could not connect", "cannot connect to", "network is unreachable",
-        "connection reset", "connection dropped", "no network connection", "nsurlerror",
-        "the network connection was lost", "request timed out", "connection failed"
-    ]
-
-    private static func isTransientNetworkURLError(_ code: Int) -> Bool {
-        let urlErrorCode = URLError.Code(rawValue: code)
-        switch urlErrorCode {
-        case .notConnectedToInternet, .networkConnectionLost, .timedOut,
-             .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
-             .resourceUnavailable, .dataNotAllowed, .internationalRoamingOff,
-             .callIsActive, .secureConnectionFailed, .clientCertificateRejected,
-             .clientCertificateRequired, .cannotLoadFromNetwork,
-             .backgroundSessionWasDisconnected, .appTransportSecurityRequiresSecureConnection:
-            return true
-        default:
-            return false
-        }
-    }
+    private static let networkPhraseSet = TransportFailureClassifier.networkPhraseSet
 
     func shouldUseStreamingForRequest(
         runId: String?,
