@@ -228,139 +228,103 @@ final class AIInteractionCoordinator {
                 isRunningUnitTests: isUnitTestRun
             )
 
-            // Use streaming in app runtime; disable in tests for deterministic harness telemetry
+            // ---- Transport layer (the ONLY place that knows the difference)
+            // Streaming in app runtime; disabled in tests for deterministic
+            // harness telemetry. Both transports normalize into one Result so
+            // the verdict pipeline below exists exactly once.
+            let outcome: Result<AIServiceResponse, Error>
             if shouldUseStreaming, let runId = request.runId {
                 do {
-                    let response = try await aiService.sendMessageStreaming(
-                        historyRequest, runId: runId)
-                    if Self.isEmptyResponse(response) && attempt < maxAttempts {
-                        await AIToolTraceLogger.shared.log(type: "chat.empty_response_retry", data: [
-                            "runId": runId,
-                            "attempt": attempt,
-                            "stage": request.stage?.rawValue ?? "unknown",
-                            "contentLength": response.content?.count ?? 0,
-                            "hasToolCalls": !(response.toolCalls?.isEmpty ?? true)
-                        ])
-                        lastError = .aiServiceError("Empty response: model returned no visible content")
-                        let waitSeconds = retryDelayNanoseconds(
-                            forAttempt: attempt,
-                            stage: request.stage,
-                            isRateLimitError: false,
-                            isRunningUnitTests: isUnitTestRun
-                        )
-                        guard await sleepRespectingCancellation(nanoseconds: waitSeconds) else {
-                            return .failure(.aiServiceError("Request cancelled"))
-                        }
-                        continue
-                    }
-                    // Malformed/truncated tool-call markup must NOT terminate
-                    // the run — retry with a correction so the agent keeps
-                    // working (previously treated as a valid answer, breaking
-                    // the agentic loop mid-task).
-                    if Self.isMalformedToolCallResponse(response),
-                       !filteredTools.isEmpty, attempt < maxAttempts {
-                        await AIToolTraceLogger.shared.log(type: "chat.malformed_tool_call_retry", data: [
-                            "runId": runId,
-                            "attempt": attempt,
-                            "stage": request.stage?.rawValue ?? "unknown",
-                            "contentLength": response.content?.count ?? 0,
-                            "malformedCount": response.malformedToolCalls?.count ?? 0
-                        ])
-                        lastError = .aiServiceError("Malformed tool call: model emitted tool-call markup that could not be parsed")
-                        let waitSeconds = retryDelayNanoseconds(
-                            forAttempt: attempt,
-                            stage: request.stage,
-                            isRateLimitError: false,
-                            isRunningUnitTests: isUnitTestRun
-                        )
-                        guard await sleepRespectingCancellation(nanoseconds: waitSeconds) else {
-                            return .failure(.aiServiceError("Request cancelled"))
-                        }
-                        continue
-                    }
-                    if networkIssueActive {
-                        eventBus.publish(ProviderIssueStatusEvent(
-                            providerName: providerLabel, statusKind: .resolved,
-                            statusCode: nil, message: "", cooldownUntil: nil))
-                        networkIssueActive = false
-                    }
-                    return .success(response)
+                    outcome = .success(try await aiService.sendMessageStreaming(
+                        historyRequest, runId: runId))
                 } catch {
-                    switch await handleRetry(error, attempt: attempt) {
-                    case .retry:
-                        continue
-                    case .giveUp:
-                        return .failure(lastError ?? .aiServiceError("sendMessageStreaming failed"))
-                    case .degrade:
-                        return .success(Self.degradedResponse())
-                    }
+                    outcome = .failure(error)
                 }
-            } else if let runId = request.runId {
-                let result = await aiService.sendMessageResult(historyRequest)
+            } else if request.runId != nil {
+                outcome = await aiService.sendMessageResult(historyRequest).mapError { $0 as Error }
+            } else {
+                // Unreachable via live callers (every pipeline passes a runId);
+                // fail fast instead of silently burning the attempt budget.
+                outcome = .failure(AppError.unknown("sendMessageWithRetry requires a runId"))
+            }
 
-                switch result {
-                case .success(let response):
-                    if Self.isEmptyResponse(response) && attempt < maxAttempts {
-                        await AIToolTraceLogger.shared.log(type: "chat.empty_response_retry", data: [
-                            "attempt": attempt,
-                            "stage": request.stage?.rawValue ?? "unknown",
-                            "contentLength": response.content?.count ?? 0,
-                            "hasToolCalls": !(response.toolCalls?.isEmpty ?? true)
-                        ])
-                        lastError = .aiServiceError("Empty response: model returned no visible content")
-                        let waitSeconds = retryDelayNanoseconds(
-                            forAttempt: attempt,
-                            stage: request.stage,
-                            isRateLimitError: false,
-                            isRunningUnitTests: isUnitTestRun
-                        )
-                        guard await sleepRespectingCancellation(nanoseconds: waitSeconds) else {
-                            return .failure(.aiServiceError("Request cancelled"))
-                        }
-                        continue
+            // ---- Verdict pipeline (single copy for both transports)
+            switch outcome {
+            case .success(let response):
+                // Empty response: retry with a correction instead of
+                // terminating the run.
+                if Self.isEmptyResponse(response), attempt < maxAttempts {
+                    lastError = .aiServiceError(Self.emptyResponseReason)
+                    await AIToolTraceLogger.shared.log(type: "chat.empty_response_retry", data: [
+                        "runId": request.runId ?? "unknown",
+                        "attempt": attempt,
+                        "stage": request.stage?.rawValue ?? "unknown",
+                        "contentLength": response.content?.count ?? 0,
+                        "hasToolCalls": !(response.toolCalls?.isEmpty ?? true),
+                    ])
+                    let waitSeconds = retryDelayNanoseconds(
+                        forAttempt: attempt,
+                        stage: request.stage,
+                        isRateLimitError: false,
+                        isRunningUnitTests: isUnitTestRun
+                    )
+                    guard await sleepRespectingCancellation(nanoseconds: waitSeconds) else {
+                        return .failure(.aiServiceError("Request cancelled"))
                     }
-                    if Self.isMalformedToolCallResponse(response),
-                       !filteredTools.isEmpty, attempt < maxAttempts {
-                        await AIToolTraceLogger.shared.log(type: "chat.malformed_tool_call_retry", data: [
-                            "attempt": attempt,
-                            "stage": request.stage?.rawValue ?? "unknown",
-                            "contentLength": response.content?.count ?? 0,
-                            "malformedCount": response.malformedToolCalls?.count ?? 0
-                        ])
-                        lastError = .aiServiceError("Malformed tool call: model emitted tool-call markup that could not be parsed")
-                        let waitSeconds = retryDelayNanoseconds(
-                            forAttempt: attempt,
-                            stage: request.stage,
-                            isRateLimitError: false,
-                            isRunningUnitTests: isUnitTestRun
-                        )
-                        guard await sleepRespectingCancellation(nanoseconds: waitSeconds) else {
-                            return .failure(.aiServiceError("Request cancelled"))
-                        }
-                        continue
+                    continue
+                }
+                // Malformed/truncated tool-call markup must NOT terminate the
+                // run — retry with a correction so the agent keeps working
+                // (previously treated as a valid answer, breaking the agentic
+                // loop mid-task).
+                if Self.isMalformedToolCallResponse(response),
+                   !filteredTools.isEmpty, attempt < maxAttempts {
+                    lastError = .aiServiceError(Self.malformedToolCallReason)
+                    await AIToolTraceLogger.shared.log(type: "chat.malformed_tool_call_retry", data: [
+                        "runId": request.runId ?? "unknown",
+                        "attempt": attempt,
+                        "stage": request.stage?.rawValue ?? "unknown",
+                        "contentLength": response.content?.count ?? 0,
+                        "malformedCount": response.malformedToolCalls?.count ?? 0,
+                    ])
+                    let waitSeconds = retryDelayNanoseconds(
+                        forAttempt: attempt,
+                        stage: request.stage,
+                        isRateLimitError: false,
+                        isRunningUnitTests: isUnitTestRun
+                    )
+                    guard await sleepRespectingCancellation(nanoseconds: waitSeconds) else {
+                        return .failure(.aiServiceError("Request cancelled"))
                     }
-                    if networkIssueActive {
-                        eventBus.publish(ProviderIssueStatusEvent(
-                            providerName: providerLabel, statusKind: .resolved,
-                            statusCode: nil, message: "", cooldownUntil: nil))
-                        networkIssueActive = false
-                    }
-                    return result
-                case .failure(let error):
-                    switch await handleRetry(error, attempt: attempt) {
-                    case .retry:
-                        continue
-                    case .giveUp:
-                        return .failure(lastError ?? .aiServiceError("sendMessageStreaming failed"))
-                    case .degrade:
-                        return .success(Self.degradedResponse())
-                    }
+                    continue
+                }
+                if networkIssueActive {
+                    eventBus.publish(ProviderIssueStatusEvent(
+                        providerName: providerLabel, statusKind: .resolved,
+                        statusCode: nil, message: "", cooldownUntil: nil))
+                    networkIssueActive = false
+                }
+                return .success(response)
+
+            case .failure(let error):
+                switch await handleRetry(error, attempt: attempt) {
+                case .retry:
+                    continue
+                case .giveUp:
+                    return .failure(lastError ?? .aiServiceError("send failed"))
+                case .degrade:
+                    return .success(Self.degradedResponse())
                 }
             }
         }
 
         return .failure(lastError ?? .unknown("ConversationManager: sendMessageWithRetry failed"))
     }
+
+    // Exact reason strings double as routing keys: the retry-message builder
+    // selects the correction prompt by matching these substrings.
+    static let emptyResponseReason = "Empty response: model returned no visible content"
+    static let malformedToolCallReason = "Malformed tool call: model emitted tool-call markup that could not be parsed"
 
     /// A response that carries tool-call MARKUP but zero recoverable calls is
     /// a parsing failure — treating it as a valid answer broke the agentic
