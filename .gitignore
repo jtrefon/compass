@@ -25,6 +25,8 @@ old_*.swift
 .build-tests/
 .build-tests/**
 .vscode/
+.windsurf/
+.hermes/
 .codacy/logs/
 .codacy/tools-configs/
 

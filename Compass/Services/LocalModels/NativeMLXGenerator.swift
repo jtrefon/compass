@@ -75,7 +75,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
     /// KV caches pin hundreds of MB to GBs of memory per conversation; cap the
     /// retained set so long sessions do not accumulate every conversation's
     /// cache forever.
-    private static let maxPromptCacheConversations = 2
+    private static let maxPromptCacheConversations = 1
 
     private func promptCacheKey(conversationId: String, modelDirectory: URL) -> String {
         // Keyed by model too — a cross-model KV cache (different layer counts /
@@ -148,6 +148,12 @@ actor NativeMLXGenerator: LocalModelGenerating {
         // Serialize with FIM and other MLX engines — see MLXInferenceLock.
         try await MLXInferenceLock.shared.acquire()
         try Task.checkCancellation()
+        // Chat/agent work has foreground priority. FIM is useful while the
+        // editor is idle, but retaining its weights alongside Qwen consumes a
+        // large portion of unified memory for no concurrent benefit. Holding
+        // the shared lock means an active FIM stream has finished before its
+        // container is released.
+        await InferenceUnloadRegistry.shared.unloadAll(labels: [InferenceUnloadRegistry.fimLabel])
         activeGenerationCount += 1
         defer {
             activeGenerationCount -= 1
@@ -177,7 +183,8 @@ actor NativeMLXGenerator: LocalModelGenerating {
         let cacheEntry = resolveCacheEntry(
             conversationId: conversationId,
             modelDirectory: modelDirectory,
-            prefixCache: prefixCache
+            prefixCache: prefixCache,
+            inferenceConfiguration: inferenceConfiguration
         )
 
         do {
@@ -243,9 +250,15 @@ actor NativeMLXGenerator: LocalModelGenerating {
         }
     }
 
-    private func resolveCacheEntry(conversationId: String?, modelDirectory: URL, prefixCache: PrefixCacheContext? = nil) -> PromptCacheEntry? {
+    private func resolveCacheEntry(
+        conversationId: String?,
+        modelDirectory: URL,
+        prefixCache: PrefixCacheContext? = nil,
+        inferenceConfiguration: LocalModelInferenceConfiguration
+    ) -> PromptCacheEntry? {
         guard let conversationId else { return nil }
-        let key = promptCacheKey(conversationId: conversationId, modelDirectory: modelDirectory)
+        let cachePolicy = "ctx=\(inferenceConfiguration.contextLength):kv=\(inferenceConfiguration.maxKVSize):q4=\(inferenceConfiguration.kvCache4BitEnabled):prefix=\(prefixCache?.hash ?? "none")"
+        let key = "\(promptCacheKey(conversationId: conversationId, modelDirectory: modelDirectory)):\(cachePolicy)"
         if let existing = promptCacheByConversation[key] {
             // touch for LRU
             promptCacheAccessOrder.removeAll { $0 == key }
@@ -454,11 +467,22 @@ nonisolated private static let maxPrefixCacheFiles = 8
 
             let input = try await context.processor.prepare(input: capturedInput.value)
             let promptTokenCount = input.text.tokens.size
+            let reservedOutputTokens = inferenceConfiguration.maxOutputTokens
+            guard promptTokenCount + reservedOutputTokens <= inferenceConfiguration.contextLength else {
+                throw AppError.aiServiceError(
+                    "Local request exceeds the configured context window: \(promptTokenCount) prompt tokens + \(reservedOutputTokens) reserved output tokens exceed \(inferenceConfiguration.contextLength)."
+                )
+            }
             let promptTokenIds = input.text.tokens.asArray(Int.self)
             await AIToolTraceLogger.shared.log(type: "mlx.prompt_prepared", data: [
                 "runId": runId ?? "",
                 "modelId": modelId,
-                "promptTokens": promptTokenCount
+                "promptTokens": promptTokenCount,
+                "contextLength": inferenceConfiguration.contextLength,
+                "reservedOutputTokens": reservedOutputTokens,
+                "contextHeadroomTokens": inferenceConfiguration.contextLength - promptTokenCount - reservedOutputTokens,
+                "kvCache4Bit": inferenceConfiguration.kvCache4BitEnabled,
+                "residentConversationCaches": promptCacheByConversation.count
             ])
 
             let (kvCache, effectiveInput) = try self.resolveKVCache(
@@ -841,6 +865,11 @@ nonisolated private static let maxPrefixCacheFiles = 8
         if let persistKVTo {
             persistConversationCaches(to: persistKVTo)
         }
+        // KV arrays are active MLX allocations, not allocator-cache entries.
+        // Dropping only model containers left their conversation caches pinned
+        // after a critical-pressure unload.
+        promptCacheByConversation.removeAll()
+        promptCacheAccessOrder.removeAll()
         containersByModelDirectory.removeAll()
         inFlightLoads.removeAll()
         accessOrder.removeAll()

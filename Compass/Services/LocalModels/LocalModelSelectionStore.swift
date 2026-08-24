@@ -26,11 +26,11 @@ actor LocalModelSelectionStore {
         )
     }
 
-    /// Honest default: the fixed chat model does NOT support a quantized KV
-    /// combiner, so 4-bit KV would be silently ignored. Only explicit opt-in
-    /// (or the env knob in the benchmark harness) enables it.
+    /// Qwen3.5 supports quantized attention KV. Keeping long-context state in
+    /// 4-bit form is the normal operating policy; callers may opt out for
+    /// quality diagnostics. The request envelope remains the hard size bound.
     func isKVCache4BitEnabled() -> Bool {
-        settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: false)
+        settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: true)
     }
 
     func setKVCache4BitEnabled(_ enabled: Bool) {

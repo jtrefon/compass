@@ -32,7 +32,6 @@ struct AIChatPanel: View {
     @State private var isHistoryPopover: Bool = false
     @State private var hoveredClosedId: String?
     @State private var hoveredModelId: String?
-    @State private var currentSearchModels: [OpenRouterModel] = []
     @State private var hoveredTabId: String?
 
     private func selectModel(_ model: OpenRouterModel) -> () -> Void {
@@ -260,12 +259,6 @@ struct AIChatPanel: View {
                 await modelSearch.loadModels(baseURL: baseURL)
             }
         }
-        .onChange(of: modelSearch.searchQuery) { _, _ in
-            currentSearchModels = modelSearch.displayModels
-        }
-        .onChange(of: modelSearch.displayModels.count) { _, _ in
-            currentSearchModels = modelSearch.displayModels
-        }
         .onReceive(NotificationCenter.default.publisher(for: .localModelOfflineModeDidChange)) { _ in
             refreshModelState()
         }
@@ -334,7 +327,7 @@ struct AIChatPanel: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(currentSearchModels, id: \.id) { model in
+                    ForEach(modelSearch.displayModels, id: \.id) { model in
                         Button(action: selectModel(model)) {
                             modelRowLabel(model)
                         }
@@ -410,6 +403,12 @@ struct AIChatPanel: View {
             width: AppConstants.Overlay.modelPopoverWidth,
             height: AppConstants.Overlay.modelPopoverHeight
         )
+        .onAppear {
+            Task {
+                let baseURL = settingsStore(for: currentProvider()).load(includeApiKey: false).baseURL
+                await modelSearch.loadModels(baseURL: baseURL)
+            }
+        }
     }
 
     private static let historyDateFormatter: DateFormatter = {
@@ -653,3 +652,19 @@ struct AIChatPanel: View {
         conversationManager.sendMessage(context: context)
     }
 }
+
+struct AIChatPanel_Previews: PreviewProvider {
+    static var previews: some View {
+        let ctx = CodeSelectionContext()
+        let container = DependencyContainer()
+        return AIChatPanel(
+            selectionContext: ctx,
+            conversationManager: container.conversationManager,
+            ui: UIStateManager(
+                uiService: UIService(errorManager: ErrorManager(), eventBus: EventBus()),
+                eventBus: EventBus()
+            )
+        )
+    }
+}
+

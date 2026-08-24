@@ -666,7 +666,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
             )
             self.draftAssistantMessageId = draftMessage.id
             self.activeStreamingRunId = runId
-            await self.historyCoordinator.append(draftMessage)
+            self.historyCoordinator.setDraft(draftMessage)
 
             let tools = self.currentMode.allowedTools(from: self.availableTools)
 
@@ -696,15 +696,14 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
                     )
                 )
 
+                self.historyCoordinator.clearDraft()
                 self.resetStreamingDraftState()
                 self.providerIssue = nil
                 self.isSending = false
                 self.eventBus.publish(ConversationRunCompletedEvent(runId: runId))
             } catch {
                 // Clean up draft message on error
-                if let draftId = self.draftAssistantMessageId {
-                    self.historyCoordinator.clearDraft()
-                }
+                self.historyCoordinator.clearDraft()
                 self.resetStreamingDraftState()
                 if error is CancellationError || Task.isCancelled || self.isLikelyCancellation(error) {
                     // Only the current run may clear the sending state — a stale
