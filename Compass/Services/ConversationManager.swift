@@ -105,14 +105,14 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         projectRootProvider: { [weak self] in self?.projectRoot }
     )
     private var cancellables = Set<AnyCancellable>()
-
-    private var activeStreamingRunId: String?
-    private var draftAssistantMessageId: UUID?
-    private var lastRenderedDraftContent: String = ""
-    private var lastRenderedDraftReasoning: String = ""
-    private let outputBuffer = StreamingOutputBuffer()
+    private let streamingCoordinator: ConversationStreamingCoordinator
     private var activeSendTask: Task<Void, Never>?
     private var activeRunCounter = 0
+
+    // Streaming state now owned by ConversationStreamingCoordinator.
+    // Kept as computed forwards for call sites that read the draft/run id.
+    private var activeStreamingRunId: String? { streamingCoordinator.activeStreamingRunId }
+    private var draftAssistantMessageId: UUID? { streamingCoordinator.draftAssistantMessageId }
 
     // MARK: - Computed Properties
 
@@ -162,6 +162,10 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
             historyCoordinator: historyCoordinator,
             projectRoot: root
         )
+        self.streamingCoordinator = ConversationStreamingCoordinator(
+            historyCoordinator: historyCoordinator,
+            eventBus: dependencies.environment.eventBus
+        )
         let fileEditorServiceProvider = fileEditorService
         self.toolExecutor = AIToolExecutor(
             fileSystemService: dependencies.services.fileSystemService,
@@ -195,7 +199,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         initializeLogging(root: root)
         setupObservation()
         setupPowerManagementObservation()
-        setupStreamingSubscriptions()
+        observeStreamingCoordinator()
         observeSessionTabs()
         observeHistoryMessages()
         startTraceLogging()
@@ -252,159 +256,13 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         )
     }
 
-    // MARK: - Event Bus Subscriptions
-
-    private func setupStreamingSubscriptions() {
-        eventBus
-            .subscribe(to: LocalModelStreamingChunkEvent.self) { [weak self] event in
-                guard let self else { return }
-                self.handleLocalModelStreamingChunk(event)
-            }
+    private func observeStreamingCoordinator() {
+        streamingCoordinator.$providerIssue
+            .sink { [weak self] issue in self?.providerIssue = issue }
             .store(in: &cancellables)
-
-        eventBus
-            .subscribe(to: LocalModelStreamingReasoningChunkEvent.self) { [weak self] event in
-                guard let self else { return }
-                self.handleLocalModelStreamingReasoningChunk(event)
-            }
+        streamingCoordinator.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
-
-        eventBus
-            .subscribe(to: ProviderIssueStatusEvent.self) { [weak self] event in
-                guard let self else { return }
-                if event.statusKind == .resolved {
-                    self.providerIssue = nil
-                    return
-                }
-                self.providerIssue = ConversationProviderIssueState(
-                    providerName: event.providerName,
-                    issueType: self.providerIssueTypeLabel(for: event.statusKind),
-                    statusCode: event.statusCode,
-                    message: event.message,
-                    cooldownUntil: event.cooldownUntil
-                )
-            }
-            .store(in: &cancellables)
-
-        eventBus
-            .subscribe(to: OpenRouterUsageUpdatedEvent.self) { [weak self] event in
-                guard let self else { return }
-                self.handleOpenRouterUsageUpdated(event)
-            }
-            .store(in: &cancellables)
-    }
-
-    // MARK: - Provider Helpers
-
-    private func providerIssueTypeLabel(for statusKind: ProviderIssueStatusEvent.StatusKind) -> String {
-        switch statusKind {
-        case .resolved:
-            return "Resolved"
-        case .rateLimited:
-            return "Rate limit"
-        case .unavailable:
-            return "Provider unavailable"
-        case .authentication:
-            return "Authentication"
-        case .transport:
-            return "Connection"
-        case .networkOffline:
-            return "Network offline"
-        case .insufficientBalance:
-            return "Insufficient balance"
-        case .unknown:
-            return "Provider issue"
-        }
-    }
-
-    // MARK: - Streaming Rendering
-
-    private func handleLocalModelStreamingChunk(_ event: LocalModelStreamingChunkEvent) {
-        guard let runId = activeStreamingRunId, runId == event.runId else { return }
-        guard let draftId = draftAssistantMessageId else { return }
-        guard !event.chunk.isEmpty else { return }
-
-        renderStreamingChunk(event.chunk, draftId: draftId)
-    }
-
-    private func handleLocalModelStreamingReasoningChunk(_ event: LocalModelStreamingReasoningChunkEvent) {
-        guard let runId = activeStreamingRunId, runId == event.runId else { return }
-        guard let draftId = draftAssistantMessageId else { return }
-        guard !event.chunk.isEmpty else { return }
-
-        renderStreamingReasoning(event.chunk, draftId: draftId)
-    }
-
-    private func renderStreamingChunk(_ chunk: String, draftId: UUID) {
-        outputBuffer.appendContent(chunk)
-        outputBuffer.flushClassification()
-        let renderContent = outputBuffer.hasContent ? outputBuffer.content : ""
-        guard renderContent != lastRenderedDraftContent else { return }
-        lastRenderedDraftContent = renderContent
-        let renderReasoning: String? = outputBuffer.hasReasoning ? outputBuffer.reasoning : nil
-        historyCoordinator.setDraft(
-            ChatMessage(
-                id: draftId,
-                role: .assistant,
-                content: renderContent,
-                timestamp: historyCoordinator.getDraftMessage(id: draftId)?.timestamp ?? Date(),
-                context: ChatMessageContentContext(reasoning: renderReasoning),
-                isDraft: true
-            )
-        )
-    }
-
-    private func renderStreamingReasoning(_ chunk: String, draftId: UUID) {
-        outputBuffer.appendReasoning(chunk)
-        let renderReasoning: String? = outputBuffer.hasReasoning ? outputBuffer.reasoning : nil
-        guard renderReasoning != lastRenderedDraftReasoning else { return }
-        lastRenderedDraftReasoning = renderReasoning ?? ""
-        let renderContent = outputBuffer.hasContent ? outputBuffer.content : ""
-        historyCoordinator.setDraft(
-            ChatMessage(
-                id: draftId,
-                role: .assistant,
-                content: renderContent,
-                timestamp: historyCoordinator.getDraftMessage(id: draftId)?.timestamp ?? Date(),
-                context: ChatMessageContentContext(reasoning: renderReasoning),
-                isDraft: true
-            )
-        )
-    }
-
-    private func handleOpenRouterUsageUpdated(_ event: OpenRouterUsageUpdatedEvent) {
-        guard let runId = event.runId, runId == activeStreamingRunId else { return }
-        guard let draftId = draftAssistantMessageId else { return }
-        guard let draftMessage = historyCoordinator.getDraftMessage(id: draftId) else { return }
-
-        historyCoordinator.setDraft(
-            ChatMessage(
-                id: draftMessage.id,
-                role: draftMessage.role,
-                content: draftMessage.content,
-                timestamp: draftMessage.timestamp,
-                context: ChatMessageContentContext(
-                    reasoning: draftMessage.reasoning,
-                    codeContext: draftMessage.codeContext
-                ),
-                billing: ChatMessageBillingContext(
-                    requestCostMicrodollars: event.usage.costMicrodollars,
-                    providerName: event.providerName,
-                    modelId: event.modelId,
-                    runId: event.runId
-                ),
-                tool: ChatMessageToolContext(
-                    toolName: draftMessage.toolName,
-                    toolStatus: draftMessage.toolStatus,
-                    target: ToolInvocationTarget(
-                        targetFile: draftMessage.targetFile,
-                        toolCallId: draftMessage.toolCallId
-                    ),
-                    toolCalls: draftMessage.toolCalls ?? []
-                ),
-                isDraft: draftMessage.isDraft
-            )
-        )
     }
 
     // MARK: - Observation
@@ -608,27 +466,22 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         ))
     }
 
-    // MARK: - State Reset
+    // MARK: - State Reset — forwarded to ConversationStreamingCoordinator
 
     private func resetStreamingDraftState() {
-        activeStreamingRunId = nil
-        draftAssistantMessageId = nil
-        lastRenderedDraftContent = ""
-        lastRenderedDraftReasoning = ""
-        outputBuffer.clear()
+        streamingCoordinator.resetStreamingDraftState()
     }
 
     /// Resets the streaming text buffer without clearing run state.
     /// Used when the local model tool loop needs to start fresh output.
     @MainActor
     func clearStreamingText() {
-        lastRenderedDraftContent = ""
-        lastRenderedDraftReasoning = ""
-        outputBuffer.clear()
+        streamingCoordinator.clearStreamingText()
     }
 
     private func resetConversationInteractionState() {
-        resetStreamingDraftState()
+        streamingCoordinator.resetStreamingDraftState()
+        streamingCoordinator.clearProviderIssue()
         isSending = false
         error = nil
         providerIssue = nil
@@ -664,9 +517,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
                 content: "",
                 isDraft: true
             )
-            self.draftAssistantMessageId = draftMessage.id
-            self.activeStreamingRunId = runId
-            self.historyCoordinator.setDraft(draftMessage)
+            self.streamingCoordinator.beginStreaming(runId: runId, draftId: draftMessage.id, draftMessage: draftMessage)
 
             let tools = self.currentMode.allowedTools(from: self.availableTools)
 
@@ -698,6 +549,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
                 self.historyCoordinator.clearDraft()
                 self.resetStreamingDraftState()
+                self.streamingCoordinator.clearProviderIssue()
                 self.providerIssue = nil
                 self.isSending = false
                 self.eventBus.publish(ConversationRunCompletedEvent(runId: runId))
@@ -821,8 +673,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         // Clean up any stale draft message from the history coordinator
         // so the next sendMessage() starts with a clean slate
         historyCoordinator.clearDraft()
-        draftAssistantMessageId = nil
-        activeStreamingRunId = nil
+        streamingCoordinator.clearProviderIssue()
         // Keep cancelledToolCallIds — the executor skips these before running;
         // the task cancellation itself aborts the remaining loop (see
         // ToolExecutionCoordinator). Wiping them here made Stop unable to stop.
