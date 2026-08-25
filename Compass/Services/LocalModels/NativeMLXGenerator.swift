@@ -87,8 +87,14 @@ actor NativeMLXGenerator: LocalModelGenerating {
         NativeMLXGenerator(eventBus: NoOpEventBus())
     }()
 
-    init(eventBus: EventBusProtocol) {
+    private let memoryMonitor: any EngineMemoryMonitoring
+
+    init(
+        eventBus: EventBusProtocol,
+        memoryMonitor: any EngineMemoryMonitoring = ProcessMemoryMonitor()
+    ) {
         self.eventBus = eventBus
+        self.memoryMonitor = memoryMonitor
         // Memory budget: do NOT clamp mlx's memoryLimit to a tiny hard cap —
         // malloc then blocks on every allocation over it (a 2.5GB model under
         // a 3GB limit made prefill/generation wait on scheduled tasks, ~4-10x
@@ -101,7 +107,8 @@ actor NativeMLXGenerator: LocalModelGenerating {
            let limitMB = Int(configured), limitMB > 0 {
             Memory.memoryLimit = limitMB * 1024 * 1024
         }
-        Task { await Self.logDeviceAndMemoryInfo() }
+        let monitorCopy = memoryMonitor
+        Task { await monitorCopy.logDeviceInfo() }
     }
 
     nonisolated static func logDeviceAndMemoryInfo() async {
@@ -166,7 +173,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         )
 
         let preparedUserInput = userInput
-        let rssLimitMB = Self.resolvedRSSLimitMB()
+        let rssLimitMB = memoryMonitor.resolvedLimitMB()
         let generationStart = ContinuousClock.now
 
         let parameters = GenerateParameters(
@@ -196,14 +203,14 @@ actor NativeMLXGenerator: LocalModelGenerating {
             )
 
             generationCount += 1
-            logMLXMemorySnapshot()
+            memoryMonitor.logSnapshot(generationCount: generationCount)
             persistPrefixCacheIfNeeded(
                 prefixCache: prefixCache,
                 modelDirectory: modelDirectory,
                 toolCallFormat: toolCallFormat,
                 inferenceConfiguration: inferenceConfiguration
             )
-            if Self.shouldUnloadModelAfterGeneration() {
+            if memoryMonitor.shouldUnloadAfterGeneration() {
                 unloadModel(modelDirectory: modelDirectory, reason: "post_generation_env_flag")
             }
 
@@ -447,13 +454,13 @@ nonisolated private static let maxPrefixCacheFiles = 8
     ) async throws -> AIServiceResponse {
         let defaultDevice = Device.defaultDevice()
         let deviceType = defaultDevice.deviceType?.rawValue ?? "unknown"
-        try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "before_container_load")
-        let rssBeforeLoadMB = Self.currentProcessRSSMB()
+        try memoryMonitor.throwIfExceeded(limitMB: rssLimitMB, phase: "before_container_load")
+        let rssBeforeLoadMB = memoryMonitor.currentRSSMB()
         let loadStart = ContinuousClock.now
         let container = try await loadContainerCached(modelDirectory: modelDirectory, toolCallFormat: toolCallFormat)
         let loadDuration = loadStart.duration(to: ContinuousClock.now)
-        let rssAfterLoadMB = Self.currentProcessRSSMB()
-        try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "after_container_load")
+        let rssAfterLoadMB = memoryMonitor.currentRSSMB()
+        try memoryMonitor.throwIfExceeded(limitMB: rssLimitMB, phase: "after_container_load")
         await AIToolTraceLogger.shared.log(type: "mlx.model_loaded", data: [
             "runId": runId ?? "",
             "modelId": modelId,
@@ -462,8 +469,9 @@ nonisolated private static let maxPrefixCacheFiles = 8
             "rssAfterLoadMB": rssAfterLoadMB
         ])
         let capturedInput = UnsafeValue(value: preparedUserInput)
+        let monitorForGen = memoryMonitor
         return try await container.perform { context in
-            try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "before_generation")
+            try monitorForGen.throwIfExceeded(limitMB: rssLimitMB, phase: "before_generation")
 
             let input = try await context.processor.prepare(input: capturedInput.value)
             let promptTokenCount = input.text.tokens.size
