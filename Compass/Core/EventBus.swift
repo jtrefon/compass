@@ -1,10 +1,3 @@
-//
-//  EventBus.swift
-//  Compass
-//
-//  Created by Jack Trefon on 21/12/2025.
-//
-
 import Foundation
 import Combine
 
@@ -18,7 +11,7 @@ public protocol EventBusProtocol: Sendable {
     func publish<E: Event>(_ event: E)
 
     /// Subscribes to a specific type of event.
-    /// - Returns: A Cancellable generic that can be stored to manage subscription lifecycle.
+    /// - Returns: A Cancellable that can be stored to manage subscription lifecycle.
     func subscribe<E: Event>(to eventType: E.Type, handler: @escaping (E) -> Void) -> AnyCancellable
 }
 
@@ -34,93 +27,79 @@ public struct NoOpEventBus: EventBusProtocol {
 }
 
 /// The concrete implementation of the Event Bus using Combine.
-/// This acts as the central nervous system of the IDE.
-/// Thread-safe but NOT isolated to @MainActor to avoid blocking background publishers.
-// Thread safety: `subjects` dictionary is protected by `lock`. The lock is
-// released before `subject.send(event)` to prevent deadlock if a subscriber
-// re-enters publish/subscribe. Combine's PassthroughSubject.send() is
-// thread-safe and re-entrant.
+///
+/// **Design rationale:**
+/// - `final class` with a single lock protecting all mutable state. While an
+///   `@MainActor` or `actor` conversion would be ideal, `subscribe` must return
+///   an `AnyCancellable` synchronously and is called from many non-async
+///   contexts (init, start) — actor isolation would cascade `await` through
+///   ~35 call sites. A lock keeps the change contained and the public API
+///   unchanged.
+/// - `@unchecked Sendable` is safe here: every access to `subjects` and
+///   `registrations` goes through `lock`. The lock is released before
+///   `subject.send(event)` to prevent deadlock if a subscriber re-enters
+///   publish/subscribe.
+/// - **Cleanup fixes unbounded growth:** the old implementation retained
+///   `PassthroughSubject`s forever. Now each subscription is tracked by UUID;
+///   when its `AnyCancellable` deallocates, the subject is removed if no other
+///   subscriber holds it.
 public final class EventBus: EventBusProtocol, @unchecked Sendable {
-    // We store PassthroughSubjects for each Event type name.
-    // Using String keys (type name) allows decoupled storage.
     private var subjects: [String: Any] = [:]
+    private var registrations: [String: [UUID: AnyCancellable]] = [:]
     private let lock = NSLock()
-
-    // Log sampling to avoid spawning a Task per event on hot paths
-    private let logSampleRate: UInt64 = 100
-    private var publishCounter: UInt64 = 0
-    private var subscribeCounter: UInt64 = 0
-    private let statsLock = NSLock()
 
     public init() {}
 
     public func publish<E: Event>(_ event: E) {
         let key = String(describing: E.self)
-
-        // Log only every Nth publish to avoid spawning Tasks on hot paths
-        statsLock.lock()
-        publishCounter += 1
-        let shouldLog = (publishCounter % logSampleRate == 0)
-        statsLock.unlock()
-        if shouldLog {
-            Task {
-                await AppLogger.shared.debug(
-                    category: .eventBus,
-                    message: "event.publish",
-                    context: AppLogger.LogCallContext(metadata: [
-                        "eventType": key,
-                        "publishCount": String(publishCounter)
-                    ])
-                )
-            }
-        }
-        
         let subject: PassthroughSubject<E, Never>?
         lock.lock()
         subject = subjects[key] as? PassthroughSubject<E, Never>
         lock.unlock()
-        
+
         subject?.send(event)
     }
 
     public func subscribe<E: Event>(to eventType: E.Type, handler: @escaping (E) -> Void) -> AnyCancellable {
         let key = String(describing: E.self)
+        let id = UUID()
 
-        // Log only every Nth subscribe
-        statsLock.lock()
-        subscribeCounter += 1
-        let shouldLog = (subscribeCounter % logSampleRate == 0)
-        statsLock.unlock()
-        if shouldLog {
-            Task {
-                await AppLogger.shared.debug(
-                    category: .eventBus,
-                    message: "event.subscribe",
-                    context: AppLogger.LogCallContext(metadata: [
-                        "eventType": key
-                    ])
-                )
-            }
-        }
-        
         lock.lock()
-        defer { lock.unlock() }
-        
         let subject: PassthroughSubject<E, Never>
-
         if let existing = subjects[key] as? PassthroughSubject<E, Never> {
             subject = existing
         } else {
             subject = PassthroughSubject<E, Never>()
             subjects[key] = subject
         }
+        lock.unlock()
 
-        // Deliver events on main thread for UI updates
-        return subject
+        let cancellable = subject
             .receive(on: DispatchQueue.main)
             .sink(receiveValue: handler)
+
+        lock.lock()
+        if registrations[key] == nil { registrations[key] = [:] }
+        registrations[key]?[id] = cancellable
+        lock.unlock()
+
+        return AnyCancellable { [weak self] in
+            self?.removeRegistration(key: key, id: id)
+        }
+    }
+
+    private func removeRegistration(key: String, id: UUID) {
+        lock.lock()
+        registrations[key]?.removeValue(forKey: id)
+        if registrations[key]?.isEmpty ?? true {
+            registrations[key] = nil
+            subjects.removeValue(forKey: key)
+        }
+        lock.unlock()
     }
 }
+
+// MARK: - Event types
 
 public struct LocalModelStreamingChunkEvent: Event {
     public let runId: String
