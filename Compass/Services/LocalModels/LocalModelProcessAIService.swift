@@ -107,14 +107,14 @@ actor LocalModelProcessAIService: AIService {
 
         // Chat generator participates in the registry so a single memory-
         // pressure pass unloads every inference container (chat + FIM).
-        InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.chatLabel) { [weak self] in
+        Task { await InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.chatLabel) { [weak self] in
             guard let self else { return }
             let persistDir = await self.lastProjectRoot?
                 .appendingPathComponent(".ide", isDirectory: true)
                 .appendingPathComponent("cache", isDirectory: true)
             await generatorForPressureHandling.unloadAllModels(
                 reason: "memory_pressure", persistKVTo: persistDir)
-        }
+        } }
 
         if !launchContext.isTesting {
             Task {

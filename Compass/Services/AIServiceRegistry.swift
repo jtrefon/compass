@@ -1,5 +1,14 @@
 import Foundation
 
+/// Registry of AI services per provider.
+///
+/// **Sendable safety:** `@unchecked Sendable` is justified here because the
+/// `services` dictionary is mutated ONLY during single-threaded setup
+/// (DependencyContainer.init / test factories) before any concurrent access
+/// occurs. After setup, all access is read-only (`service(for:)`,
+/// `allServices()`). The `providerSelectionStore` and `localSelectionStore`
+/// are themselves Sendable. A lock guards the rare concurrent read path as a
+/// defensive measure, but in practice reads happen after configuration completes.
 final class AIServiceRegistry: @unchecked Sendable {
     private let lock = NSLock()
     private var services: [AIProviderID: any AIService] = [:]
