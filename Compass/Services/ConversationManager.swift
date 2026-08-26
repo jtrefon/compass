@@ -92,6 +92,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     private var projectRoot: URL
     private let conversationLogger: ConversationLogger
     private let sessionManager: SessionManager
+    private let sessionCoordinator: ConversationSessionCoordinator
     private let settingsStore = SettingsStore(userDefaults: AppRuntimeEnvironment.userDefaults)
     private let activityCoordinator: AgentActivityCoordinating?
     /// Token for the current API sending activity
@@ -166,6 +167,10 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
             historyCoordinator: historyCoordinator,
             eventBus: dependencies.environment.eventBus
         )
+        self.sessionCoordinator = ConversationSessionCoordinator(
+            sessionManager: sessionManager,
+            historyCoordinator: historyCoordinator
+        )
         let fileEditorServiceProvider = fileEditorService
         self.toolExecutor = AIToolExecutor(
             fileSystemService: dependencies.services.fileSystemService,
@@ -200,8 +205,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         setupObservation()
         setupPowerManagementObservation()
         observeStreamingCoordinator()
-        observeSessionTabs()
-        observeHistoryMessages()
+        observeSessionCoordinator()
         startTraceLogging()
         configureLoggingStores(root: root)
         // Restore the last session's state (messages, mode, input)
@@ -217,29 +221,23 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     // MARK: - Session Management
 
-    private func observeSessionTabs() {
-        sessionManager.$conversationTabs
-            .sink { [weak self] tabs in
-                self?.conversationTabs = tabs
-            }
+    private func observeSessionCoordinator() {
+        sessionCoordinator.$conversationTabs
+            .sink { [weak self] tabs in self?.conversationTabs = tabs }
             .store(in: &cancellables)
-        sessionManager.$closedConversations
-            .sink { [weak self] closed in
-                self?.closedConversations = closed
-            }
+        sessionCoordinator.$closedConversations
+            .sink { [weak self] closed in self?.closedConversations = closed }
             .store(in: &cancellables)
-    }
-
-    private func observeHistoryMessages() {
-        historyCoordinator.$messages
-            .sink { [weak self] msgs in
-                self?.messages = msgs
-            }
+        sessionCoordinator.$messages
+            .sink { [weak self] msgs in self?.messages = msgs }
+            .store(in: &cancellables)
+        sessionCoordinator.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
     }
 
     private func saveCurrentSessionSnapshot() {
-        sessionManager.saveSnapshot(input: currentInput, mode: currentMode)
+        sessionCoordinator.saveCurrentSnapshot(input: currentInput, mode: currentMode)
     }
 
     private func updateCancelledToolCallIds(_ mutate: (inout Set<String>) -> Void) {
@@ -249,11 +247,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     private func restoreSession(_ sessionId: String) {
         updateCancelledToolCallIds { $0.removeAll() }
-        sessionManager.restoreSession(
-            sessionId,
-            input: &currentInput,
-            mode: &currentMode
-        )
+        sessionCoordinator.restoreSession(sessionId, input: &currentInput, mode: &currentMode)
     }
 
     private func observeStreamingCoordinator() {
@@ -356,11 +350,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
         clearConversation()
 
-        sessionManager.updateProjectRoot(
-            newRoot,
-            input: &currentInput,
-            mode: &currentMode
-        )
+        sessionCoordinator.updateProjectRoot(newRoot, input: &currentInput, mode: &currentMode)
 
         conversationLogger.initializeProjectRoot(newRoot, eventBus: eventBus)
         startTraceLogging()
@@ -602,7 +592,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         cancelActiveSendTask()
         resetConversationInteractionState()
         currentInput = ""
-        historyCoordinator.clearConversation()
+        sessionCoordinator.clearHistory()
         updateCancelledToolCallIds { $0.removeAll() }
     }
 
@@ -611,10 +601,10 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         resetConversationInteractionState()
         saveCurrentSessionSnapshot()
         currentInput = ""
-        historyCoordinator.clearConversation()
+        sessionCoordinator.clearHistory()
 
         let oldConversationId = sessionManager.selectedId
-        let newConversationId = sessionManager.startNew(
+        let newConversationId = sessionCoordinator.startNew(
             input: &currentInput,
             mode: &currentMode
         )
@@ -632,7 +622,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         cancelActiveSendTask()
         resetConversationInteractionState()
         saveCurrentSessionSnapshot()
-        guard sessionManager.switchTo(
+        guard sessionCoordinator.switchTo(
             id: id,
             input: &currentInput,
             mode: &currentMode
@@ -642,7 +632,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     func closeConversation(id: String) {
         cancelActiveSendTask()
         saveCurrentSessionSnapshot()
-        _ = sessionManager.close(
+        _ = sessionCoordinator.close(
             id: id,
             input: &currentInput,
             mode: &currentMode
@@ -654,7 +644,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         cancelActiveSendTask()
         resetConversationInteractionState()
         saveCurrentSessionSnapshot()
-        _ = sessionManager.recover(
+        _ = sessionCoordinator.recover(
             id: id,
             input: &currentInput,
             mode: &currentMode
@@ -663,7 +653,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
     /// Permanently removes a closed conversation from the recovery dropdown.
     func discardClosedConversation(id: String) {
-        sessionManager.discardClosed(id: id)
+        sessionCoordinator.discardClosed(id: id)
     }
 
     func stopGeneration() {
