@@ -54,10 +54,7 @@ struct PrefixCacheContext: Sendable {
 
 actor NativeMLXGenerator: LocalModelGenerating {
     private let eventBus: EventBusProtocol
-    private var containersByModelDirectory: [URL: ModelContainer] = [:]
-    private var inFlightLoads: [URL: Task<ModelContainer, Error>] = [:]
-    private var accessOrder: [URL] = []
-    private let maxCachedModels = 1
+    private let modelRepository: MLXModelRepository
     private var generationCount: Int = 0
     /// Generations currently executing; the unload path waits for these
     /// (defense in depth — the pressure handler already holds
@@ -91,10 +88,12 @@ actor NativeMLXGenerator: LocalModelGenerating {
 
     init(
         eventBus: EventBusProtocol,
-        memoryMonitor: any EngineMemoryMonitoring = ProcessMemoryMonitor()
+        memoryMonitor: any EngineMemoryMonitoring = ProcessMemoryMonitor(),
+        modelRepository: MLXModelRepository = MLXModelRepository()
     ) {
         self.eventBus = eventBus
         self.memoryMonitor = memoryMonitor
+        self.modelRepository = modelRepository
         // Memory budget: do NOT clamp mlx's memoryLimit to a tiny hard cap —
         // malloc then blocks on every allocation over it (a 2.5GB model under
         // a 3GB limit made prefill/generation wait on scheduled tasks, ~4-10x
@@ -211,7 +210,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 inferenceConfiguration: inferenceConfiguration
             )
             if memoryMonitor.shouldUnloadAfterGeneration() {
-                unloadModel(modelDirectory: modelDirectory, reason: "post_generation_env_flag")
+                await unloadModel(modelDirectory: modelDirectory, reason: "post_generation_env_flag")
             }
 
             return response
@@ -221,7 +220,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
             // dropped every conversation's KV cache. Only load-time/RSS
             // failures and explicit unload requests should tear it down.
             if !(error is CancellationError) && !Task.isCancelled {
-                unloadModel(modelDirectory: modelDirectory, reason: "generation_error")
+                await unloadModel(modelDirectory: modelDirectory, reason: "generation_error")
             }
             throw error
         }
@@ -878,9 +877,7 @@ nonisolated private static let maxPrefixCacheFiles = 8
         // after a critical-pressure unload.
         promptCacheByConversation.removeAll()
         promptCacheAccessOrder.removeAll()
-        containersByModelDirectory.removeAll()
-        inFlightLoads.removeAll()
-        accessOrder.removeAll()
+        await modelRepository.unloadAll()
         Memory.clearCache()
     }
 
@@ -905,66 +902,17 @@ nonisolated private static let maxPrefixCacheFiles = 8
         }
     }
 
-    func unloadModel(modelDirectory: URL, reason: String = "unknown") {
+    func unloadModel(modelDirectory: URL, reason: String = "unknown") async {
         synchronizeMLXStream()
-        let cacheKey = modelDirectory.resolvingSymlinksInPath().standardizedFileURL
-        containersByModelDirectory.removeValue(forKey: cacheKey)
-        inFlightLoads.removeValue(forKey: cacheKey)
-        accessOrder.removeAll { $0 == cacheKey }
+        await modelRepository.unload(modelDirectory: modelDirectory)
         promptCacheByConversation.removeAll()
         Memory.clearCache()
     }
 
     private func loadContainerCached(modelDirectory: URL, toolCallFormat: ToolCallFormat? = nil) async throws -> ModelContainer {
-        let cacheKey = modelDirectory.resolvingSymlinksInPath().standardizedFileURL
-
-        if let existing = containersByModelDirectory[cacheKey] {
-            accessOrder.removeAll { $0 == cacheKey }
-            accessOrder.append(cacheKey)
-            return existing
-        }
-
-        if let existingTask = inFlightLoads[cacheKey] {
-            return try await existingTask.value
-        }
-
-        if containersByModelDirectory.count >= maxCachedModels, let oldest = accessOrder.first {
-            containersByModelDirectory.removeValue(forKey: oldest)
-            accessOrder.removeFirst()
-        }
-
-        let configuration = ModelConfiguration(directory: cacheKey, toolCallFormat: toolCallFormat)
-        let loadTask = Task<ModelContainer, Error> {
-            try await self.loadModelContainer(
-                configuration: configuration,
-                modelDirectory: cacheKey
-            )
-        }
-        inFlightLoads[cacheKey] = loadTask
-
-        let container: ModelContainer
-        do {
-            container = try await loadTask.value
-        } catch {
-            inFlightLoads.removeValue(forKey: cacheKey)
-            throw error
-        }
-
-        inFlightLoads.removeValue(forKey: cacheKey)
-        containersByModelDirectory[cacheKey] = container
-        accessOrder.append(cacheKey)
-        return container
+        try await modelRepository.load(modelDirectory: modelDirectory, toolCallFormat: toolCallFormat)
     }
 
-    private func loadModelContainer(
-        configuration _: ModelConfiguration,
-        modelDirectory: URL
-    ) async throws -> ModelContainer {
-        let tokenizerLoader = LocalTokenizerLoader(directory: modelDirectory)
-        // Fixed chat model (Qwen3.5-4B) is text-only — always the LLM factory.
-        return try await LLMModelFactory.shared.loadContainer(
-            from: modelDirectory, using: tokenizerLoader)
-    }
 }
 
 /// Bridges the huggingface swift-transformers AutoTokenizer into the
