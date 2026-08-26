@@ -93,10 +93,9 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
     private let conversationLogger: ConversationLogger
     private let sessionManager: SessionManager
     private let sessionCoordinator: ConversationSessionCoordinator
+    private let lifecycleCoordinator: ConversationLifecycleCoordinator
     private let settingsStore = SettingsStore(userDefaults: AppRuntimeEnvironment.userDefaults)
     private let activityCoordinator: AgentActivityCoordinating?
-    /// Token for the current API sending activity
-    private var apiSendingActivityToken: AgentActivityToken?
     private lazy var toolProvider = ConversationToolProvider(
         fileSystemService: fileSystemService,
         eventBus: eventBus,
@@ -195,19 +194,23 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         }
 
         self.conversationLogger = ConversationLogger()
+        self.lifecycleCoordinator = ConversationLifecycleCoordinator(
+            conversationLogger: conversationLogger,
+            activityCoordinator: dependencies.services.activityCoordinator
+        )
 
         // Wire up streaming reset after all properties are initialized
         self.sendCoordinator.clearStreamingBuffer = { [weak self] in
             self?.clearStreamingText()
         }
 
-        initializeLogging(root: root)
+        lifecycleCoordinator.initializeLogging(root: root, eventBus: eventBus)
         setupObservation()
-        setupPowerManagementObservation()
+        lifecycleCoordinator.observeIsSending($isSending)
         observeStreamingCoordinator()
         observeSessionCoordinator()
-        startTraceLogging()
-        configureLoggingStores(root: root)
+        lifecycleCoordinator.startTraceLogging(root: root, currentMode: currentMode)
+        lifecycleCoordinator.configureLoggingStores(root: root)
         // Restore the last session's state (messages, mode, input)
         // so the app picks up where it left off on relaunch.
         // (§Fix: session persistence regression — restoreSession was never
@@ -267,57 +270,6 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
             .store(in: &cancellables)
     }
 
-    /// Observe isSending state to prevent system sleep during agent activity
-    /// Uses AgentActivityCoordinator for reference-counted power management
-    private func setupPowerManagementObservation() {
-        $isSending
-            .removeDuplicates()
-            .sink { [weak self] isSending in
-                guard let self, let coordinator = self.activityCoordinator else { return }
-
-                if isSending {
-                    // Begin API sending activity - token will be released when sending ends
-                    self.apiSendingActivityToken = coordinator.beginActivity(type: .apiSending)
-                } else {
-                    // End API sending activity
-                    self.apiSendingActivityToken?.end()
-                    self.apiSendingActivityToken = nil
-                }
-            }
-            .store(in: &cancellables)
-    }
-
-    private func initializeLogging(root: URL) {
-        conversationLogger.initializeProjectRoot(root, eventBus: eventBus)
-    }
-
-    private func startTraceLogging() {
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            let logPath = await AIToolTraceLogger.shared.currentLogFilePath()
-            await conversationLogger.logTraceStart(
-                mode: await currentMode.rawValue,
-                projectRootPath: await projectRoot.path,
-                logPath: logPath ?? ""
-            )
-        }
-    }
-
-    private func configureLoggingStores(root: URL) {
-        Task.detached(priority: .utility) {
-            // CRITICAL: Set project root for all loggers including AI trace
-            await AIToolTraceLogger.shared.setProjectRoot(root)
-            await AppLogger.shared.setProjectRoot(root)
-            FIMTraceLogger.shared.setProjectRoot(root)
-            await ConversationLogStore.shared.setProjectRoot(root)
-            await ExecutionLogStore.shared.setProjectRoot(root)
-            await ConversationIndexStore.shared.setProjectRoot(root)
-            await ConversationPlanStore.shared.setProjectRoot(root)
-            await PatchSetStore.shared.setProjectRoot(root)
-            await OrchestrationRunStore.shared.setProjectRoot(root)
-        }
-    }
-
     // MARK: - Dependency Updates
 
     func updateAIService(_ newService: AIService) {
@@ -344,7 +296,7 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
         projectRoot = newRoot
         toolExecutor.updateProjectRoot(newRoot)
-        configureLoggingStores(root: newRoot)
+        lifecycleCoordinator.configureLoggingStores(root: newRoot)
 
         saveCurrentSessionSnapshot()
 
@@ -352,8 +304,8 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
 
         sessionCoordinator.updateProjectRoot(newRoot, input: &currentInput, mode: &currentMode)
 
-        conversationLogger.initializeProjectRoot(newRoot, eventBus: eventBus)
-        startTraceLogging()
+        lifecycleCoordinator.initializeLogging(root: newRoot, eventBus: eventBus)
+        lifecycleCoordinator.startTraceLogging(root: newRoot, currentMode: currentMode)
         conversationLogger.logConversationStart(
             conversationId: self.conversationId,
             mode: self.currentMode.rawValue,
