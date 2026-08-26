@@ -66,17 +66,11 @@ actor NativeMLXGenerator: LocalModelGenerating {
     private var promptCacheByConversation: [String: PromptCacheEntry] = [:]
     private var savedPrefixCacheHashes: Set<String> = []
     /// LRU access order for eviction — Dictionary key iteration is hash-based,
-    /// so a naive keys.first eviction could drop the ACTIVE conversation's
-    /// cache while a stale one stays pinned.
+    private let kvCacheManager: MLXKVCacheManager
     private var promptCacheAccessOrder: [String] = []
-    /// KV caches pin hundreds of MB to GBs of memory per conversation; cap the
-    /// retained set so long sessions do not accumulate every conversation's
-    /// cache forever.
     private static let maxPromptCacheConversations = 1
 
     private func promptCacheKey(conversationId: String, modelDirectory: URL) -> String {
-        // Keyed by model too — a cross-model KV cache (different layer counts /
-        // head dims) would crash with a shape mismatch or silently corrupt output.
         "\(conversationId):\(modelDirectory.standardizedFileURL.path)"
     }
 
@@ -89,11 +83,13 @@ actor NativeMLXGenerator: LocalModelGenerating {
     init(
         eventBus: EventBusProtocol,
         memoryMonitor: any EngineMemoryMonitoring = ProcessMemoryMonitor(),
-        modelRepository: MLXModelRepository = MLXModelRepository()
+        modelRepository: MLXModelRepository = MLXModelRepository(),
+        kvCacheManager: MLXKVCacheManager = MLXKVCacheManager()
     ) {
         self.eventBus = eventBus
         self.memoryMonitor = memoryMonitor
         self.modelRepository = modelRepository
+        self.kvCacheManager = kvCacheManager
         // Memory budget: do NOT clamp mlx's memoryLimit to a tiny hard cap —
         // malloc then blocks on every allocation over it (a 2.5GB model under
         // a 3GB limit made prefill/generation wait on scheduled tasks, ~4-10x
