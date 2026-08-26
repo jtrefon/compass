@@ -79,6 +79,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
     }()
 
     private let memoryMonitor: any EngineMemoryMonitoring
+    private let generationService: MLXGenerationService
 
     init(
         eventBus: EventBusProtocol,
@@ -90,6 +91,12 @@ actor NativeMLXGenerator: LocalModelGenerating {
         self.memoryMonitor = memoryMonitor
         self.modelRepository = modelRepository
         self.kvCacheManager = kvCacheManager
+        self.generationService = MLXGenerationService(
+            modelRepository: modelRepository,
+            kvCacheManager: kvCacheManager,
+            memoryMonitor: memoryMonitor,
+            eventBus: eventBus
+        )
         // Memory budget: do NOT clamp mlx's memoryLimit to a tiny hard cap —
         // malloc then blocks on every allocation over it (a 2.5GB model under
         // a 3GB limit made prefill/generation wait on scheduled tasks, ~4-10x
