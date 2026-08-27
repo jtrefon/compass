@@ -10,12 +10,18 @@ struct OverlayHeaderView: View {
     let onClose: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: AppConstants.Layout.spacingSm) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: AppConstants.Layout.compactIconSize))
+                .foregroundStyle(AppConstants.Color.textSecondary)
+
             Text(title)
-                .font(.headline)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppConstants.Color.textSecondary)
 
             TextField(placeholder, text: $query)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(.body)
                 .frame(minWidth: textFieldMinWidth)
                 .onSubmit {
                     onSubmit()
@@ -23,12 +29,16 @@ struct OverlayHeaderView: View {
 
             if showsProgress {
                 ProgressView()
-                    .scaleEffect(0.75)
+                    .controlSize(.small)
             }
 
-            Button(NSLocalizedString("common.close", comment: "")) {
-                onClose()
-            }
+            IDEIconButton(
+                symbol: "xmark",
+                accessibilityLabel: NSLocalizedString("common.close", comment: ""),
+                action: onClose
+            )
         }
+        .padding(.horizontal, AppConstants.Layout.spacingSm)
+        .frame(height: AppConstants.Layout.headerHeight)
     }
 }

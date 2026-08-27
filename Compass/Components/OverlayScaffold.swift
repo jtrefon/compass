@@ -17,7 +17,7 @@ struct OverlayScaffold<Content: View>: View {
 
     var body: some View {
         OverlayCard {
-            VStack(spacing: 12) {
+            VStack(spacing: AppConstants.Layout.spacingMd) {
                 OverlayHeaderView(
                     title: configuration.title,
                     placeholder: configuration.placeholder,

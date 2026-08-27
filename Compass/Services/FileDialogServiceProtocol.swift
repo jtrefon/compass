@@ -2,7 +2,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 @MainActor
-protocol FileDialogServiceProtocol {
+public protocol FileDialogServiceProtocol {
     func openFileOrFolder() async -> URL?
     func openFolder() async -> URL?
     func saveFile(defaultFileName: String, allowedContentTypes: [UTType]) async -> URL?
