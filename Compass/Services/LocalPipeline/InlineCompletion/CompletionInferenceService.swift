@@ -27,7 +27,14 @@ final class AIServiceInlineCompletionProvider: InlineCompletionProviding {
     private var fimService: FIMInferenceService?
 
     init() {
-        registerForPressureUnload()
+        Task { await InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.fimLabel) { [weak self] in
+            if let fim = await MainActor.run(body: { self?.fimService }) {
+                await fim.unload()
+            }
+            await MainActor.run {
+                self?.fimService = nil
+            }
+        } }
     }
 
     func completeLocallyStreaming(
@@ -56,19 +63,6 @@ final class AIServiceInlineCompletionProvider: InlineCompletionProviding {
 
     func lastGeneratedFirstTokenID() async -> Int? {
         await fimService?.lastGeneratedFirstTokenID
-    }
-
-    /// Under memory pressure the chat generator unloads — the FIM container
-    /// must too, or the 1GB+ weights keep the process over budget.
-    private func registerForPressureUnload() {
-        InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.fimLabel) { [weak self] in
-            if let fim = await MainActor.run(body: { self?.fimService }) {
-                await fim.unload()
-            }
-            await MainActor.run {
-                self?.fimService = nil
-            }
-        }
     }
 
     private func resolveFIMService(modelId: String) async throws -> FIMInferenceService {

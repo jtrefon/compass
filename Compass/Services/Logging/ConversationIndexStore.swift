@@ -38,8 +38,7 @@ public actor ConversationIndexStore {
 
             // Write ONLY to project directory (no Application Support)
             if let projectIndexURL = projectIndexFileURL() {
-                try NDJSONLogFileWriter.ensureDirectoryExists(for: projectIndexURL)
-                try NDJSONLogFileWriter.append(line: line, to: projectIndexURL)
+                await NDJSONAppendStore.shared.append(line, to: projectIndexURL)
             }
         } catch {
             await CrashReporter.shared.capture(
