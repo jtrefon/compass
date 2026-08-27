@@ -34,7 +34,7 @@ public actor ExecutionLogStore {
             line.append(json)
             line.append(Data("\n".utf8))
 
-            try ConversationScopedNDJSONStore.appendLine(
+            try await ConversationScopedNDJSONStore.appendLine(
                 line,
                 conversationId: conversationId,
                 fileName: "executions.ndjson",

@@ -25,37 +25,37 @@ final class DatabaseManagerTests: XCTestCase {
         "docs/guide.md"
     ]
 
-    private func insertResource(id: String, path: String, qualityScore: Double, aiEnriched: Bool) throws {
+    private func insertResource(id: String, path: String, qualityScore: Double, aiEnriched: Bool) async throws {
         if aiEnriched {
             let sql = """
             INSERT INTO resources (id, path, language, last_modified, content_hash, quality_score, ai_enriched)
             VALUES (?, ?, ?, ?, ?, ?, 1);
             """
-            try dbManager.execute(
+            try await dbManager.execute(
                 sql: sql,
                 parameters: [id, path, "swift", 0.0, "hash", qualityScore]
             )
             return
         }
 
-        try dbManager.execute(
+        try await dbManager.execute(
             sql: insertResourceSQL,
             parameters: [id, path, "swift", 0.0, "hash", qualityScore]
         )
     }
 
-    private func insertResource(path: String, qualityScore: Double = 7.5) throws {
-        try insertResource(id: UUID().uuidString, path: path, qualityScore: qualityScore, aiEnriched: false)
+    private func insertResource(path: String, qualityScore: Double = 7.5) async throws {
+        try await insertResource(id: UUID().uuidString, path: path, qualityScore: qualityScore, aiEnriched: false)
     }
 
-    private func insertResources(paths: [String]) throws {
+    private func insertResources(paths: [String]) async throws {
         for path in paths {
-            try insertResource(path: path)
+            try await insertResource(path: path)
         }
     }
 
-    private func insertAIEnrichedResource(path: String, qualityScore: Double) throws {
-        try insertResource(id: UUID().uuidString, path: path, qualityScore: qualityScore, aiEnriched: true)
+    private func insertAIEnrichedResource(path: String, qualityScore: Double) async throws {
+        try await insertResource(id: UUID().uuidString, path: path, qualityScore: qualityScore, aiEnriched: true)
     }
 
     override func setUp() async throws {
@@ -71,66 +71,68 @@ final class DatabaseManagerTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testListResourcePaths_noResults() throws {
-        let results = try dbManager.listResourcePaths(matching: nil, limit: 10, offset: 0)
+    func testListResourcePaths_noResults() async throws {
+        let results = try await dbManager.listResourcePaths(matching: nil, limit: 10, offset: 0)
         XCTAssertTrue(results.isEmpty)
     }
 
-    func testListResourcePaths_withInserts() throws {
+    func testListResourcePaths_withInserts() async throws {
         // Insert some test resources
-        try insertResources(paths: samplePaths)
+        try await insertResources(paths: samplePaths)
 
-        let results = try dbManager.listResourcePaths(matching: nil, limit: 10, offset: 0)
+        let results = try await dbManager.listResourcePaths(matching: nil, limit: 10, offset: 0)
         XCTAssertEqual(results.count, 4)
         XCTAssertTrue(results.contains("src/main.swift"))
         XCTAssertTrue(results.contains("README.md"))
     }
 
-    func testListResourcePaths_withFilter() throws {
-        try insertResources(paths: samplePaths)
+    func testListResourcePaths_withFilter() async throws {
+        try await insertResources(paths: samplePaths)
 
-        let results = try dbManager.listResourcePaths(matching: "swift", limit: 10, offset: 0)
+        let results = try await dbManager.listResourcePaths(matching: "swift", limit: 10, offset: 0)
         XCTAssertEqual(results.count, 2)
         XCTAssertTrue(results.allSatisfy { $0.contains("swift") })
     }
 
-    func testHasResourcePath() throws {
+    func testHasResourcePath() async throws {
         let path = "src/main.swift"
 
-        try insertResource(path: path)
+        try await insertResource(path: path)
 
-        XCTAssertTrue(try dbManager.hasResourcePath(path))
-        XCTAssertFalse(try dbManager.hasResourcePath("src/nonexistent.swift"))
+        let hasPath = try await dbManager.hasResourcePath(path)
+        let missingPath = try await dbManager.hasResourcePath("src/nonexistent.swift")
+        XCTAssertTrue(hasPath)
+        XCTAssertFalse(missingPath)
     }
 
-    func testFindResourceMatches() throws {
-        try insertResources(paths: samplePaths)
+    func testFindResourceMatches() async throws {
+        try await insertResources(paths: samplePaths)
 
-        let results = try dbManager.findResourceMatches(query: "swift", limit: 10)
+        let results = try await dbManager.findResourceMatches(query: "swift", limit: 10)
         XCTAssertEqual(results.count, 2)
         XCTAssertTrue(results.allSatisfy { $0.path.contains("swift") })
         XCTAssertTrue(results.allSatisfy { $0.aiEnriched == false })
         XCTAssertEqual(results.first?.qualityScore, 7.5)
     }
 
-    func testFindResourceMatches_withAIEnriched() throws {
+    func testFindResourceMatches_withAIEnriched() async throws {
         let path = "src/ai_enriched.swift"
 
-        try insertAIEnrichedResource(path: path, qualityScore: 9.2)
+        try await insertAIEnrichedResource(path: path, qualityScore: 9.2)
 
-        let results = try dbManager.findResourceMatches(query: "ai_enriched", limit: 10)
+        let results = try await dbManager.findResourceMatches(query: "ai_enriched", limit: 10)
         XCTAssertEqual(results.count, 1)
         XCTAssertTrue(results.first?.aiEnriched == true)
         XCTAssertEqual(results.first?.qualityScore, 9.2)
     }
 
-    func testSchemaTablesExist() throws {
-        // Validate all expected tables were created by DatabaseSchemaManager.
+    func testSchemaTablesExist() async throws {
+        // Validate all expected tables were created by the schema initializer.
         // A missing CREATE TABLE or syntax error in the schema SQL causes
         // DatabaseManager.init to throw on startup, crashing the app.
         for table in ["resources", "symbols", "symbol_names", "symbol_details", "symbol_locations"] {
             let sql = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?;"
-            let count = try dbManager.scalarInt(sql: sql, parameters: [table])
+            let count = try await dbManager.scalarInt(sql: sql, parameters: [table])
             XCTAssertEqual(count, 1, "Expected table '\(table)' to exist in schema")
         }
     }}

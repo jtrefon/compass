@@ -17,4 +17,11 @@ enum AppConstantsSettings {
     static let statusTextSize: CGFloat = 12
 
     static let contentTopPadding: CGFloat = 4
+
+    static let windowMinWidth: CGFloat = 720
+    static let windowIdealWidth: CGFloat = 760
+    static let windowMinHeight: CGFloat = 560
+    static let windowIdealHeight: CGFloat = 620
+    static let dialogSheetWidth: CGFloat = 320
 }
+
