@@ -484,6 +484,13 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 )
             }
             let promptTokenIds = input.text.tokens.asArray(Int.self)
+            // Publish initial context estimate for live status bar (mirrors cloud path)
+            if let runId {
+                let initialEstimate = promptTokenCount
+                Task { @MainActor in
+                    eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: initialEstimate))
+                }
+            }
             await AIToolTraceLogger.shared.log(type: "mlx.prompt_prepared", data: [
                 "runId": runId ?? "",
                 "modelId": modelId,
@@ -665,6 +672,13 @@ nonisolated private static let maxPrefixCacheFiles = 8
                     if result.chunkCount == 1 || result.chunkCount % 8 == 0 {
                         eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: text))
                     }
+                    // Live context: update estimate every 8 chunks (mirrors cloud)
+                    if result.chunkCount % 8 == 0 {
+                        let estimate = input.text.tokens.size + recorder.tokenIDs.count
+                        Task { @MainActor in
+                            eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: estimate))
+                        }
+                    }
                 }
             case .info:
                 if case .info(let info) = generation {
@@ -676,6 +690,12 @@ nonisolated private static let maxPrefixCacheFiles = 8
         }
 
         result.generatedTokenIds = recorder.tokenIDs
+        if let runId {
+            let finalEstimate = input.text.tokens.size + recorder.tokenIDs.count
+            Task { @MainActor in
+                eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: finalEstimate, isFinal: true))
+            }
+        }
         return result
     }
 
