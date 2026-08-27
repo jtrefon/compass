@@ -63,7 +63,7 @@ public actor CodebaseIndexInitializationState {
 public class CodebaseIndex: CodebaseIndexProtocol, @unchecked Sendable {
     let eventBus: EventBusProtocol
     let coordinator: IndexCoordinator
-    public let database: DatabaseStore
+    public let database: DatabaseManager
     let indexer: IndexerActor
     let queryService: QueryService
     let aiService: AIService
@@ -95,7 +95,7 @@ public class CodebaseIndex: CodebaseIndexProtocol, @unchecked Sendable {
             storageDirectoryPath: resolvedConfig.configuration.storageDirectoryPath
         )
 
-        self.database = try DatabaseStore(path: dbPath)
+        self.database = try DatabaseManager(path: dbPath)
         self.indexer = IndexerActor(
             database: database,
             config: resolvedConfig.configuration,
@@ -161,8 +161,8 @@ public class CodebaseIndex: CodebaseIndexProtocol, @unchecked Sendable {
             storageDirectoryPath: resolvedConfig.configuration.storageDirectoryPath
         )
 
-        let tempDatabase: DatabaseStore = (try? DatabaseStore(path: dbPath))
-            ?? (try! DatabaseStore(path: NSTemporaryDirectory() + "codebase-index-\(UUID().uuidString).db"))
+        let tempDatabase: DatabaseManager = (try? DatabaseManager(path: dbPath))
+            ?? (try! DatabaseManager(path: NSTemporaryDirectory() + "codebase-index-\(UUID().uuidString).db"))
 
         let index = CodebaseIndex(
             eventBus: eventBus,
@@ -180,7 +180,7 @@ public class CodebaseIndex: CodebaseIndexProtocol, @unchecked Sendable {
         eventBus: EventBusProtocol,
         projectRoot: URL,
         aiService: AIService,
-        database: DatabaseStore,
+        database: DatabaseManager,
         config: ResolvedIndexConfiguration
     ) {
         let initStart = Date()
