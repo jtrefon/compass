@@ -201,7 +201,8 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 modelId: modelId, modelDirectory: modelDirectory, toolCallFormat: toolCallFormat,
                 runId: runId, preparedUserInput: preparedUserInput, rssLimitMB: rssLimitMB,
                 generationStart: generationStart, parameters: parameters, eventBus: eventBus,
-                cacheEntry: cacheEntry, inferenceConfiguration: inferenceConfiguration
+                cacheEntry: cacheEntry, inferenceConfiguration: inferenceConfiguration,
+                conversationId: conversationId
             )
 
             generationCount += 1
@@ -452,7 +453,8 @@ nonisolated private static let maxPrefixCacheFiles = 8
         parameters: GenerateParameters,
         eventBus: EventBusProtocol,
         cacheEntry: PromptCacheEntry?,
-        inferenceConfiguration: LocalModelInferenceConfiguration
+        inferenceConfiguration: LocalModelInferenceConfiguration,
+        conversationId: String?
     ) async throws -> AIServiceResponse {
         let defaultDevice = Device.defaultDevice()
         let deviceType = defaultDevice.deviceType?.rawValue ?? "unknown"
@@ -484,11 +486,15 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 )
             }
             let promptTokenIds = input.text.tokens.asArray(Int.self)
-            // Publish initial context estimate for live status bar (mirrors cloud path)
+            // Publish initial context estimate for live status bar (prompt-only, window from inference config)
             if let runId {
                 let initialEstimate = promptTokenCount
+                let windowTokens = inferenceConfiguration.contextLength
                 Task { @MainActor in
-                    eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: initialEstimate))
+                    eventBus.publish(StreamingContextUsageEvent(
+                        runId: runId, estimatedPromptTokens: initialEstimate,
+                        windowTokens: windowTokens, conversationId: conversationId
+                    ))
                 }
             }
             await AIToolTraceLogger.shared.log(type: "mlx.prompt_prepared", data: [
@@ -670,9 +676,12 @@ nonisolated private static let maxPrefixCacheFiles = 8
                     eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: text))
                     // Live context: update estimate every chunk (was throttled 8, now live)
                     if result.chunkCount % 4 == 0 {
-                        let estimate = input.text.tokens.size + recorder.tokenIDs.count
+                        let estimate = input.text.tokens.size
                         Task { @MainActor in
-                            eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: estimate))
+                            eventBus.publish(StreamingContextUsageEvent(
+                                runId: runId, estimatedPromptTokens: estimate,
+                                windowTokens: nil, conversationId: nil
+                            ))
                         }
                     }
                 }
@@ -687,9 +696,12 @@ nonisolated private static let maxPrefixCacheFiles = 8
 
         result.generatedTokenIds = recorder.tokenIDs
         if let runId {
-            let finalEstimate = input.text.tokens.size + recorder.tokenIDs.count
+            let finalEstimate = input.text.tokens.size
             Task { @MainActor in
-                eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: finalEstimate, isFinal: true))
+                eventBus.publish(StreamingContextUsageEvent(
+                    runId: runId, estimatedPromptTokens: finalEstimate,
+                    windowTokens: nil, conversationId: nil, isFinal: true
+                ))
             }
         }
         return result
@@ -764,9 +776,7 @@ nonisolated private static let maxPrefixCacheFiles = 8
     }
 
     func preload(modelId: String, modelDirectory: URL, toolCallFormat: ToolCallFormat?) async throws {
-        let loadStart = ContinuousClock.now
         _ = try await loadContainerCached(modelDirectory: modelDirectory, toolCallFormat: toolCallFormat)
-        let loadDuration = loadStart.duration(to: ContinuousClock.now)
     }
 
     private func synchronizeMLXStream() {

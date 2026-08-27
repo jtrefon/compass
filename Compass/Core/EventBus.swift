@@ -133,11 +133,21 @@ public struct LocalModelStreamingReasoningChunkEvent: Event {
 public struct StreamingContextUsageEvent: Event {
     public let runId: String
     public let estimatedPromptTokens: Int
+    public let windowTokens: Int?
+    public let conversationId: String?
     public let isFinal: Bool
 
-    public init(runId: String, estimatedPromptTokens: Int, isFinal: Bool = false) {
+    public init(
+        runId: String,
+        estimatedPromptTokens: Int,
+        windowTokens: Int? = nil,
+        conversationId: String? = nil,
+        isFinal: Bool = false
+    ) {
         self.runId = runId
         self.estimatedPromptTokens = estimatedPromptTokens
+        self.windowTokens = windowTokens
+        self.conversationId = conversationId
         self.isFinal = isFinal
     }
 }

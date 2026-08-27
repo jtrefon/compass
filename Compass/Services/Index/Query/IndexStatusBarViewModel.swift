@@ -37,10 +37,13 @@ final class IndexStatusBarViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var statsTimer: AnyCancellable?
     private var accumulatedRemoteCostMicrodollars: Int = 0
-    /// Real cumulative prompt tokens from completed API responses
-    private var accumulatedPromptTokens: Int = 0
-    /// Streaming estimate for the current in-flight response
-    private var streamingPromptEstimate: Int = 0
+    /// Single gauge state — displayTokens is what CTX shows, windowTokens is the window.
+    /// Replaces the 6-var dual-gauge (accumulatedPromptTokens, streamingPromptEstimate,
+    /// accumulatedCompletionTokens, lastUsageRunId, usageSeenForCurrentRun,
+    /// observedContextWindowTokens, observedLocalWindowTokens).
+    private var displayTokens: Int = 0
+    private var windowTokens: Int = 0
+    private var lastRunId: String?
     private let tokenRateTracker = TokenRateTracker()
 
     init(
@@ -225,27 +228,17 @@ final class IndexStatusBarViewModel: ObservableObject {
 
         eventBus.subscribe(to: StreamingContextUsageEvent.self) { [weak self] event in
             guard let self else { return }
+            if let window = event.windowTokens, window > 0 {
+                self.windowTokens = window
+            }
             if event.isFinal {
-                if !self.usageSeenForCurrentRun {
-                    self.accumulatedPromptTokens = event.estimatedPromptTokens
-                }
-                self.streamingPromptEstimate = 0
+                self.displayTokens = event.estimatedPromptTokens
             } else {
-                if event.runId != self.lastUsageRunId {
-                    self.lastUsageRunId = event.runId
-                    self.usageSeenForCurrentRun = false
-                    // Don't reset accumulated — it holds the previous run's
-                    // authoritative total. Streaming estimate is per-run, but
-                    // the display is total = accumulated + streaming, so a new
-                    // run's streaming should start from 0 and grow, not reset
-                    // the whole gauge to the new run's prompt alone. The old
-                    // total remains visible until the new run's first chunk.
-                    // To avoid the 100→21k→900 jump, keep streaming monotonic.
-                    self.streamingPromptEstimate = event.estimatedPromptTokens
+                if event.runId != self.lastRunId {
+                    self.lastRunId = event.runId
+                    self.displayTokens = event.estimatedPromptTokens
                 } else {
-                    // Monotonic: never let live estimate go down (handles reordered
-                    // or small estimates from a new iteration's initial 100-token probe)
-                    self.streamingPromptEstimate = max(self.streamingPromptEstimate, event.estimatedPromptTokens)
+                    self.displayTokens = max(self.displayTokens, event.estimatedPromptTokens)
                 }
             }
             self.updateContextDisplay()
@@ -254,15 +247,11 @@ final class IndexStatusBarViewModel: ObservableObject {
 
         eventBus.subscribe(to: OpenRouterUsageUpdatedEvent.self) { [weak self] event in
             guard let self else { return }
-            // Real token count from the API response — the authoritative
-            // per-run numbers (assignment, not accumulation).
-            self.accumulatedPromptTokens = event.usage.promptTokens
-            self.accumulatedCompletionTokens = event.usage.completionTokens
-            self.usageSeenForCurrentRun = true
-            self.streamingPromptEstimate = 0
+            self.displayTokens = event.usage.promptTokens + event.usage.completionTokens
             if let contextLength = event.contextLength, contextLength > 0 {
-                self.observedContextWindowTokens = contextLength
+                self.windowTokens = contextLength
             }
+            self.lastRunId = nil
             self.updateContextDisplay()
             self.remoteAICostText = self.formatRemoteCost(
                 providerName: event.providerName,
@@ -286,21 +275,17 @@ final class IndexStatusBarViewModel: ObservableObject {
 
         eventBus.subscribe(to: ConversationContextEvent.self) { [weak self] event in
             guard let self else { return }
-            // Convert chars to estimated tokens (4 chars ≈ 1 token) for consistency
-            // with the remote display which reports actual token counts.
-            let estTokens = max(1, event.totalCharCount / 4)
             if let windowChars = event.contextWindowChars {
                 let windowTokens = max(1, windowChars / 4)
-                let used = min(estTokens, windowTokens)
-                self.localModelContextUsageText = "CTX \(Self.formatTokenCount(used))/\(Self.formatTokenCount(windowTokens))"
-                // Also store for openRouter live display when local is active
-                // (local now publishes StreamingContextUsageEvent which drives openRouter path)
-                self.observedLocalWindowTokens = windowTokens
-            } else {
-                self.localModelContextUsageText = "CTX ~\(Self.formatTokenCount(estTokens)) · \(event.messageCount) msgs"
-            }
-            if let ratio = event.compressionRatio {
-                self.localModelContextUsageText += " · \(String(format: "%.1fx", ratio))"
+                self.windowTokens = windowTokens
+                // Keep localModelContextUsageText for diagnostics, but the gauge
+                // is now driven solely by StreamingContextUsageEvent / OpenRouterUsageUpdatedEvent
+                // via displayTokens. This handler just ensures window is known before first stream.
+                self.localModelContextUsageText = "CTX \(Self.formatTokenCount(min(max(1, event.totalCharCount / 4), windowTokens)))/\(Self.formatTokenCount(windowTokens))"
+                if let ratio = event.compressionRatio {
+                    self.localModelContextUsageText += " · \(String(format: "%.1fx", ratio))"
+                }
+                self.updateContextDisplay()
             }
         }
         .store(in: &cancellables)
@@ -400,34 +385,14 @@ final class IndexStatusBarViewModel: ObservableObject {
         return String(format: "%.1fM", k / 1000.0)
     }
 
-    /// Update the context display with the current accumulated + streaming estimate
+    /// Single gauge — window set once per run via StreamingContextUsageEvent / OpenRouterUsageUpdatedEvent.
     private func updateContextDisplay() {
-        let total = accumulatedPromptTokens + accumulatedCompletionTokens + streamingPromptEstimate
-        // For local, use the last known local window (from ConversationContextEvent, 130k slider)
-        // not the cloud 262k fallback. observedLocalWindowTokens is set via ConversationContextEvent.
-        let windowTokens: Int
-        if observedContextWindowTokens > 0 {
-            windowTokens = observedContextWindowTokens
-        } else if observedLocalWindowTokens > 0 {
-            windowTokens = observedLocalWindowTokens
-        } else {
-            let ceOverride = CustomEndpointSettingsStore().load(includeApiKey: false).contextOverride
-            windowTokens = ceOverride > 0 ? ceOverride : 262_000
-        }
-        let used = min(total, windowTokens)
-        openRouterContextUsageText = "CTX \(Self.formatTokenCount(used))/\(Self.formatTokenCount(windowTokens))"
+        let window = windowTokens > 0 ? windowTokens : 262_000
+        let used = min(displayTokens, window)
+        let text = "CTX \(Self.formatTokenCount(used))/\(Self.formatTokenCount(window))"
+        openRouterContextUsageText = text
+        localModelContextUsageText = text
     }
-
-    /// Completion tokens reported by the provider (displayed alongside prompt tokens).
-    private var accumulatedCompletionTokens = 0
-    /// runId of the run currently shown — a new run resets the totals.
-    private var lastUsageRunId: String?
-    /// Whether the authoritative usage event arrived for the current run.
-    private var usageSeenForCurrentRun = false
-    /// Context window (tokens) reported by the provider in the last usage event.
-    private var observedContextWindowTokens = 0
-    /// Local window (tokens) from ConversationContextEvent — 130k slider, not 262k cloud default.
-    private var observedLocalWindowTokens = 0
 
     private static func formatTokenCount(_ count: Int) -> String {
         if count < 1000 { return "\(count)" }
