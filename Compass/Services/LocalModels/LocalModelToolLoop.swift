@@ -78,6 +78,9 @@ final class LocalModelToolLoop {
         var consecutiveRepetitions = 0
 
         repeat {
+            if iteration > 0 {
+                history.clearStreamingBuffer()
+            }
             let stage: AIRequestStage? = iteration > 0 ? .tool_loop : nil
 
             await logger.logIterationStart(

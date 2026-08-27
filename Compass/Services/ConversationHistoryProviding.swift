@@ -34,4 +34,8 @@ protocol ConversationHistoryProviding: Sendable {
 
     /// Clear a live tool execution status message by tool call ID.
     func clearLiveToolMessage(_ toolCallId: String)
+
+    /// Clear the streaming text buffer (outputBuffer) so the next generation
+    /// starts fresh and doesn't append to the previous content.
+    func clearStreamingBuffer()
 }

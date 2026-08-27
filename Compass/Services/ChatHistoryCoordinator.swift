@@ -44,6 +44,12 @@ final class ChatHistoryCoordinator: ObservableObject {
     /// SwiftUI observes this. Never sent to the model — use `allMessages` for that.
     @Published private(set) var messages: [ChatMessage] = []
 
+    // Streaming buffer lives here so `clearStreamingBuffer()` can reset it
+    // without the history needing a back-reference to the coordinator.
+    private let streamingBuffer = StreamingOutputBuffer()
+    private var lastStreamingContent = ""
+    private var lastStreamingReasoning = ""
+
     // MARK: - Envelope
 
     private var envelope: ConversationEnvelope
@@ -165,6 +171,37 @@ final class ChatHistoryCoordinator: ObservableObject {
         liveToolMessages.removeValue(forKey: toolCallId)
         liveToolStatus.removeValue(forKey: toolCallId)
         recompose()
+    }
+
+    func clearStreamingBuffer() {
+        streamingBuffer.clear()
+        lastStreamingContent = ""
+        lastStreamingReasoning = ""
+    }
+
+    // MARK: - Streaming helpers (used by ConversationStreamingCoordinator)
+
+    func appendStreamingContent(_ chunk: String) -> (content: String, reasoning: String?) {
+        streamingBuffer.appendContent(chunk)
+        streamingBuffer.flushClassification()
+        let content = streamingBuffer.hasContent ? streamingBuffer.content : ""
+        let reasoning: String? = streamingBuffer.hasReasoning ? streamingBuffer.reasoning : nil
+        let shouldUpdate = content != lastStreamingContent || reasoning != lastStreamingReasoning
+        guard shouldUpdate else { return (lastStreamingContent, lastStreamingReasoning.isEmpty ? nil : lastStreamingReasoning) }
+        lastStreamingContent = content
+        lastStreamingReasoning = reasoning ?? ""
+        return (content, reasoning)
+    }
+
+    func appendStreamingReasoning(_ chunk: String) -> (content: String, reasoning: String?) {
+        streamingBuffer.appendReasoning(chunk)
+        let content = streamingBuffer.hasContent ? streamingBuffer.content : ""
+        let reasoning: String? = streamingBuffer.hasReasoning ? streamingBuffer.reasoning : nil
+        let shouldUpdate = content != lastStreamingContent || reasoning != lastStreamingReasoning
+        guard shouldUpdate else { return (lastStreamingContent, lastStreamingReasoning.isEmpty ? nil : lastStreamingReasoning) }
+        lastStreamingContent = content
+        lastStreamingReasoning = reasoning ?? ""
+        return (content, reasoning)
     }
 
     // MARK: - Display composition

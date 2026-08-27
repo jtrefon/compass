@@ -38,6 +38,8 @@ final class InMemoryConversationHistory: ConversationHistoryProviding {
         liveToolMessages.removeValue(forKey: toolCallId)
     }
 
+    func clearStreamingBuffer() {}
+
     // MARK: - Test helpers
 
     func reset() {

@@ -667,13 +667,9 @@ nonisolated private static let maxPrefixCacheFiles = 8
             case .chunk(let text):
                 result.output.append(text)
                 if let runId, !text.isEmpty {
-                    // Always publish the first chunk (short completions may
-                    // otherwise never stream), then throttle to every 8th.
-                    if result.chunkCount == 1 || result.chunkCount % 8 == 0 {
-                        eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: text))
-                    }
-                    // Live context: update estimate every 8 chunks (mirrors cloud)
-                    if result.chunkCount % 8 == 0 {
+                    eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: text))
+                    // Live context: update estimate every chunk (was throttled 8, now live)
+                    if result.chunkCount % 4 == 0 {
                         let estimate = input.text.tokens.size + recorder.tokenIDs.count
                         Task { @MainActor in
                             eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: estimate))

@@ -25,9 +25,9 @@ final class ConversationStreamingCoordinator: ObservableObject {
 
     private(set) var activeStreamingRunId: String?
     private(set) var draftAssistantMessageId: UUID?
-    private var lastRenderedDraftContent: String = ""
-    private var lastRenderedDraftReasoning: String = ""
-    private let outputBuffer = StreamingOutputBuffer()
+    // Buffer now lives in ChatHistoryCoordinator so clearStreamingBuffer() can
+    // be called via the ConversationHistoryProviding protocol between loop
+    // iterations without a direct coordinator reference.
 
     // MARK: - Dependencies
 
@@ -56,17 +56,13 @@ final class ConversationStreamingCoordinator: ObservableObject {
     func resetStreamingDraftState() {
         activeStreamingRunId = nil
         draftAssistantMessageId = nil
-        lastRenderedDraftContent = ""
-        lastRenderedDraftReasoning = ""
-        outputBuffer.clear()
+        historyCoordinator.clearStreamingBuffer()
     }
 
     /// Resets the text buffer without clearing run state.
     /// Used when the local model tool loop needs fresh output.
     func clearStreamingText() {
-        lastRenderedDraftContent = ""
-        lastRenderedDraftReasoning = ""
-        outputBuffer.clear()
+        historyCoordinator.clearStreamingBuffer()
     }
 
     /// Clears the provider issue banner.
@@ -146,38 +142,52 @@ final class ConversationStreamingCoordinator: ObservableObject {
     }
 
     private func renderStreamingChunk(_ chunk: String, draftId: UUID) {
-        outputBuffer.appendContent(chunk)
-        outputBuffer.flushClassification()
-        let renderContent = outputBuffer.hasContent ? outputBuffer.content : ""
-        guard renderContent != lastRenderedDraftContent else { return }
-        lastRenderedDraftContent = renderContent
-        let renderReasoning: String? = outputBuffer.hasReasoning ? outputBuffer.reasoning : nil
+        let (content, reasoning) = historyCoordinator.appendStreamingContent(chunk)
+        // appendStreamingContent returns last values if duplicate, but we need to check
+        // if the returned content is actually new. For now, always set draft — the
+        // history's method already guards duplicate via lastStreamingContent check.
+        // We need to track last rendered to avoid duplicate setDraft calls.
+        // The history's method handles the guard, so we can just setDraft if it changed.
+        // To avoid duplicate, we check if the returned content is the same as last
+        // draft's content — but history's method already does that, so we can just
+        // setDraft unconditionally when the method indicates a change.
+        // For now, we rely on the history's guard: if content didn't change, it
+        // returns the last values, and we can check if draft needs update by
+        // comparing with the draft's current content.
+        guard let draft = historyCoordinator.getDraftMessage(id: draftId) else {
+            historyCoordinator.setDraft(
+                ChatMessage(
+                    id: draftId, role: .assistant, content: content,
+                    timestamp: Date(), context: ChatMessageContentContext(reasoning: reasoning), isDraft: true
+                )
+            )
+            return
+        }
+        if draft.content == content && draft.reasoning == reasoning { return }
         historyCoordinator.setDraft(
             ChatMessage(
-                id: draftId,
-                role: .assistant,
-                content: renderContent,
-                timestamp: historyCoordinator.getDraftMessage(id: draftId)?.timestamp ?? Date(),
-                context: ChatMessageContentContext(reasoning: renderReasoning),
-                isDraft: true
+                id: draftId, role: .assistant, content: content,
+                timestamp: draft.timestamp, context: ChatMessageContentContext(reasoning: reasoning), isDraft: true
             )
         )
     }
 
     private func renderStreamingReasoning(_ chunk: String, draftId: UUID) {
-        outputBuffer.appendReasoning(chunk)
-        let renderReasoning: String? = outputBuffer.hasReasoning ? outputBuffer.reasoning : nil
-        guard renderReasoning != lastRenderedDraftReasoning else { return }
-        lastRenderedDraftReasoning = renderReasoning ?? ""
-        let renderContent = outputBuffer.hasContent ? outputBuffer.content : ""
+        let (content, reasoning) = historyCoordinator.appendStreamingReasoning(chunk)
+        guard let draft = historyCoordinator.getDraftMessage(id: draftId) else {
+            historyCoordinator.setDraft(
+                ChatMessage(
+                    id: draftId, role: .assistant, content: content,
+                    timestamp: Date(), context: ChatMessageContentContext(reasoning: reasoning), isDraft: true
+                )
+            )
+            return
+        }
+        if draft.content == content && draft.reasoning == reasoning { return }
         historyCoordinator.setDraft(
             ChatMessage(
-                id: draftId,
-                role: .assistant,
-                content: renderContent,
-                timestamp: historyCoordinator.getDraftMessage(id: draftId)?.timestamp ?? Date(),
-                context: ChatMessageContentContext(reasoning: renderReasoning),
-                isDraft: true
+                id: draftId, role: .assistant, content: content,
+                timestamp: draft.timestamp, context: ChatMessageContentContext(reasoning: reasoning), isDraft: true
             )
         )
     }
