@@ -28,16 +28,21 @@ struct LocalModelPromptBuilder {
             if message.role == .tool {
                 let toolName = message.toolName ?? "unknown_tool"
                 let toolContent = replayToolMessageContent(from: message)
-                rawMessages.append([
+                var toolDict: [String: any Sendable] = [
                     "role": "tool",
                     "content": toolContent,
+                    "name": toolName,
                     "tool_responses": [
                         [
                             "name": toolName,
                             "response": toolContent,
                         ] as [String: any Sendable],
                     ] as [any Sendable],
-                ] as [String: any Sendable])
+                ]
+                if let toolCallId = message.toolCallId, !toolCallId.isEmpty {
+                    toolDict["tool_call_id"] = toolCallId
+                }
+                rawMessages.append(toolDict)
                 continue
             }
 
@@ -180,29 +185,38 @@ struct LocalModelPromptBuilder {
             for gm in group {
                 groupTokens += approximateTokenCount(gm.content) + 16
             }
-            if groupTokens <= availableHistoryBudget || selected.isEmpty {
+            let messageTokens = approximateTokenCount(message.content) + 16
+            if consumedTokens + groupTokens + messageTokens <= availableHistoryBudget {
                 // Keep the exchange group as a unit when it fits.
-                selected.append(message)
-                for gm in group {
+                // Because `selected` accumulates in reverse chronological order
+                // (newest to oldest), append the newer `group` (in reverse)
+                // before the older `message`.
+                for gm in group.reversed() {
                     selected.append(gm)
                 }
-                consumedTokens += groupTokens + approximateTokenCount(message.content) + 16
+                selected.append(message)
+                consumedTokens += groupTokens + messageTokens
                 continue
             }
 
-            // Group doesn't fit — keep the newest user message and drop the
-            // orphaned exchange rather than split it.
+            // Group doesn't fit — preserve the newest user message. If that
+            // one message itself exceeds the envelope, native preflight
+            // rejects it rather than silently truncating user input.
             if selected.isEmpty, message.role == .user {
                 selected.append(message)
-                consumedTokens += approximateTokenCount(message.content) + 16
+                consumedTokens += messageTokens
             }
         }
 
-        // Flush any trailing exchange captured at the loop end.
+        // Flush any trailing exchange captured at the loop end (newest to oldest).
+        var trailingGroup: [ChatMessage] = []
         if let pendingToolCall {
-            selected.append(pendingToolCall)
+            trailingGroup.append(pendingToolCall)
         }
-        selected.append(contentsOf: pendingToolResults.reversed())
+        trailingGroup.append(contentsOf: pendingToolResults.reversed())
+        for gm in trailingGroup.reversed() {
+            selected.append(gm)
+        }
 
         return selected.reversed()
     }

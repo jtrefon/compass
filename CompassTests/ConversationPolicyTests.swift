@@ -12,8 +12,8 @@ final class ConversationPolicyTests: XCTestCase {
 
     private var allTools: [AITool] {
         [
-            makeTool(name: "glob"),
-            makeTool(name: "ls"),
+            // `glob`/`ls` were retired from the toolset (5865606f) — the
+            // slimmed exploration surface is search-only.
             makeTool(name: "search"),
             makeTool(name: "read"),
             makeTool(name: "context"),
@@ -24,15 +24,10 @@ final class ConversationPolicyTests: XCTestCase {
     }
 
     private let expectedReadOnly: Set<String> = [
-        "glob",
-        "ls",
         "search",
-        "read",
-        "context"
+        "read"
     ]
     private let expectedToolLoopExecution: Set<String> = [
-        "glob",
-        "ls",
         "search",
         "read",
         "context",

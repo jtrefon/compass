@@ -4,26 +4,65 @@ import Combine
 /// Central subscriber for all contextual data events.
 /// Writes to `.ide/logs/` NDJSON files — the single persistence path
 /// for all data that should survive restart and be available for RAG.
+///
+/// **Ordering guarantee:** EventBus dispatches on the main queue, so the
+/// subscription closures below run serially; each event is yielded into a
+/// single `AsyncStream` consumed by exactly one task. Emission order equals
+/// append order per file — no fire-and-forget tasks racing each other.
 public final class LogCoordinator: @unchecked Sendable {
+    enum LogEntry {
+        case context(ContextLogEvent)
+        case toolResult(ToolResultEvent)
+    }
+
     private let projectRoot: URL
     private let eventBus: EventBusProtocol
-    private let iso = ISO8601DateFormatter()
     private var bag: Set<AnyCancellable> = []
+    private var entries: AsyncStream<LogEntry>.Continuation?
+    private var consumer: Task<Void, Never>?
 
     public init(projectRoot: URL, eventBus: EventBusProtocol) {
         self.projectRoot = projectRoot
         self.eventBus = eventBus
     }
 
+    deinit {
+        entries?.finish()
+        consumer?.cancel()
+    }
+
     public func start() {
+        var continuation: AsyncStream<LogEntry>.Continuation!
+        let stream = AsyncStream<LogEntry>(bufferingPolicy: .unbounded) { continuation = $0 }
+        entries = continuation
+
         let root = projectRoot
-        eventBus.subscribe(to: ContextLogEvent.self) { event in
-            Task { await LogCoordinator.writeContextLog(event, projectRoot: root) }
+        consumer = Task {
+            for await entry in stream {
+                switch entry {
+                case .context(let event):
+                    await LogCoordinator.writeContextLog(event, projectRoot: root)
+                case .toolResult(let event):
+                    await LogCoordinator.writeToolResult(event, projectRoot: root)
+                }
+            }
+        }
+
+        eventBus.subscribe(to: ContextLogEvent.self) { [weak self] event in
+            self?.entries?.yield(.context(event))
         }.store(in: &bag)
-        let root2 = projectRoot
-        eventBus.subscribe(to: ToolResultEvent.self) { event in
-            Task { await LogCoordinator.writeToolResult(event, projectRoot: root2) }
+        eventBus.subscribe(to: ToolResultEvent.self) { [weak self] event in
+            self?.entries?.yield(.toolResult(event))
         }.store(in: &bag)
+    }
+
+    /// Stops consumption and releases the subscription bag (test runtimes).
+    public func stop() {
+        entries?.finish()
+        entries = nil
+        consumer?.cancel()
+        consumer = nil
+        bag.removeAll()
     }
 
     // MARK: - ContextLogEvent → conversation.ndjson
@@ -37,17 +76,22 @@ public final class LogCoordinator: @unchecked Sendable {
             type: event.source,
             data: event.metadata.merging(["content": event.content]) { $1 }.mapValues { LogValue.string($0) }
         )
-        guard let json = try? JSONEncoder().encode(convEvent) else { return }
-        var line = Data(json)
-        line.append(Data("\n".utf8))
-        guard let convId = event.conversationId else { return }
-        let convDir = ConversationScopedNDJSONStore.projectConversationDirectory(
-            projectRoot: projectRoot,
-            conversationId: convId
-        )
-        let fileURL = convDir.appendingPathComponent("conversation.ndjson")
-        try? NDJSONLogFileWriter.ensureDirectoryExists(for: fileURL)
-        try? NDJSONLogFileWriter.append(line: line, to: fileURL)
+        do {
+            let json = try JSONEncoder().encode(convEvent)
+            var line = Data(json)
+            line.append(Data("\n".utf8))
+            guard let convId = event.conversationId else { return }
+            let convDir = ConversationScopedNDJSONStore.projectConversationDirectory(
+                projectRoot: projectRoot,
+                conversationId: convId
+            )
+            await NDJSONAppendStore.shared.append(line, to: convDir.appendingPathComponent("conversation.ndjson"))
+        } catch {
+            await AppLogger.shared.error(
+                category: .conversation,
+                message: "LogCoordinator context encode failed: \(error.localizedDescription)"
+            )
+        }
     }
 
     // MARK: - ToolResultEvent → executions.ndjson + conversation.ndjson
@@ -73,16 +117,22 @@ public final class LogCoordinator: @unchecked Sendable {
             type: event.type,
             data: execData
         )
-        if let json = try? JSONEncoder().encode(execEvent) {
+
+        let execDir = ConversationScopedNDJSONStore.projectConversationDirectory(
+            projectRoot: projectRoot,
+            conversationId: convId
+        )
+
+        do {
+            let json = try JSONEncoder().encode(execEvent)
             var line = Data(json)
             line.append(Data("\n".utf8))
-            let execDir = ConversationScopedNDJSONStore.projectConversationDirectory(
-                projectRoot: projectRoot,
-                conversationId: convId
+            await NDJSONAppendStore.shared.append(line, to: execDir.appendingPathComponent("executions.ndjson"))
+        } catch {
+            await AppLogger.shared.error(
+                category: .tool,
+                message: "LogCoordinator execution encode failed: \(error.localizedDescription)"
             )
-            let execFileURL = execDir.appendingPathComponent("executions.ndjson")
-            try? NDJSONLogFileWriter.ensureDirectoryExists(for: execFileURL)
-            try? NDJSONLogFileWriter.append(line: line, to: execFileURL)
         }
 
         var convData: [String: String] = ["tool": event.toolName, "toolCallId": event.toolCallId]
@@ -95,16 +145,16 @@ public final class LogCoordinator: @unchecked Sendable {
             type: "tool.\(event.type)",
             data: convData.mapValues { LogValue.string($0) }
         )
-        if let json = try? JSONEncoder().encode(convEvent) {
+        do {
+            let json = try JSONEncoder().encode(convEvent)
             var line = Data(json)
             line.append(Data("\n".utf8))
-            let convDir = ConversationScopedNDJSONStore.projectConversationDirectory(
-                projectRoot: projectRoot,
-                conversationId: convId
+            await NDJSONAppendStore.shared.append(line, to: execDir.appendingPathComponent("conversation.ndjson"))
+        } catch {
+            await AppLogger.shared.error(
+                category: .conversation,
+                message: "LogCoordinator tool-result encode failed: \(error.localizedDescription)"
             )
-            let convFileURL = convDir.appendingPathComponent("conversation.ndjson")
-            try? NDJSONLogFileWriter.ensureDirectoryExists(for: convFileURL)
-            try? NDJSONLogFileWriter.append(line: line, to: convFileURL)
         }
     }
 }

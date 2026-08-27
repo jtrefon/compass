@@ -107,14 +107,14 @@ actor LocalModelProcessAIService: AIService {
 
         // Chat generator participates in the registry so a single memory-
         // pressure pass unloads every inference container (chat + FIM).
-        InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.chatLabel) { [weak self] in
+        Task { await InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.chatLabel) { [weak self] in
             guard let self else { return }
             let persistDir = await self.lastProjectRoot?
                 .appendingPathComponent(".ide", isDirectory: true)
                 .appendingPathComponent("cache", isDirectory: true)
             await generatorForPressureHandling.unloadAllModels(
                 reason: "memory_pressure", persistKVTo: persistDir)
-        }
+        } }
 
         if !launchContext.isTesting {
             Task {
@@ -175,7 +175,7 @@ actor LocalModelProcessAIService: AIService {
                 topP: inferenceConfiguration.topP,
                 repetitionPenalty: inferenceConfiguration.repetitionPenalty,
                 repetitionContextSize: inferenceConfiguration.repetitionContextSize,
-                kvCache4BitEnabled: false
+                kvCache4BitEnabled: true
             )
         let settings = settingsStore.load(includeApiKey: false)
         
@@ -237,6 +237,22 @@ actor LocalModelProcessAIService: AIService {
             explicitContext: request.context,
             systemContent: systemContent
         )
+
+        // TELEMETRY: Log raw message structure for "what did the model see" diagnosis
+        let rawMessageSummary = rawMessages.map { dict -> [String: any Sendable] in
+            [
+                "role": dict["role"] ?? "",
+                "contentLength": (dict["content"] as? String)?.count ?? 0,
+                "hasToolCalls": dict["tool_calls"] != nil,
+                "toolCallId": dict["tool_call_id"] ?? "",
+            ]
+        }
+        await AIToolTraceLogger.shared.log(type: "mlx.raw_messages", data: [
+            "runId": request.runId ?? "",
+            "messageCount": rawMessages.count,
+            "messages": rawMessageSummary as [any Sendable],
+        ])
+
         // Local inference is text-only (single-model policy) — no media payloads.
         let capturedUserInput = UnsafeValue(value: UserInput(
             messages: rawMessages, images: [], videos: [],

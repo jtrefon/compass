@@ -30,9 +30,11 @@ final class LocalToolExecutionTests: XCTestCase {
         let toolMessages = runtime.manager.messages.filter { $0.isToolExecution }
         print("[TOOL-EXEC] executed tools: \(toolMessages.map { $0.toolName ?? "?" }.joined(separator: ", "))")
         XCTAssertTrue(ok, "Local run must complete")
+        // `ls`/`glob` were retired by the slimmed toolset (5865606f) — for
+        // "list files" the model may legitimately answer via bash.
         XCTAssertTrue(
-            toolMessages.contains { ["ls", "glob", "read", "search"].contains($0.toolName) },
-            "Expected a real tool execution (ls/glob/read/search), got none"
+            toolMessages.contains { ["bash", "read", "search"].contains($0.toolName) },
+            "Expected a real tool execution (bash/read/search), got none"
         )
     }
 

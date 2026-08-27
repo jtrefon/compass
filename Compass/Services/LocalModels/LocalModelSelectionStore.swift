@@ -26,15 +26,15 @@ actor LocalModelSelectionStore {
         )
     }
 
-    /// Honest default: the fixed chat model does NOT support a quantized KV
-    /// combiner, so 4-bit KV would be silently ignored. Only explicit opt-in
-    /// (or the env knob in the benchmark harness) enables it.
-    func isKVCache4BitEnabled() -> Bool {
-        settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: false)
-    }
+    /// Qwen3.5 supports quantized attention KV. 4-bit is now the permanent
+    /// policy (was a settings toggle, now removed from UI). The old UserDefaults
+    /// value is ignored and `setKVCache4BitEnabled` is a no-op for backward compat.
+    func isKVCache4BitEnabled() -> Bool { true }
 
     func setKVCache4BitEnabled(_ enabled: Bool) {
-        settingsStore.set(enabled, forKey: LocalModelSettingsKeys.kvCache4BitEnabled)
+        // No-op — 4-bit is permanent. Keep the UserDefaults write for
+        // backward compat so an old `false` does not stick if we ever revert.
+        settingsStore.set(true, forKey: LocalModelSettingsKeys.kvCache4BitEnabled)
     }
 
     func contextLength() -> Int? {

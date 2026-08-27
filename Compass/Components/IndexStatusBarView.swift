@@ -62,6 +62,7 @@ struct IndexStatusBarView: View {
         choices.append(LanguageChoice(id: "typescript", title: "TypeScript", languageIdentifier: "typescript"))
         choices.append(LanguageChoice(id: "tsx", title: "TypeScript React", languageIdentifier: "tsx"))
         choices.append(LanguageChoice(id: "python", title: "Python", languageIdentifier: "python"))
+        choices.append(LanguageChoice(id: "php", title: "PHP", languageIdentifier: "php"))
         choices.append(LanguageChoice(id: "html", title: "HTML", languageIdentifier: "html"))
         choices.append(LanguageChoice(id: "css", title: "CSS", languageIdentifier: "css"))
         choices.append(LanguageChoice(id: "json", title: "JSON", languageIdentifier: "json"))
@@ -81,6 +82,8 @@ struct IndexStatusBarView: View {
             "typescript": "TypeScript",
             "tsx": "TypeScript React",
             "python": "Python",
+            "php": "PHP",
+            "phtml": "PHP",
             "html": "HTML",
             "css": "CSS",
             "json": "JSON",
