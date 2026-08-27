@@ -113,10 +113,10 @@ final class IndexStatusBarViewModelTests: XCTestCase {
 
 @MainActor
 private final class StatsFakeCodebaseIndex: CodebaseIndexProtocol {
-    var database: DatabaseStore
+    var database: DatabaseManager
 
     init() {
-        database = try! DatabaseStore(path: "/tmp/test_statusbar_stats_\(UUID().uuidString).db")
+        database = try! DatabaseManager(path: "/tmp/test_statusbar_stats_\(UUID().uuidString).db")
     }
 
     func start() {}
@@ -156,10 +156,10 @@ private final class StatsFakeCodebaseIndex: CodebaseIndexProtocol {
 
 @MainActor
 private final class FakeCodebaseIndex: CodebaseIndexProtocol {
-    var database: DatabaseStore
+    var database: DatabaseManager
 
     init() {
-        database = try! DatabaseStore(path: "/tmp/test_statusbar_\(UUID().uuidString).db")
+        database = try! DatabaseManager(path: "/tmp/test_statusbar_\(UUID().uuidString).db")
     }
 
     func start() {}

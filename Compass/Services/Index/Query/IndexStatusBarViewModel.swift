@@ -226,24 +226,27 @@ final class IndexStatusBarViewModel: ObservableObject {
         eventBus.subscribe(to: StreamingContextUsageEvent.self) { [weak self] event in
             guard let self else { return }
             if event.isFinal {
-                // Run finished: if the authoritative usage event never arrived
-                // (e.g. local model), the final estimate IS the run's total.
                 if !self.usageSeenForCurrentRun {
                     self.accumulatedPromptTokens = event.estimatedPromptTokens
                 }
                 self.streamingPromptEstimate = 0
             } else {
-                // New run starts: reset the per-run totals. The previous
-                // implementation accumulated every run into a session total
-                // that capped at the window — showing 262K/262K forever.
                 if event.runId != self.lastUsageRunId {
                     self.lastUsageRunId = event.runId
                     self.usageSeenForCurrentRun = false
-                    self.accumulatedPromptTokens = 0
-                    self.accumulatedCompletionTokens = 0
+                    // Don't reset accumulated — it holds the previous run's
+                    // authoritative total. Streaming estimate is per-run, but
+                    // the display is total = accumulated + streaming, so a new
+                    // run's streaming should start from 0 and grow, not reset
+                    // the whole gauge to the new run's prompt alone. The old
+                    // total remains visible until the new run's first chunk.
+                    // To avoid the 100→21k→900 jump, keep streaming monotonic.
+                    self.streamingPromptEstimate = event.estimatedPromptTokens
+                } else {
+                    // Monotonic: never let live estimate go down (handles reordered
+                    // or small estimates from a new iteration's initial 100-token probe)
+                    self.streamingPromptEstimate = max(self.streamingPromptEstimate, event.estimatedPromptTokens)
                 }
-                // Smoothly update the display during streaming
-                self.streamingPromptEstimate = event.estimatedPromptTokens
             }
             self.updateContextDisplay()
         }
@@ -290,6 +293,9 @@ final class IndexStatusBarViewModel: ObservableObject {
                 let windowTokens = max(1, windowChars / 4)
                 let used = min(estTokens, windowTokens)
                 self.localModelContextUsageText = "CTX \(Self.formatTokenCount(used))/\(Self.formatTokenCount(windowTokens))"
+                // Also store for openRouter live display when local is active
+                // (local now publishes StreamingContextUsageEvent which drives openRouter path)
+                self.observedLocalWindowTokens = windowTokens
             } else {
                 self.localModelContextUsageText = "CTX ~\(Self.formatTokenCount(estTokens)) · \(event.messageCount) msgs"
             }
@@ -397,10 +403,17 @@ final class IndexStatusBarViewModel: ObservableObject {
     /// Update the context display with the current accumulated + streaming estimate
     private func updateContextDisplay() {
         let total = accumulatedPromptTokens + accumulatedCompletionTokens + streamingPromptEstimate
-        let ceOverride = CustomEndpointSettingsStore().load(includeApiKey: false).contextOverride
-        let windowTokens = observedContextWindowTokens > 0
-            ? observedContextWindowTokens
-            : (ceOverride > 0 ? ceOverride : 262_000)
+        // For local, use the last known local window (from ConversationContextEvent, 130k slider)
+        // not the cloud 262k fallback. observedLocalWindowTokens is set via ConversationContextEvent.
+        let windowTokens: Int
+        if observedContextWindowTokens > 0 {
+            windowTokens = observedContextWindowTokens
+        } else if observedLocalWindowTokens > 0 {
+            windowTokens = observedLocalWindowTokens
+        } else {
+            let ceOverride = CustomEndpointSettingsStore().load(includeApiKey: false).contextOverride
+            windowTokens = ceOverride > 0 ? ceOverride : 262_000
+        }
         let used = min(total, windowTokens)
         openRouterContextUsageText = "CTX \(Self.formatTokenCount(used))/\(Self.formatTokenCount(windowTokens))"
     }
@@ -413,6 +426,8 @@ final class IndexStatusBarViewModel: ObservableObject {
     private var usageSeenForCurrentRun = false
     /// Context window (tokens) reported by the provider in the last usage event.
     private var observedContextWindowTokens = 0
+    /// Local window (tokens) from ConversationContextEvent — 130k slider, not 262k cloud default.
+    private var observedLocalWindowTokens = 0
 
     private static func formatTokenCount(_ count: Int) -> String {
         if count < 1000 { return "\(count)" }

@@ -111,41 +111,40 @@ struct FileExplorerView<Context: IDEContext & ObservableObject>: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .layoutPriority(1)
             .sheet(isPresented: $isShowingNewFileSheet) {
-                VStack(spacing: 20) {
+                VStack(spacing: AppConstants.Layout.spacingLg) {
                     Text(localized("file_tree.create_file.title"))
                         .font(.headline)
                     TextField(localized("file_tree.create_file.name_placeholder"), text: $newFileName)
                         .textFieldStyle(.roundedBorder)
-                        .padding()
                         .onSubmit { createNewFile() }
                     HStack {
                         Button(localized("common.cancel")) { isShowingNewFileSheet = false }
                         Spacer()
                         Button(localized("common.create")) { createNewFile() }
+                            .buttonStyle(.borderedProminent)
                             .disabled(newFileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    .padding(.horizontal)
                 }
-                .padding()
-                .frame(width: 300)
+                .padding(AppConstants.Layout.spacingLg)
+                .frame(width: AppConstants.Settings.dialogSheetWidth)
             }
             .sheet(isPresented: $isShowingNewFolderSheet) {
-                VStack(spacing: 20) {
-                    Text(localized("file_tree.create_folder.title")).font(.headline)
+                VStack(spacing: AppConstants.Layout.spacingLg) {
+                    Text(localized("file_tree.create_folder.title"))
+                        .font(.headline)
                     TextField(localized("file_tree.create_folder.name_placeholder"), text: $newFolderName)
                         .textFieldStyle(.roundedBorder)
-                        .padding()
                         .onSubmit { createNewFolder() }
                     HStack {
                         Button(localized("common.cancel")) { isShowingNewFolderSheet = false }
                         Spacer()
                         Button(localized("common.create")) { createNewFolder() }
+                            .buttonStyle(.borderedProminent)
                             .disabled(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    .padding(.horizontal)
                 }
-                .padding()
-                .frame(width: 300)
+                .padding(AppConstants.Layout.spacingLg)
+                .frame(width: AppConstants.Settings.dialogSheetWidth)
             }
         }
         .frame(minWidth: 200)

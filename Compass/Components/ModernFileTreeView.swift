@@ -30,19 +30,6 @@ struct ModernFileTreeView: NSViewRepresentable {
         let containerView = NSView()
         containerView.translatesAutoresizingMaskIntoConstraints = false
 
-        let visualEffectView = NSVisualEffectView()
-        visualEffectView.material = .sidebar
-        visualEffectView.blendingMode = .withinWindow
-        visualEffectView.state = .active
-        visualEffectView.translatesAutoresizingMaskIntoConstraints = false
-        containerView.addSubview(visualEffectView)
-        NSLayoutConstraint.activate([
-            visualEffectView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-            visualEffectView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-            visualEffectView.topAnchor.constraint(equalTo: containerView.topAnchor),
-            visualEffectView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-        ])
-
         let outlineView = NSOutlineView(frame: .zero)
         outlineView.setAccessibilityIdentifier(AccessibilityID.fileExplorerOutline)
         outlineView.headerView = nil

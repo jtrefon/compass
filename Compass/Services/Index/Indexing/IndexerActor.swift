@@ -1,14 +1,14 @@
 import Foundation
 
 public actor IndexerActor {
-    private let database: DatabaseStore
+    private let database: DatabaseManager
     private let config: IndexConfiguration
     private let projectRoot: URL?
 
     private static let supportedExtensions = AppConstantsIndexing.indexableExtensions
 
     public init(
-        database: DatabaseStore,
+        database: DatabaseManager,
         config: IndexConfiguration = .default,
         projectRoot: URL? = nil
     ) {
