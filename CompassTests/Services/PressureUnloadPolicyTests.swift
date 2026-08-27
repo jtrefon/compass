@@ -49,13 +49,13 @@ final class PressureUnloadPolicyTests: XCTestCase {
 
     override func setUp() async throws {
         fimFlag.value = false
-        InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.fimLabel) { [fimFlag] in
+        await InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.fimLabel) { [fimFlag] in
             fimFlag.value = true
         }
     }
 
     override func tearDown() async throws {
-        InferenceUnloadRegistry.shared.removeAllHandlers()
+        await InferenceUnloadRegistry.shared.removeAllHandlers()
     }
 
     private final class CallbackBox: @unchecked Sendable {

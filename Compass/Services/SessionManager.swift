@@ -312,6 +312,21 @@ final class SessionManager: ObservableObject {
         projectRoot = newRoot
 
         let migratedSessionId = historyCoordinator.currentConversationId
+        // Self-heal: if the in-memory history is empty (fresh launch, before
+        // restore) but disk already has a non-empty snapshot, don't overwrite
+        // it with empty. This was the bug that wiped 7AFAB3E after cache clean.
+        if historyCoordinator.committedMessages.isEmpty,
+           let existing = Self.loadSnapshot(sessionId: migratedSessionId, projectRoot: projectRoot),
+           !existing.messages.isEmpty {
+            currentSessionId = migratedSessionId
+            conversationSessionOrder = [migratedSessionId]
+            conversationSessionSnapshots = [migratedSessionId: existing]
+            refreshTabs()
+            Self.saveSessionOrder(conversationSessionOrder)
+            Self.saveSelectedId(currentSessionId)
+            return
+        }
+
         currentSessionId = migratedSessionId
         conversationSessionOrder = [migratedSessionId]
         let snapshot = SessionSnapshot(
