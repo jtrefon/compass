@@ -26,15 +26,15 @@ actor LocalModelSelectionStore {
         )
     }
 
-    /// Qwen3.5 supports quantized attention KV. Keeping long-context state in
-    /// 4-bit form is the normal operating policy; callers may opt out for
-    /// quality diagnostics. The request envelope remains the hard size bound.
-    func isKVCache4BitEnabled() -> Bool {
-        settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: true)
-    }
+    /// Qwen3.5 supports quantized attention KV. 4-bit is now the permanent
+    /// policy (was a settings toggle, now removed from UI). The old UserDefaults
+    /// value is ignored and `setKVCache4BitEnabled` is a no-op for backward compat.
+    func isKVCache4BitEnabled() -> Bool { true }
 
     func setKVCache4BitEnabled(_ enabled: Bool) {
-        settingsStore.set(enabled, forKey: LocalModelSettingsKeys.kvCache4BitEnabled)
+        // No-op — 4-bit is permanent. Keep the UserDefaults write for
+        // backward compat so an old `false` does not stick if we ever revert.
+        settingsStore.set(true, forKey: LocalModelSettingsKeys.kvCache4BitEnabled)
     }
 
     func contextLength() -> Int? {

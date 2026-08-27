@@ -175,7 +175,7 @@ actor LocalModelProcessAIService: AIService {
                 topP: inferenceConfiguration.topP,
                 repetitionPenalty: inferenceConfiguration.repetitionPenalty,
                 repetitionContextSize: inferenceConfiguration.repetitionContextSize,
-                kvCache4BitEnabled: false
+                kvCache4BitEnabled: true
             )
         let settings = settingsStore.load(includeApiKey: false)
         
