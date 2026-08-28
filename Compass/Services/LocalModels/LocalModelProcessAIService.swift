@@ -197,6 +197,15 @@ actor LocalModelProcessAIService: AIService {
             inferenceConfiguration: inferenceConfiguration,
             approximateTokenCount: { [self] in approximateTokenCount($0) }
         )
+        await AIToolTraceLogger.shared.log(type: "mlx.budget", data: [
+            "runId": request.runId ?? "",
+            "retainedMessages": budgetedMessages.count,
+            "retainedTokens": budgetedMessages.reduce(0) { $0 + approximateTokenCount($1.content) },
+            "droppedMessages": testBudget.retainedMessages.count - budgetedMessages.count,
+            "droppedTokens": (testBudget.retainedMessages.count - budgetedMessages.count) * 100, // approx
+            "systemTokens": approximateTokenCount(systemContent),
+            "explicitContextTokens": request.context.map { approximateTokenCount($0) } ?? 0
+        ])
 
         // Convert AITool to ToolSpec for MLXLLM
         let toolSpecs = promptBuilder.convertToToolSpec(request.tools)

@@ -459,12 +459,14 @@ nonisolated private static let maxPrefixCacheFiles = 8
         let defaultDevice = Device.defaultDevice()
         let deviceType = defaultDevice.deviceType?.rawValue ?? "unknown"
         try memoryMonitor.throwIfExceeded(limitMB: rssLimitMB, phase: "before_container_load")
+        await logMemorySnapshot(phase: "before_container_load", runId: runId)
         let rssBeforeLoadMB = memoryMonitor.currentRSSMB()
         let loadStart = ContinuousClock.now
         let container = try await loadContainerCached(modelDirectory: modelDirectory, toolCallFormat: toolCallFormat)
         let loadDuration = loadStart.duration(to: ContinuousClock.now)
         let rssAfterLoadMB = memoryMonitor.currentRSSMB()
         try memoryMonitor.throwIfExceeded(limitMB: rssLimitMB, phase: "after_container_load")
+        await logMemorySnapshot(phase: "after_container_load", runId: runId)
         await AIToolTraceLogger.shared.log(type: "mlx.model_loaded", data: [
             "runId": runId ?? "",
             "modelId": modelId,
@@ -513,7 +515,8 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 from: cacheEntry,
                 promptTokenIds: promptTokenIds,
                 parameters: parameters,
-                context: context
+                context: context,
+                runId: runId
             )
 
             MLX.Memory.peakMemory = 0
@@ -561,7 +564,8 @@ nonisolated private static let maxPrefixCacheFiles = 8
         from cacheEntry: PromptCacheEntry?,
         promptTokenIds: [Int],
         parameters: GenerateParameters,
-        context: ModelContext
+        context: ModelContext,
+        runId: String? = nil
     ) throws -> (kvCache: [KVCache]?, effectiveInput: LMInput) {
         var effectiveInput = input
         var kvCache: [KVCache]? = nil
@@ -612,6 +616,39 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 cacheEntry.clear()
             }
             kvCache = context.model.newCache(parameters: parameters)
+        }
+
+        // Comprehensive KV telemetry for 30k diagnosis — was 0 fields before
+        let (cachedCount, cachedOffset, cachedMaxSize) = {
+            if let c = cacheEntry?.get().cache?.first {
+                return (cacheEntry?.get().cache?.count ?? 0, c.offset, c.maxSize ?? 0)
+            }
+            return (0, 0, 0)
+        }()
+        let hit = kvCache != nil && !(cacheEntry?.get().cache?.isEmpty ?? true) && effectiveInput.text.tokens.size < promptTokenIds.count
+        let logRunId = runId ?? "unknown"
+        let logCommonLen = (cacheEntry?.get().tokenIds.count ?? 0) > 0 ? Self.commonPrefixLength(cacheEntry!.get().tokenIds, promptTokenIds) : 0
+        let logSuffixLen = effectiveInput.text.tokens.size
+        let logPromptLen = promptTokenIds.count
+        let logTrimCount = (cacheEntry?.get().tokenIds.count ?? 0) - logCommonLen
+        let logHit = hit
+        let logCachedCount = cachedCount
+        let logCachedOffset = cachedOffset
+        let logCachedMaxSize = cachedMaxSize
+        Task {
+            await AIToolTraceLogger.shared.log(type: "mlx.kv_cache", data: [
+                "runId": logRunId,
+                "hit": logHit,
+                "commonLen": logCommonLen,
+                "suffixLen": logSuffixLen,
+                "promptLen": logPromptLen,
+                "trimCount": logTrimCount,
+                "cachedCount": logCachedCount,
+                "cachedOffset": logCachedOffset,
+                "cachedMaxSize": logCachedMaxSize,
+                "kvCache4Bit": parameters.kvBits == 4,
+                "cacheKind": "rotating-full"
+            ])
         }
 
         return (kvCache, effectiveInput)
@@ -796,6 +833,20 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 "peakMB": peakMB
             ])
         }
+    }
+
+    private func logMemorySnapshot(phase: String, runId: String?) async {
+        let snapshot = Memory.snapshot()
+        let rssMB = memoryMonitor.currentRSSMB()
+        await AIToolTraceLogger.shared.log(type: "mlx.memory_snapshot", data: [
+            "runId": runId ?? "unknown",
+            "phase": phase,
+            "activeMB": snapshot.activeMemory / (1024 * 1024),
+            "cacheMB": snapshot.cacheMemory / (1024 * 1024),
+            "peakMB": snapshot.peakMemory / (1024 * 1024),
+            "rssMB": rssMB,
+            "generationCount": generationCount
+        ])
     }
 
     nonisolated private static func resolvedRSSLimitMB() -> Int {

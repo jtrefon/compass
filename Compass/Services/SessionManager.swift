@@ -201,6 +201,7 @@ final class SessionManager: ObservableObject {
         refreshTabs()
         Self.saveSessionOrder(conversationSessionOrder)
         Self.saveSelectedId(currentSessionId)
+        AIToolTraceLogger.shared.startNewSession(conversationId: newConversationId)
         return newConversationId
     }
 
