@@ -43,6 +43,47 @@ final class AIToolTraceLogger {
         projectRoot = root
     }
 
+    /// Per-session cutoff: truncate ai-trace.ndjson on new session, keep previous as .bak.
+    /// Called from SessionManager.startNew / clear (new conversationId). Overwrite is best at this stage
+    /// so the live file is always current session only (no sifting through 3 fixed issues' history).
+    func startNewSession(conversationId: String) {
+        queue.async { [weak self] in
+            guard let self, let root = self.projectRoot else { return }
+            let logsDir = root.appendingPathComponent(".ide", isDirectory: true).appendingPathComponent("logs", isDirectory: true)
+            let fileURL = logsDir.appendingPathComponent("ai-trace.ndjson")
+            let bakURL = logsDir.appendingPathComponent("ai-trace.\(conversationId).bak.ndjson")
+            // Only rotate if current file has content and is not already for this conversation
+            // Check if current file's last session.start is already this conversationId
+            if let handle = self.fileHandle {
+                try? handle.close()
+                self.fileHandle = nil
+            }
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+                let size = attrs?[.size] as? UInt64 ?? 0
+                if size > 1024 { // only rotate if meaningful content (not empty)
+                    // If a bak for this conversation already exists, keep it (don't overwrite previous bak)
+                    if !FileManager.default.fileExists(atPath: bakURL.path) {
+                        try? FileManager.default.moveItem(at: fileURL, to: bakURL)
+                    } else {
+                        try? FileManager.default.removeItem(at: fileURL)
+                    }
+                } else if size > 0 {
+                    try? FileManager.default.removeItem(at: fileURL)
+                }
+            }
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+            self.fileHandle = try? FileHandle(forWritingTo: fileURL)
+            // Marker so the new file is self-describing
+            var payload: [String: Any] = ["type": "session.start", "conversationId": conversationId]
+            payload["timestamp"] = ISO8601DateFormatter().string(from: Date())
+            if let line = try? JSONSerialization.data(withJSONObject: payload),
+               let handle = self.fileHandle {
+                try? handle.write(contentsOf: line + Data("\n".utf8))
+            }
+        }
+    }
+
     func currentLogFilePath() -> String? {
         guard let projectRoot else { return nil }
         return projectRoot
