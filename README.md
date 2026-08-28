@@ -2,7 +2,7 @@
 
 > AI coding that respects your machine.
 
-**Compass is a native AI IDE for macOS** — agentic coding with your own provider and keys, plus
+**Compass is a native AI IDE for macOS**: agentic coding with your own provider and keys, plus
 on-device RAG, FIM completion, and local chat that work fully offline. ~200MB, MIT licensed,
 no Electron, no lock-in.
 
@@ -12,9 +12,6 @@ and where we're going, and [BENCHMARKS.md](BENCHMARKS.md) for the numbers we've 
 
 [![CI](https://github.com/jtrefon/compass/actions/workflows/ci.yml/badge.svg)](https://github.com/jtrefon/compass/actions/workflows/ci.yml)
 [![Release](https://github.com/jtrefon/compass/actions/workflows/release.yml/badge.svg)](https://github.com/jtrefon/compass/actions/workflows/release.yml)
-[![Codacy Grade](https://app.codacy.com/project/badge/Grade/db02c680a7e24b90b6340b027b6ebc93)](https://app.codacy.com/gh/jtrefon/ai-ide/dashboard)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
-[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=jtrefon_ai-ide&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=jtrefon_ai-ide)
 
 ---
 
@@ -34,7 +31,7 @@ Liquid Glass, Apple Neural Engine) with two deliberately separate AI pipelines:
 | Network | None required. Ever. | Required for agentic work |
 
 The local model never orchestrates. The cloud model never runs inline completion. Each does what
-it's best at — that's the whole architecture in one sentence.
+it's best at: that's the whole architecture in one sentence.
 
 **Vibe code at full speed.** Bring the best model in the world, run the full agentic pipeline at
 native speed, pay your provider's rate — not a per-seat tax.
@@ -49,29 +46,32 @@ local chat all still work. The intelligence is on-device too.
 Requirements: **Apple Silicon Mac, macOS 26+**, Xcode 26+ for building from source.
 
 ```sh
-# Install via Homebrew (cask ships with v0.7)
-brew install --cask https://raw.githubusercontent.com/jtrefon/compass/main/Casks/compass.rb
+# Install via Homebrew (one command; auto-taps the cask)
+brew install --cask jtrefon/compass/compass
+
+# Or the one-line installer (downloads the latest release, checks the signature):
+curl -fsSL https://raw.githubusercontent.com/jtrefon/compass/main/install.sh | bash
 
 # Or grab the latest DMG/ZIP from Releases
 # https://github.com/jtrefon/compass/releases
 ```
 
 First launch: Compass indexes your project and pulls the on-device model. Local completion, chat,
-and search work immediately — no keys, no account, no network.
+and search work immediately: no keys, no account, no network.
 
 For agentic coding, add your own API key (OpenRouter, Kilo, DeepSeek, any OpenAI-compatible
 endpoint) in Settings → Providers. Your key, your bill, your choice.
 
-> **The honest part:** builds are not notarized yet — Apple charges $99/year for that, and
-> Compass makes $0 until sponsors fund it (roadmap item, in the open). Your Mac will warn you
-> once: right-click → Open. The source is right here if you'd rather verify first.
+> **The honest part:** builds are not notarized yet. Compass ships without Apple's paid
+> notarization, like many open-source Mac apps; your Mac will ask you to confirm once
+> (right-click → Open). The source is right here if you'd rather verify first.
 
 ## What's shipping
 
 - **Real FIM completion** — ghost text in <100ms from a 4B on-device model, not a remote
   round-trip, not a fake heuristic
 - **Private local chat** — ask questions, bounce ideas, get a second pair of eyes, entirely on-device
-- **ANE-accelerated RAG** — SQLite FTS5 + HNSW/FAISS retrieval, embeddings on the Apple Neural Engine
+- **ANE-accelerated RAG** — SQLite index + HNSW/FAISS retrieval, embeddings on the Apple Neural Engine
 - **Agentic coding, your provider** — Planner → Worker → QA orchestration, 20+ tools, harness-tested
 - **Built-in terminal & browser**, tree-sitter highlighting across 20+ languages, per-project
   system prompts, command palette, project state persistence

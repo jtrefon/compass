@@ -79,8 +79,12 @@ public enum ToolCallFormat: String, Sendable, Codable, CaseIterable {
     case glm4
 
     /// Gemma function call format.
-    /// Example: `call:name{key:value,k:<escape>str<escape>}`
+    /// Example: `<start_function_call>call:name{key:value,k:<escape>str<escape>}<end_function_call>`
     case gemma
+
+    /// Gemma4 function call format.
+    /// Example: `<|tool_call>call:name{key:<|"|>value<|"|>}<tool_call|>`
+    case gemma4
 
     /// Kimi K2 format with functions prefix.
     /// Example: `functions.name:0<|tool_call_argument_begin|>{"key": "value"}`
@@ -114,7 +118,12 @@ public enum ToolCallFormat: String, Sendable, Codable, CaseIterable {
         case .glm4:
             return GLM4ToolCallParser()
         case .gemma:
-            return GemmaFunctionParser()
+            return GemmaFunctionParser(
+                startTag: "<start_function_call>", endTag: "<end_function_call>",
+                escapeMarker: "<escape>")
+        case .gemma4:
+            return GemmaFunctionParser(
+                startTag: "<|tool_call>", endTag: "<tool_call|>", escapeMarker: "<|\"|>")
         case .kimiK2:
             return KimiK2ToolCallParser()
         case .minimaxM2:
@@ -123,6 +132,18 @@ public enum ToolCallFormat: String, Sendable, Codable, CaseIterable {
             return MistralToolCallParser()
         case .llama3:
             return Llama3ToolCallParser()
+        }
+    }
+
+    /// Generate an ID compatible with this tool-call syntax.
+    func generateToolCallID() -> String {
+        let uuid = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+
+        switch self {
+        case .mistral:
+            return String(uuid.prefix(9))
+        default:
+            return "call_" + uuid.lowercased()
         }
     }
 
@@ -170,8 +191,13 @@ public enum ToolCallFormat: String, Sendable, Codable, CaseIterable {
             return .glm4
         }
 
+        // Gemma4
+        if type.hasPrefix("gemma4") {
+            return .gemma4
+        }
+
         // Gemma
-        if type == "gemma" || type.hasPrefix("gemma4") {
+        if type == "gemma" {
             return .gemma
         }
 

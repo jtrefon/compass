@@ -61,7 +61,7 @@ There is no node that checks "Is plan complete?" before allowing FinalResponse. 
 
 ### Fix 1: Add Plan Completion Check Before Final Response
 
-**File:** `osx-ide/Services/Orchestration/Nodes/ConditionalToolLoopNode.swift`
+**File:** `compass/Services/Orchestration/Nodes/ConditionalToolLoopNode.swift`
 
 **Change:** Before proceeding to FinalResponseNode, verify plan completion:
 
@@ -80,7 +80,7 @@ if planProgress.total > 0 && !planProgress.isComplete {
 
 ### Fix 2: Remove False Plan Completion in FinalResponseHandler
 
-**File:** `osx-ide/Services/ConversationFlow/FinalResponseHandler.swift`
+**File:** `compass/Services/ConversationFlow/FinalResponseHandler.swift`
 
 **Change:** Replace `completeRemainingPlanItems` with a verification approach:
 
@@ -107,7 +107,7 @@ private func handlePlanOnCompletion(conversationId: String) async {
 
 ### Fix 3: Add Plan-Aware Delivery Gate
 
-**File:** `osx-ide/Services/Orchestration/Nodes/DeliveryGateNode.swift`
+**File:** `compass/Services/Orchestration/Nodes/DeliveryGateNode.swift`
 
 **Change:** Enhance DeliveryGate to check plan completion:
 
@@ -124,7 +124,7 @@ if progress.total > 0 && !progress.isComplete {
 
 ### Fix 4: Improve Force Continuation Logic
 
-**File:** `osx-ide/Services/ConversationFlow/ToolLoopHandler.swift`
+**File:** `compass/Services/ConversationFlow/ToolLoopHandler.swift`
 
 **Change:** The `shouldForceContinuationForIncompletePlan` should also trigger when:
 - Model attempts final_response with incomplete plan
@@ -154,10 +154,10 @@ if mode == .agent,
 
 ## Files to Modify
 
-1. `osx-ide/Services/ConversationFlow/FinalResponseHandler.swift` - Fix plan completion logic
-2. `osx-ide/Services/Orchestration/Nodes/ConditionalToolLoopNode.swift` - Add plan check
-3. `osx-ide/Services/Orchestration/Nodes/DeliveryGateNode.swift` - Enhance with plan verification
-4. `osx-ide/Services/ConversationFlow/ToolLoopHandler.swift` - Improve force continuation
+1. `compass/Services/ConversationFlow/FinalResponseHandler.swift` - Fix plan completion logic
+2. `compass/Services/Orchestration/Nodes/ConditionalToolLoopNode.swift` - Add plan check
+3. `compass/Services/Orchestration/Nodes/DeliveryGateNode.swift` - Enhance with plan verification
+4. `compass/Services/ConversationFlow/ToolLoopHandler.swift` - Improve force continuation
 
 ---
 

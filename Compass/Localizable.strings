@@ -1,0 +1,279 @@
+"new_project.title" = "Create New Project";
+"new_project.project_location" = "Project Location:";
+"new_project.no_location_selected" = "No location selected";
+"new_project.browse" = "Browse...";
+"new_project.project_name" = "Project Name:";
+"new_project.enter_project_name" = "Enter project name";
+"new_project.invalid_project_name" = "Invalid project name. Avoid special characters and reserved names.";
+"common.cancel" = "Cancel";
+"common.ok" = "OK";
+"common.create" = "Create";
+
+"file_tree.rename.title" = "Rename";
+"file_tree.rename.info" = "Enter a new name.";
+"file_tree.rename.button" = "Rename";
+"file_tree.create.button" = "Create";
+"file_tree.create_file.title" = "Create File";
+"file_tree.create_file.info" = "Enter a file name.";
+"file_tree.create_file.name_placeholder" = "File name";
+"file_tree.create_folder.title" = "Create Folder";
+"file_tree.create_folder.info" = "Enter a folder name.";
+"file_tree.create_folder.name_placeholder" = "Folder name";
+
+"file_explorer.search.placeholder" = "Search...";
+"file_explorer.refresh_help" = "Refresh";
+
+"ai_chat.title" = "AI Assistant";
+"ai_chat.context_format" = "Context: \"%@\"";
+"ai_chat.plan.title" = "Plan";
+"ai_chat.plan.empty" = "No plan set.";
+"ai_chat.mode" = "Mode";
+"ai_chat.new_conversation_help" = "Start a new conversation";
+
+"settings.ai.openrouter_connection.title" = "OpenRouter Connection";
+"settings.ai.openrouter_connection.subtitle" = "Store your API key and connection details.";
+
+"settings.ai.api_key.title" = "API key";
+"settings.ai.api_key.subtitle" = "Stored locally for this device.";
+"settings.ai.api_key.placeholder" = "sk-or-...";
+"settings.ai.api_key.validate" = "Validate";
+
+"settings.ai.advanced.show" = "Show Advanced";
+"settings.ai.advanced.hide" = "Hide Advanced";
+
+"settings.ai.base_url.title" = "Base URL";
+"settings.ai.base_url.subtitle" = "Defaults to the OpenRouter API endpoint.";
+"settings.ai.base_url.placeholder" = "https://openrouter.ai/api/v1";
+
+"settings.ai.model_selection.title" = "Model Selection";
+"settings.ai.model_selection.subtitle" = "Search OpenRouter models with autocomplete.";
+
+"settings.ai.model.title" = "Model";
+"settings.ai.model.subtitle" = "Type to search and select.";
+"settings.ai.model.placeholder" = "e.g. openai/gpt-4o-mini";
+"settings.ai.model.test_latency" = "Test Latency";
+
+"settings.ai.system_prompt.title" = "System Prompt";
+"settings.ai.system_prompt.subtitle" = "Override the default system instructions.";
+"settings.ai.system_prompt.help" = "Use this to steer tone, formatting, and coding style.";
+"settings.ai.system_prompt.reset" = "Reset Prompt";
+
+"settings.ai.reasoning_card.title" = "Reasoning";
+"settings.ai.reasoning_card.subtitle" = "Show the assistant's multi-step reasoning panel in chat.";
+"settings.ai.reasoning.title" = "Reasoning";
+"settings.ai.reasoning.subtitle" = "Adds an expandable reasoning section above assistant responses.";
+
+"settings.tabs.general" = "General";
+"settings.tabs.ai" = "AI";
+"settings.tabs.agent" = "Agent";
+"settings.tabs.modules" = "Modules";
+
+"chat.typing" = "Assistant is typing…";
+"chat.role.you" = "You";
+"chat.role.assistant" = "Assistant";
+"chat.reasoning.title" = "Reasoning";
+"chat.copy_message" = "Copy Message";
+
+"tool.default_name" = "Tool";
+"tool.cancel_help" = "Cancel execution";
+
+"common.show_more" = "Show more";
+"common.show_less" = "Show less";
+"common.hide" = "Hide";
+"common.clear" = "Clear";
+
+"editor.untitled" = "Untitled";
+
+"bottom_panel.picker" = "Bottom Panel";
+"bottom_panel.terminal" = "Terminal";
+"bottom_panel.logs" = "Logs";
+"bottom_panel.problems" = "Problems";
+
+"terminal.clear_help" = "Clear Terminal";
+
+"logs.follow" = "Follow";
+"logs.source" = "Source";
+
+"common.close" = "Close";
+
+"rename_symbol.title_format" = "Rename \"%@\"";
+"rename_symbol.new_name_placeholder" = "New name";
+"rename_symbol.replacements_format" = "Replacements: %d";
+"rename_symbol.rename" = "Rename";
+
+"global_search.title" = "Search";
+"global_search.placeholder" = "Find in workspace";
+
+"go_to_symbol.title" = "Go to Symbol";
+"go_to_symbol.placeholder" = "Type a symbol…";
+
+"command_palette.title" = "Command Palette";
+"command_palette.placeholder" = "Type a command…";
+
+"quick_open.title" = "Quick Open";
+"quick_open.placeholder" = "Type a file name…";
+"quick_open.recent" = "Recent";
+"quick_open.results" = "Results";
+
+"chat_input.placeholder" = "Type a message... (Shift+Enter for newline)";
+
+"terminal.error.title" = "Terminal Error";
+
+"model_suggestions.matches_format" = "Matches %d models";
+
+"tool_timeline.empty.title" = "No tool executions yet";
+"tool_timeline.empty.subtitle" = "Switch to Agent mode and run a task that calls tools.";
+
+"file_tree.context.new_file" = "New File";
+"file_tree.context.new_folder" = "New Folder";
+"file_tree.context.open" = "Open";
+"file_tree.context.rename" = "Rename";
+"file_tree.context.delete" = "Delete";
+"file_tree.context.show_in_finder" = "Show in Finder";
+
+"alert.error.title" = "Error";
+"alert.suggestion_format" = "Suggestion: %@";
+
+"menu.new_project" = "New Project";
+"menu.open" = "Open...";
+"menu.open_folder" = "Open Folder...";
+"menu.save" = "Save";
+"menu.save_as" = "Save As...";
+
+"menu.toggle.file_explorer" = "File Explorer";
+"menu.toggle.terminal" = "Terminal";
+"menu.toggle.ai_chat" = "AI Chat";
+"menu.toggle.hidden_files" = "Hidden Files";
+"menu.toggle.markdown_view" = "Markdown Preview";
+"menu.toggle.code_panel" = "Code";
+
+"menu.tools" = "Tools";
+"menu.tools.codebase_index_enabled" = "Codebase Index Enabled";
+"menu.tools.ai_enrichment_indexing" = "AI Enrichment Indexing";
+"menu.tools.ai_enrichment_indexing.missing_model" = "Select an OpenRouter model in Settings before enabling AI enrichment indexing.";
+"menu.tools.format_document" = "Format Document";
+"menu.tools.reindex_project_now" = "Reindex Project Now";
+"menu.tools.rebuild_vector_store" = "Rebuild Vector Store";
+
+"menu.editor" = "Editor";
+"menu.editor.find" = "Find";
+"menu.editor.replace" = "Replace";
+"menu.editor.trigger_inline_completion" = "Trigger Inline Completion";
+"menu.editor.ai_inline_assist" = "AI Inline Assist";
+"menu.editor.close_tab" = "Close Tab";
+"menu.editor.close_all_tabs" = "Close All Tabs";
+"menu.editor.next_tab" = "Next Tab";
+"menu.editor.previous_tab" = "Previous Tab";
+"menu.editor.split_right" = "Split Right";
+"menu.editor.split_down" = "Split Down";
+"menu.editor.focus_next_group" = "Focus Next Group";
+
+"menu.search" = "Search";
+"menu.search.find_in_workspace" = "Find in Workspace";
+"menu.search.command_palette" = "Command Palette";
+
+"menu.go" = "Go";
+"menu.go.quick_open" = "Quick Open";
+"menu.go.go_to_symbol" = "Go to Symbol";
+"menu.go.go_to_definition" = "Go to Definition";
+"menu.go.find_references" = "Find References";
+"menu.go.rename_symbol" = "Rename Symbol";
+"menu.go.add_next_occurrence" = "Add Next Occurrence";
+"menu.go.add_cursor_above" = "Add Cursor Above";
+"menu.go.add_cursor_below" = "Add Cursor Below";
+
+"menu.explorer" = "Explorer";
+"menu.explorer.delete" = "Delete";
+"menu.explorer.rename" = "Rename";
+
+"status.language_mode.select_title" = "Select Language Mode";
+"status.language_mode.auto_detect" = "Auto Detect";
+"status.metrics.title" = "Index Metrics";
+"status.metrics.c" = "C = Classes";
+"status.metrics.f" = "F = Functions";
+"status.metrics.s" = "S = Total symbols";
+"status.metrics.q" = "Q = Average quality score (0-100)";
+"status.metrics.m" = "M = Memories (LT = Long-term)";
+"status.metrics.db" = "DB = Database size";
+
+"status.diagnostics.title" = "Index & Session Analytics";
+"status.diagnostics.index_section" = "Index";
+"status.diagnostics.files" = "Files indexed";
+"status.diagnostics.classes" = "Classes";
+"status.diagnostics.functions" = "Functions";
+"status.diagnostics.structs" = "Structs";
+"status.diagnostics.enums" = "Enums";
+"status.diagnostics.protocols" = "Protocols";
+"status.diagnostics.variables" = "Variables";
+"status.diagnostics.symbols" = "Total symbols";
+"status.diagnostics.quality" = "Quality score";
+"status.diagnostics.index_size" = "Index size";
+"status.diagnostics.vector_section" = "Vector Store";
+"status.diagnostics.vector_entries" = "Entries";
+"status.diagnostics.vector_error" = "Error";
+"status.diagnostics.vector_uninit" = "Uninitialized";
+"status.diagnostics.session_section" = "Session";
+"status.diagnostics.context" = "Context window";
+"status.diagnostics.speed" = "Speed";
+"status.diagnostics.cost" = "Last run cost";
+"status.diagnostics.spend" = "Session spend";
+"status.diagnostics.balance" = "Account balance";
+
+"settings.status_bar.title" = "Status Bar";
+"settings.status_bar.subtitle" = "How the bottom status bar presents state.";
+"settings.status_bar.verbose.title" = "Verbose metrics";
+"settings.status_bar.verbose.subtitle" = "Show the full text strip (index counts, class/function/symbol stats). Off by default — the icon-first layout keeps the strip minimal; details live in the analytics popover.";
+
+"settings.appearance.title" = "Appearance";
+"settings.appearance.subtitle" = "Choose a theme that feels native and calm.";
+"settings.appearance.theme.title" = "Theme";
+"settings.appearance.theme.subtitle" = "Match the system or pick a style.";
+
+"settings.editor.title" = "Editor";
+"settings.editor.subtitle" = "Typography and layout tuned for focus.";
+"settings.editor.font_family.title" = "Font family";
+"settings.editor.font_family.subtitle" = "Select a monospace font for code.";
+"settings.editor.font_size.title" = "Font size";
+"settings.editor.font_size.subtitle" = "Adjust the editor point size.";
+"settings.editor.font_size.unit" = "pt";
+"settings.editor.indentation.title" = "Indentation";
+"settings.editor.indentation.subtitle" = "Choose tabs or spaces.";
+"settings.editor.line_numbers.title" = "Line numbers";
+"settings.editor.line_numbers.subtitle" = "Show a gutter for navigation.";
+"settings.editor.word_wrap.title" = "Word wrap";
+"settings.editor.word_wrap.subtitle" = "Keep long lines within the view.";
+"settings.editor.minimap.title" = "Minimap";
+"settings.editor.minimap.subtitle" = "Quickly scan large files.";
+
+"settings.inline_completion.title" = "Inline Completion";
+"settings.inline_completion.subtitle" = "Low-latency ghost text suggestions for the active editor pane.";
+"settings.inline_completion.enabled.title" = "Enable inline completion";
+"settings.inline_completion.enabled.subtitle" = "Show contextual suggestions while typing in supported files.";
+"settings.inline_completion.aggressiveness.title" = "Ranking aggressiveness";
+"settings.inline_completion.aggressiveness.subtitle" = "Bias more strongly toward short, confident completions.";
+"settings.inline_completion.max_length.title" = "Maximum suggestion length";
+"settings.inline_completion.max_length.subtitle" = "Cap the number of characters accepted from the model.";
+"settings.inline_completion.debug_overlay.title" = "Debug overlay";
+"settings.inline_completion.debug_overlay.subtitle" = "Show live suggestion metadata over the editor.";
+
+"settings.workspace.title" = "Workspace";
+"settings.workspace.subtitle" = "Layout options for your daily flow.";
+"settings.workspace.sidebar.title" = "Sidebar";
+"settings.workspace.sidebar.subtitle" = "Show the file tree and tabs.";
+
+"settings.defaults.title" = "Defaults";
+"settings.defaults.subtitle" = "Restore the original configuration.";
+"settings.defaults.reset.title" = "Reset settings";
+"settings.defaults.reset.subtitle" = "Revert all preferences to their factory values.";
+"settings.defaults.reset.warning" = "This will restore layouts and editor preferences.";
+"settings.defaults.reset.button" = "Reset to Defaults";
+
+"language_modules.search.placeholder" = "Search modules...";
+"language_modules.card.title" = "Language Modules";
+"language_modules.card.subtitle" = "Enable or disable language-specific features for better performance.";
+"language_modules.empty" = "No modules found matching '%@'";
+"language_modules.feature_summary" = "Syntax coloring, symbol extraction, and IntelliSense.";
+"language_modules.extensions" = "Extensions: %@";
+"language_modules.performance.title" = "Performance Note";
+"language_modules.performance.subtitle" = "Disabling unused modules reduces memory usage and speeds up indexing.";
+"language_modules.performance.detail" = "When a module is disabled, files of that type will still be viewable but will not have syntax highlighting or symbol navigation.";

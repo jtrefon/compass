@@ -29,10 +29,56 @@ public struct JSONToolCallParser: ToolCallParser, Sendable {
 
         let jsonStr = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard let data = jsonStr.data(using: .utf8),
-            let function = try? JSONDecoder().decode(ToolCall.Function.self, from: data)
+        guard
+            let data = jsonStr.data(using: .utf8),
+            let toolCall = parseToolCall(from: data)
         else { return nil }
 
-        return ToolCall(function: function)
+        // If tool schemas are provided, only accept calls to declared tools.
+        if let tools, !tools.isEmpty {
+            var isDeclaredTool = false
+            for tool in tools {
+                let functionSpec = tool["function"] as? [String: any Sendable]
+                if functionSpec?["name"] as? String == toolCall.function.name {
+                    isDeclaredTool = true
+                    break
+                }
+            }
+
+            guard isDeclaredTool else {
+                return nil
+            }
+        }
+
+        return toolCall
+    }
+
+    private func parseToolCall(from data: Data) -> ToolCall? {
+        guard var jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+
+        var id = jsonObject["id"] as? String
+        if let functionObject = jsonObject["function"] as? [String: Any] {
+            id = id ?? functionObject["id"] as? String
+            jsonObject = functionObject
+        }
+
+        if let stringifiedArguments = jsonObject["arguments"] as? String {
+            guard
+                let argumentsData = stringifiedArguments.data(using: .utf8),
+                let argumentsObject = try? JSONSerialization.jsonObject(with: argumentsData)
+                    as? [String: Any]
+            else { return nil }
+            jsonObject["arguments"] = argumentsObject
+        }
+
+        guard
+            let normalizedData = try? JSONSerialization.data(withJSONObject: jsonObject),
+            let function = try? JSONDecoder().decode(ToolCall.Function.self, from: normalizedData)
+        else { return nil }
+
+        return ToolCall(function: function, id: id)
     }
 }

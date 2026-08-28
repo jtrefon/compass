@@ -4,7 +4,7 @@ import { BASE_URL, REPO } from "../consts";
 ---
 
 <BaseLayout
-  title="Benchmarks — Compass"
+  title="Benchmarks: Compass"
   description="Compass benchmark results: semantic search p50 0.11ms, 2,000 vectors added in 158ms, embeddings 3–15ms on-device. Numbers we measured, not numbers we hope for."
   canonical={`${BASE_URL}/benchmarks`}
 >
@@ -13,7 +13,7 @@ import { BASE_URL, REPO } from "../consts";
       <p class="section-kicker reveal">Benchmarks</p>
       <h1 class="reveal">Numbers we measured, not numbers we hope for.</h1>
       <p class="reveal" style="font-size:1.05rem;color:var(--text-dim);max-width:620px;margin:0 auto;line-height:1.7">
-        Every metric below comes from <code>./run.sh benchmark</code> — a test suite that runs the
+        Every metric below comes from <code>./run.sh benchmark</code>, a test suite that runs the
         <strong>real app code</strong> (real FAISS bridge, real vector store, real embedding
         models), not mocks. Run it on your own machine; the command is in the repo.
       </p>
@@ -60,7 +60,7 @@ import { BASE_URL, REPO } from "../consts";
             <tr>
               <td style="padding:10px 14px;font-family:var(--font-mono);color:var(--accent)">Embeddings (on-device, ANE)</td>
               <td style="padding:10px 14px"><strong>3.2 / 7.4 / 15.0 ms</strong></td>
-              <td style="padding:10px 14px;color:var(--text-dim)">bge-small (384d) / bge-base (768d) / bge-large (1024d) — avg per embedding</td>
+              <td style="padding:10px 14px;color:var(--text-dim)">bge-small (384d) / bge-base (768d) / bge-large (1024d), avg per embedding</td>
             </tr>
           </tbody>
         </table>
@@ -78,7 +78,7 @@ import { BASE_URL, REPO } from "../consts";
       <h2 class="section-title reveal">The numbers our users actually care about</h2>
       <div style="display:grid;gap:16px">
         <div class="reveal card">
-          <h3 style="font-size:.95rem;margin-bottom:4px">RAM — the founding story</h3>
+          <h3 style="font-size:.95rem;margin-bottom:4px">RAM: the founding story</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">
             Compass exists because Cursor + Docker ate a 16GB MacBook. Footprint and growth are
             tracked like bugs: 8 MB for 2,000 semantic entries, and we publish the delta because
@@ -86,14 +86,14 @@ import { BASE_URL, REPO } from "../consts";
           </p>
         </div>
         <div class="reveal card">
-          <h3 style="font-size:.95rem;margin-bottom:4px">Search latency — retrieval must feel instant</h3>
+          <h3 style="font-size:.95rem;margin-bottom:4px">Search latency: retrieval must feel instant</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">
             RAG quality is worthless if retrieval feels slow. Sub-millisecond at 2,000 entries;
             the target is sub-10ms at 1,000,000. The index grows; the latency shouldn't.
           </p>
         </div>
         <div class="reveal card">
-          <h3 style="font-size:.95rem;margin-bottom:4px">Embedding latency — the Neural Engine promise</h3>
+          <h3 style="font-size:.95rem;margin-bottom:4px">Embedding latency: the Neural Engine promise</h3>
           <p style="font-size:.85rem;color:var(--text-dim)">
             All bundled models must stay under 100 ms per embedding. Current: 3–15 ms.
           </p>
@@ -112,7 +112,7 @@ import { BASE_URL, REPO } from "../consts";
           <p style="font-size:.85rem;color:var(--text-dim)">
             The <strong>&lt;100ms</strong> claim, measured with the real 4B on-device model:
             time-to-first-token, prompt tokens/sec, generation tokens/sec, RSS before/after load.
-            The metrics struct already exists in the harness — the run needs the model download
+            The metrics struct already exists in the harness; the run needs the model download
             and the stable merge. This is the marquee number; we won't publish it until we've
             actually measured it.
           </p>
@@ -126,7 +126,7 @@ import { BASE_URL, REPO } from "../consts";
         </div>
       </div>
       <p class="reveal" style="text-align:center;margin-top:24px;color:var(--text-dim)">
-        Benchmarks run on every release and on demand — see the
+        Benchmarks run on every release and on demand. See the
         <a href={`${REPO}/actions/workflows/benchmark.yml`} style="color:var(--accent);text-decoration:underline">Benchmark workflow</a>.
       </p>
     </div>

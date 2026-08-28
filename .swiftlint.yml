@@ -2,9 +2,19 @@ disabled_rules:
   - one_declaration_per_file
 
 included:
-  - osx-ide
+  - Compass
 
 excluded:
   - .build
   - .build-tests
   - "**/DerivedSources"
+
+# Guardrails enforcing DESIGN_STANDARDS.md (token-based UI, no magic numbers).
+custom_rules:
+  # Warn on literal cornerRadius: values that bypass AppConstants.Layout.corner* tokens.
+  # cornerRadius: 0 is exempt (full-bleed edges meeting a window/panel border).
+  hardcoded_corner_radius:
+    name: "Hardcoded corner radius"
+    regex: 'cornerRadius:\s*(?!0\b)\d+(\.\d+)?'
+    message: "Use AppConstants.Layout.corner* tokens (cornerSm=6, cornerMd=8, cornerLg=12, cornerXL=16) instead of a literal cornerRadius. See DESIGN_STANDARDS.md §3."
+    severity: warning

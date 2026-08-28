@@ -17,7 +17,7 @@ This document provides a systematic analysis and actionable fix plan.
 
 ### 1. DatabaseManager - Synchronous Blocking (CRITICAL)
 
-**Location:** [`DatabaseManager.swift:326-332`](osx-ide/Services/Index/Database/DatabaseManager.swift:326)
+**Location:** [`DatabaseManager.swift:326-332`](compass/Services/Index/Database/DatabaseManager.swift:326)
 
 ```swift
 internal func syncOnQueue<T>(_ work: () throws -> T) throws -> T {
@@ -51,7 +51,7 @@ actor DatabaseStore {
 
 ### 2. DependencyContainer Initialization (CRITICAL)
 
-**Location:** [`DependencyContainer.swift:17-85`](osx-ide/Services/DependencyContainer.swift:17)
+**Location:** [`DependencyContainer.swift:17-85`](compass/Services/DependencyContainer.swift:17)
 
 ```swift
 init(isTesting: Bool = ...) {
@@ -97,7 +97,7 @@ class DependencyContainer {
 
 ### 3. CodebaseIndex Synchronous Initialization (CRITICAL)
 
-**Location:** [`CodebaseIndex.swift:29-62`](osx-ide/Services/Index/CodebaseIndex.swift:29)
+**Location:** [`CodebaseIndex.swift:29-62`](compass/Services/Index/CodebaseIndex.swift:29)
 
 ```swift
 init(eventBus: EventBusProtocol, projectRoot: URL, aiService: AIService, config: IndexConfiguration) throws {
@@ -144,7 +144,7 @@ class CodebaseIndex: CodebaseIndexProtocol {
 
 ### 4. CoreML Embedding Model Loading (HIGH)
 
-**Location:** [`MemoryEmbeddingGenerator.swift:73-97`](osx-ide/Services/Index/Memory/MemoryEmbeddingGenerator.swift:73)
+**Location:** [`MemoryEmbeddingGenerator.swift:73-97`](compass/Services/Index/Memory/MemoryEmbeddingGenerator.swift:73)
 
 ```swift
 public static func makeDefault(projectRoot: URL?) -> CoreMLTextEmbeddingGenerator? {
@@ -183,7 +183,7 @@ public static func makeDefault(projectRoot: URL?) async -> CoreMLTextEmbeddingGe
 
 ### 5. ProjectCoordinator.configureProject (HIGH)
 
-**Location:** [`ProjectCoordinator.swift:38-78`](osx-ide/Services/ProjectCoordinator.swift:38)
+**Location:** [`ProjectCoordinator.swift:38-78`](compass/Services/ProjectCoordinator.swift:38)
 
 ```swift
 func configureProject(root: URL) {
@@ -234,7 +234,7 @@ func configureProject(root: URL) async {
 
 ### 6. EventBus Main Actor Isolation (MEDIUM)
 
-**Location:** [`EventBus.swift:29`](osx-ide/Core/EventBus.swift:29)
+**Location:** [`EventBus.swift:29`](compass/Core/EventBus.swift:29)
 
 ```swift
 @MainActor
@@ -270,7 +270,7 @@ public final class EventBus: EventBusProtocol, @unchecked Sendable {
 
 ### 7. ConversationManager Initialization (MEDIUM)
 
-**Location:** [`ConversationManager.swift:100-146`](osx-ide/Services/ConversationManager.swift:100)
+**Location:** [`ConversationManager.swift:100-146`](compass/Services/ConversationManager.swift:100)
 
 ```swift
 init(dependencies: Dependencies) {
@@ -294,7 +294,7 @@ init(dependencies: Dependencies) {
 
 ### 8. LocalModelDownloader (LOW - Already Async)
 
-**Location:** [`LocalModelDownloader.swift:3`](osx-ide/Services/LocalModels/LocalModelDownloader.swift:3)
+**Location:** [`LocalModelDownloader.swift:3`](compass/Services/LocalModels/LocalModelDownloader.swift:3)
 
 ```swift
 actor LocalModelDownloader {
@@ -310,7 +310,7 @@ actor LocalModelDownloader {
 
 ### 9. LocalModelProcessAIService (LOW - Already Async)
 
-**Location:** [`LocalModelProcessAIService.swift:37`](osx-ide/Services/LocalModels/LocalModelProcessAIService.swift:37)
+**Location:** [`LocalModelProcessAIService.swift:37`](compass/Services/LocalModels/LocalModelProcessAIService.swift:37)
 
 ```swift
 actor LocalModelProcessAIService: AIService {

@@ -28,7 +28,7 @@ jobs:
   build:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install libomp (OpenMP)
         run: brew install libomp
@@ -65,10 +65,26 @@ jobs:
           fi
 
       - name: Cache Derived Data
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/${{ env.DERIVED_DATA }}
           key: derived-${{ github.sha }}
+
+  lint:
+    # Local static analysis replaces hosted Codacy/Sonar for Swift: the repo's
+    # own .swiftlint.yml (incl. DESIGN_STANDARDS guardrails) runs here and posts
+    # PR annotations via the github-actions-logging reporter. Advisory today —
+    # the codebase carries ~150 pre-existing errors; flip `|| true` off once the
+    # debt is burned down.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: swiftlint lint --reporter github-actions-logging || true
 
   unit-tests:
     # Skip on Dependabot branches: dependency bumps get the required build
@@ -78,13 +94,13 @@ jobs:
     needs: build
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install libomp (OpenMP)
         run: brew install libomp
 
       - name: Restore Derived Data
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.build-ci
           key: derived-${{ github.sha }}
@@ -115,13 +131,13 @@ jobs:
     needs: build
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install libomp (OpenMP)
         run: brew install libomp
 
       - name: Restore Derived Data
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.build-ci
           key: derived-${{ github.sha }}
@@ -147,13 +163,13 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Restore Derived Data
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.build-ci
           key: derived-${{ github.sha }}
 
       - name: Upload App Bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Compass-app
           path: .build-ci/Build/Products/Debug/*.app

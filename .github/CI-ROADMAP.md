@@ -49,7 +49,7 @@ These fail in CI and are skipped with `-skip-testing`. Fix them at your convenie
 
 ### 4. CODEOWNERS
 - Require specific reviewers for critical paths
-- `/osx-ide/Services/` @team-leads
+- `/Compass/Services/` @team-leads
 - Config: `.github/CODEOWNERS`
 - *Effort: 5min*
 
@@ -81,7 +81,7 @@ These fail in CI and are skipped with `-skip-testing`. Fix them at your convenie
 
 ### 9. Test Sharding
 - Split unit tests across 2-3 parallel runners
-- `-only-testing:osx-ideTests/TestSuiteA` etc.
+- `-only-testing:CompassTests/TestSuiteA` etc.
 - Cut unit test wall time ~50%
 - *Effort: 30min*
 

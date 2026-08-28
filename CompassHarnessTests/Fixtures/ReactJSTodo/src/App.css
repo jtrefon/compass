@@ -1,0 +1,6 @@
+.app { max-width: 480px; margin: 2rem auto; font-family: system-ui, sans-serif; }
+.todo-list { list-style: none; padding: 0; }
+.todo { display: flex; gap: 0.5rem; align-items: center; padding: 0.5rem; border-bottom: 1px solid #eee; }
+.todo.done .text { text-decoration: line-through; color: #999; }
+.empty { color: #888; font-style: italic; }
+.add-todo { display: flex; gap: 0.5rem; margin-bottom: 1rem; }

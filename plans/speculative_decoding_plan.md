@@ -50,9 +50,9 @@ flowchart TB
 **How it works:**
 - If request requires tool execution → use OpenRouter only (reliable)
 - If request is simple chat (no tools) → use MLX or parallel race
-- MLX capability detection: [`MLXCapability.supportsStructuredToolCalls = false`](osx-ide/Services/ModelCapability.swift:50)
+- MLX capability detection: [`MLXCapability.supportsStructuredToolCalls = false`](compass/Services/ModelCapability.swift:50)
 
-**This is basically what your existing [`ModelRoutingAIService`](osx-ide/Services/ModelRoutingAIService.swift:10) already does!**
+**This is basically what your existing [`ModelRoutingAIService`](compass/Services/ModelRoutingAIService.swift:10) already does!**
 
 ---
 
@@ -93,7 +93,7 @@ flowchart TB
 **Safeguards:**
 - Only use MLX drafts for read-only operations
 - Always use OpenRouter for: file write, delete, command execution, network calls
-- Your existing tool filtering in [`filterToolsForMLX()`](osx-ide/Services/ModelRoutingAIService.swift:196) already does this!
+- Your existing tool filtering in [`filterToolsForMLX()`](compass/Services/ModelRoutingAIService.swift:196) already does this!
 
 ---
 
@@ -101,9 +101,9 @@ flowchart TB
 
 ### Your Architecture Is Already Safe
 
-Your current [`ModelRoutingAIService`](osx-ide/Services/ModelRoutingAIService.swift:10) already implements the safest approach:
+Your current [`ModelRoutingAIService`](compass/Services/ModelRoutingAIService.swift:10) already implements the safest approach:
 
-1. **Offline mode (MLX only)** → forces chat mode, limits tools to read-only ([line 196-210](osx-ide/Services/ModelRoutingAIService.swift:196))
+1. **Offline mode (MLX only)** → forces chat mode, limits tools to read-only ([line 196-210](compass/Services/ModelRoutingAIService.swift:196))
 2. **Online mode (OpenRouter)** → full tool execution
 
 ### Recommendation
@@ -135,9 +135,9 @@ Your current [`ModelRoutingAIService`](osx-ide/Services/ModelRoutingAIService.sw
 3. ❌ Wrong tool selection = real-world damage
 4. ❌ Race conditions create unpredictability
 
-Your existing architecture in [`ModelRoutingAIService`](osx-ide/Services/ModelRoutingAIService.swift:10) is the correct approach: use MLX for read-only/chat, use OpenRouter for tool execution.
+Your existing architecture in [`ModelRoutingAIService`](compass/Services/ModelRoutingAIService.swift:10) is the correct approach: use MLX for read-only/chat, use OpenRouter for tool execution.
 
 If you want to optimize latency, focus on:
 - Better RAG context retrieval with MLX
 - Response caching
-- Prompt prefix caching (you already have this in [`PromptPrefixCache`](osx-ide/Services/LocalModels/PromptPrefixCache.swift:1))
+- Prompt prefix caching (you already have this in [`PromptPrefixCache`](compass/Services/LocalModels/PromptPrefixCache.swift:1))

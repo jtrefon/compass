@@ -8,6 +8,8 @@
 ./run.sh test SuiteName   # Single suite filter (e.g. LogCoordinatorTests)
 ./run.sh harness          # Headless integration tests
 ./run.sh e2e              # XCUITest suites
+./run.sh check-prompts    # Guardrail: no orphan prompt files (no code reference)
+./run.sh benchmark-local  # Local chat KPI benchmark (Qwen3.5-4B); knobs via COMPASS_LOCAL_MODEL_*
 ./run.sh clean            # rm -rf .build .build-tests + xcodebuild clean
 ```
 
@@ -20,9 +22,9 @@ Package resolution: `xcodebuild -resolvePackageDependencies -project Compass.xco
 - **Entrypoint**: `CompassApp.swift:32` — `CompassApp` with `@NSApplicationDelegateAdaptor AppDelegate`.
 - **DI container**: `DependencyContainer.swift` — `@MainActor` class, creates all services, wires EventBus.
 - **EventBus**: `Core/EventBus.swift` — central pub/sub via Combine `PassthroughSubject`. Typed events, dispatched by type name. Subscribers receive on `DispatchQueue.main`.
-- **Two AI pipelines**: local (MLX 4B model for inline completion) + cloud (OpenRouter via `ConversationOrchestrator` for agentic work).
+- **Two AI pipelines**: local (fixed models — `LocalModelCatalog.chatModel` Qwen3.5-4B for chat/inference, `LocalModelCatalog.fimModel` Qwen2.5-Coder-1.5B for inline completion; no user model selection) + cloud (OpenRouter via `ConversationOrchestrator` for agentic work).
 - **Vector store**: FAISS via C bridge (`Services/VectorStore/CFAISSWrapper/` + `libfaiss_full.a`). Metadata in JSON sidecar.
-- **Project state dir**: `.ide/` by default, overridable via `IDE_DIR_NAME` env var. Houses logs, index, vector store, chat history, plans, checkpoints.
+- **Project state dir**: `.ide/` by default, overridable via `IDE_DIR_NAME` env var. Houses logs, index, vector store, chat history, plans.
 
 ## Modes
 
@@ -31,7 +33,7 @@ Three modes, three distinct purposes. Modes are **prompt/toolset selectors only*
 | Mode | Enum (`AIMode`) | Status | Tools | Prompt | Purpose |
 |---|---|---|---|---|---|
 | **Chat** | `.chat` | Shipping | All **except** mutation (`write`, `edit`, `rm`, `bash`, `write_file`, `run_command`, etc.) — read/search/browse/RAG only | `mode-chat` | Read-only co-pilot. Full search, web, and project/RAG access, but **cannot modify files or run a terminal**. For users who want the assistant to reason *with* them while they do the work themselves. |
-| **Coder** | `.coder` | **Primary / main mode** | Full access (all tools) | `mode-coder` | The **agentic coding harness**. User gives instructions; Coder executes them end-to-end (read → write/edit → run → verify). `usesNewArchitecture = true`. This is what the online agentic harness tests exercise. Competitive posture: Cursor / Windsurf / Codex-style agentic coding. |
+| **Coder** | `.coder` | **Primary / main mode** | Full access (all tools) | `mode-coder` | The **agentic coding harness**. User gives instructions; Coder executes them end-to-end (read → write/edit → run → verify). This is what the online agentic harness tests exercise. Competitive posture: Cursor / Windsurf / Codex-style agentic coding. |
 | **Agent** | `.agent` | **Planned — NOT built (stub is correct)** | Full access (same toolset as Coder) | `mode-agent` (stub: "under development and not yet operational") | Future fully-autonomous **deep-research engine** ("vibe coder"). For large/legacy efforts: architecture improvement, technical-debt reduction, legacy migration, issue hunting. Intended as a **never-ending loop** (until the user stops it or the goal is reached) that drills a subject to exhaustion — "not a single stone left unturned." Heavy, long-running (weeks/months of work). **No capacity to build this yet.** |
 
 ### Mode naming caveat (important)
@@ -56,7 +58,6 @@ Current stability work targets **Coder** (the main agentic mode): zero dropouts,
 ```
 .ide/
 ├── chat/                 # Conversation history
-├── checkpoints/          # Agent checkpoints
 ├── index/                # Codebase SQLite (FTS5 + symbols)
 ├── logs/
 │   └── conversations/    # NDJSON per conversation (conversation.ndjson + executions.ndjson)
@@ -79,13 +80,51 @@ ContextLogEvent / ToolResultEvent → EventBus
        └── stores (vector + SourceReference) in FAISS
 ```
 
+### Engine live path (read this before touching agent code)
+
+The agentic engine has ONE runtime path. Everything below is LIVE — anything not on
+this path is dead and must be deleted, not fixed:
+
+```
+send()  ConversationManager.sendMessage
+  └── ConversationSendCoordinator.send(request)      ← the ONLY entry point (UI + harness)
+        ├── cloud: executeNewArchitectureFlow
+        │     └── OrchestrationGraphRunner → graph nodes (Researcher/Analyst/Architect/PM/LeafExecutor/LeafReview/FinalResponse/FastPath)
+        │           └── AIInteractionCoordinator.sendMessageWithRetry → OpenAICompatibleChatService → OpenRouterAPIClient
+        └── local: executeLocalModelToolLoop (2-pass)
+              └── AIInteractionCoordinator → LocalModelProcessAIService → MLX (in-process)
+  every path ends at: ToolMarkupStripper (commit boundary) → ChatHistoryCoordinator.append
+tool execution: ToolExecutionCoordinator → AIToolExecutor.executeToolCall
+  → Tools/* (read/write/edit/rm/bash/search/glob/ls/context/web_*/plan/pinned_rule_*/index_exclusion)
+  → PreWritePreventionEngine → ToolScheduler.runWriteTask (per-path serialization)
+  → ToolTimeoutCenter + ToolTimeoutCircuitBreaker
+telemetry: ToolResultEvent → EventBus → LogCoordinator (NDJSON) + VectorStoreEmbeddingCoordinator
+          AIToolTraceLogger → .ide/logs/ai-trace.ndjson
+prompts: SystemPromptAssembler → PromptRepository → Prompts/ (27 files, all referenced — `./run.sh check-prompts`)
+```
+
+**Rules:**
+1. **Never apply a fix to a file not on this path.** Fixes landing in dead files were
+   the root cause of the engine's decay (three abandoned generations accreted on top
+   of each other). If a file is not on the live path, delete it in the same change.
+2. **`AIMode` is a prompt/toolset selector, nothing else.** `isAgentic` is `true` for
+   every mode; never gate agent machinery on `mode == .agent`.
+3. **Tool names have ONE source of truth**: `ToolTaxonomy` (readOnly/mutation/terminal/
+   planning/pinnedRules/execution). Never hardcode tool-name lists in filters.
+4. **Markup stripping has ONE implementation**: `ToolMarkupStripper`. Never add a second
+   stripper.
+5. **Prompts are referenced or deleted**: no prompt file without a code reference in
+   the same commit. `./run.sh check-prompts` enforces it.
+6. **Any→typed argument coercion goes through `ToolArgumentCoercion`** (JSON
+   round-tripping produces Double/Int/Int64/NSNumber/String — never assume one shape).
+
 ## Testing
 
 - **Swift Testing** (`import Testing`) used in newer tests (`LogCoordinatorTests`).
 - **XCTest** (`import XCTest`) used in older tests (`AIToolExecutorSchedulerTests`).
 - Unit tests: `./run.sh test` — skips 6 UI-heavy suites that need AppKit rendering.
 - Harness tests: `./run.sh harness` — headless integration, memory-guarded (6GB default).
-- Online harnesses (`WebSearchHarnessTests` etc.) require `OSX_IDE_RUN_ONLINE_HARNESS=1` and **must not run in parallel** (provider rate limits).
+- Online harnesses (`WebSearchHarnessTests` etc.) require `COMPASS_RUN_ONLINE_HARNESS=1` and **must not run in parallel** (provider rate limits).
 - Test config env vars: `ALLOW_EXTERNAL_APIS`, `USE_MOCK_SERVICES`, `SWIFT_ENABLE_EXPLICIT_MODULES`.
 
 ## Harness System (`CompassHarnessTests/`)
@@ -115,7 +154,7 @@ The harness is a **headless XCTest suite** that instantiates the real app's `Dep
 ./run.sh harness PureAgenticHarnessTests
 
 # Online suites (requires API keys — serial execution enforced)
-OSX_IDE_RUN_ONLINE_HARNESS=1 ./run.sh harness WebSearchHarnessTests
+COMPASS_RUN_ONLINE_HARNESS=1 ./run.sh harness WebSearchHarnessTests
 
 # Convenience commands
 ./run.sh harness-online              # Runs the online suites (WebSearch, WordPressReview, ReproCrash)
@@ -128,8 +167,8 @@ OSX_IDE_RUN_ONLINE_HARNESS=1 ./run.sh harness WebSearchHarnessTests
 
 | Command | Env var | Suites | Purpose |
 |---|---|---|---|
-| `harness` | `OSX_IDE_RUN_ONLINE_HARNESS=1` to include online | All harness suites: `PureAgenticHarnessTests`, `StripMarkupTest`, `RAGPreventionHarnessTests`, `WebSearchHarnessTests`, `WordPressReviewReproductionTests`, `ReproCrashTest`, `EmbeddingBenchmarkHarnessTests` | Headless integration tests |
-| `harness-online` | `OSX_IDE_RUN_ONLINE_HARNESS=1` (set automatically) | `WebSearchHarnessTests`, `WordPressReviewReproductionTests`, `ReproCrashTest` | Live-provider end-to-end runs |
+| `harness` | `COMPASS_RUN_ONLINE_HARNESS=1` to include online | All harness suites: `PureAgenticHarnessTests`, `StripMarkupTest`, `RAGPreventionHarnessTests`, `WebSearchHarnessTests`, `WordPressReviewReproductionTests`, `ReproCrashTest`, `EmbeddingBenchmarkHarnessTests` | Headless integration tests |
+| `harness-online` | `COMPASS_RUN_ONLINE_HARNESS=1` (set automatically) | `WebSearchHarnessTests`, `WordPressReviewReproductionTests`, `ReproCrashTest` | Live-provider end-to-end runs |
 | `harness-offline` | — | Offline suites (`PureAgenticHarnessTests`, `StripMarkupTest`, `RAGPreventionHarnessTests`, `EmbeddingBenchmarkHarnessTests`) | No provider traffic |
 | `benchmark-offline` | — | `EmbeddingBenchmarkHarnessTests` | Embedding model benchmarks |
 
@@ -140,7 +179,7 @@ OSX_IDE_RUN_ONLINE_HARNESS=1 ./run.sh harness WebSearchHarnessTests
 - `release()` unblocks the next waiter or resets to free
 - Prevents parallel provider traffic (429 floods / account bans)
 
-Online suites are skipped unless `OSX_IDE_RUN_ONLINE_HARNESS=1` is set (checked by `run.sh` and the gate).
+Online suites are skipped unless `COMPASS_RUN_ONLINE_HARNESS=1` is set (checked by `run.sh` and the gate).
 
 ### Memory guard
 
@@ -185,19 +224,19 @@ final class MyHarnessTests: XCTestCase {
 
 | Variable | Effect |
 |---|---|
-| `OSX_IDE_RUN_ONLINE_HARNESS=1` | Enables online harness suites (requires API keys) |
+| `COMPASS_RUN_ONLINE_HARNESS=1` | Enables online harness suites (requires API keys) |
 | `HARNESS_MAX_RSS_GB` | Memory guard limit (default: 6) |
 | `HARNESS_MODEL_ID` | Override the AI model used |
 | `HARNESS_USE_OPENROUTER` | Force OpenRouter provider |
 | `HARNESS_TEST_PROFILE_DIR` | Directory for test profile artifacts |
-| `OSXIDE_DISABLE_HEAVY_INIT` | Skip heavy initialization in test runtime |
-| `OSXIDE_ENABLE_PRODUCTION_PARITY_HARNESS` | Enable production parity mode |
-| `OSXIDE_LOCAL_MODEL_MAX_RSS_MB` | Local model memory budget |
-| `OSX_IDE_PROMPTS_ROOT` | Override prompts directory |
-| `OSXIDE_DEGRADE_ON_TRANSPORT_FAILURE` | Graceful degradation on transport failure |
-| `OSXIDE_FALLBACK_MODEL_ID` | Fallback model ID |
-| `OSXIDE_CIRCUIT_FAILURE_THRESHOLD` | Circuit breaker threshold |
-| `OSXIDE_CIRCUIT_COOLDOWN_SEC` | Circuit breaker cooldown seconds |
+| `COMPASS_DISABLE_HEAVY_INIT` | Skip heavy initialization in test runtime |
+| `COMPASS_ENABLE_PRODUCTION_PARITY_HARNESS` | Enable production parity mode |
+| `COMPASS_LOCAL_MODEL_MAX_RSS_MB` | Local model memory budget |
+| `COMPASS_PROMPTS_ROOT` | Override prompts directory |
+| `COMPASS_DEGRADE_ON_TRANSPORT_FAILURE` | Graceful degradation on transport failure |
+| `COMPASS_FALLBACK_MODEL_ID` | Fallback model ID |
+| `COMPASS_CIRCUIT_FAILURE_THRESHOLD` | Circuit breaker threshold |
+| `COMPASS_CIRCUIT_COOLDOWN_SEC` | Circuit breaker cooldown seconds |
 
 ### Test tools used by harness
 

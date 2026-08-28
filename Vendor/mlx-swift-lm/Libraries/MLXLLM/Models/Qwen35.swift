@@ -233,8 +233,6 @@ final class Qwen35GatedDeltaNet: Module {
         let B = inputs.dim(0)
         let S = inputs.dim(1)
 
-
-
         var qkv = inProjQKV(inputs)
         let z = inProjZ(inputs).reshaped(B, S, numVHeads, headVDim)
         let b = inProjB(inputs)
@@ -267,12 +265,11 @@ final class Qwen35GatedDeltaNet: Module {
         let dtype = q.dtype
         let invScale = pow(Float(headKDim), -0.5)
         let qNormed =
-            MLXArray(pow(invScale, 2)).asType(dtype)
+            MLXArray(pow(invScale, 2), dtype: dtype)
             * MLXFast.rmsNorm(q, weight: MLXArray.mlxNone, eps: 1e-6)
         let kNormed =
-            MLXArray(invScale).asType(dtype)
+            MLXArray(invScale, dtype: dtype)
             * MLXFast.rmsNorm(k, weight: MLXArray.mlxNone, eps: 1e-6)
-
 
         var out: MLXArray
 
@@ -287,7 +284,6 @@ final class Qwen35GatedDeltaNet: Module {
             state: state,
             mask: mask
         )
-
 
         if let cache {
             cache[1] = state
@@ -352,8 +348,6 @@ final class Qwen35Attention: Module {
         let B = x.dim(0)
         let L = x.dim(1)
 
-
-
         let qProjOutput = qProj(x)
         let qSplit = qProjOutput.reshaped(B, L, attentionHeads, -1).split(parts: 2, axis: -1)
         var queries = qSplit[0]
@@ -366,9 +360,9 @@ final class Qwen35Attention: Module {
         keys = kNorm(keys.reshaped(B, L, kvHeads, -1)).transposed(0, 2, 1, 3)
         values = values.reshaped(B, L, kvHeads, -1).transposed(0, 2, 1, 3)
 
-        queries = applyRotaryPosition(rope, to: queries, cache: cache)
-        keys = applyRotaryPosition(rope, to: keys, cache: cache)
-
+        let offset = cache?.ropeOffset
+        queries = applyRotaryPosition(rope, to: queries, offset: offset)
+        keys = applyRotaryPosition(rope, to: keys, offset: offset)
 
         let output = attentionWithCacheUpdate(
             queries: queries,
@@ -380,7 +374,6 @@ final class Qwen35Attention: Module {
         )
         .transposed(0, 2, 1, 3)
         .reshaped(B, L, -1)
-
 
         return oProj(sigmoidMultiply(output, gate))
     }
@@ -431,7 +424,7 @@ final class Qwen35SparseMoeBlock: Module, UnaryLayer {
         }
 
         let y = switchMLP(x, inds)
-        let combined = (y * scores[.ellipsis, .newAxis]).sum(axis: -2)
+        let combined = weightedExpertSum(y, scores)
 
         var sharedY = sharedExpert(x)
         sharedY = sigmoid(sharedExpertGate(x)) * sharedY
@@ -543,9 +536,6 @@ public class Qwen35TextModelInner: Module {
         let faMask = createAttentionMask(h: hiddenStates, cache: cacheArray?[faIdx])
         let ssmMask = createSSMMask(h: hiddenStates, cache: cacheArray?[ssmIdx] as? MambaCache)
 
-        let modelDtype = hiddenStates.dtype
-        let isPrefill = inputs.dim(1) > 1
-
         for (i, layer) in layers.enumerated() {
             let mask = layer.isLinear ? ssmMask : nil
             let attnMask =
@@ -553,15 +543,7 @@ public class Qwen35TextModelInner: Module {
                 ? MLXFast.ScaledDotProductAttentionMaskMode.none : faMask
             hiddenStates = layer(
                 hiddenStates, attentionMask: attnMask, ssmMask: mask, cache: cacheArray?[i])
-            hiddenStates = hiddenStates.asType(modelDtype)
-
-            if isPrefill {
-                eval(hiddenStates)
-                if let c = cacheArray?[i] { eval(c) }
-                Memory.clearCache()
-            }
-            }
-
+        }
 
         return norm(hiddenStates)
     }
@@ -598,23 +580,48 @@ public class Qwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     }
 
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
-        let maxKVSize = parameters?.maxKVSize
-        let kvBits = parameters?.kvBits
+        let attentionCache = Qwen35TextModel.makeAttentionCache(parameters: parameters)
         return model.layers.map { layer in
             if layer.isLinear {
                 return MambaCache()
             }
-            // Create QuantizedKVCache directly when kvBits is set.
-            // maybeQuantizeKVCache is NOT called during prefill chunks, so KVCacheSimple
-            // would stay FP16 and accumulate ~10GB before post-prefill quantization.
-            if let kvBits = kvBits, kvBits < 8 {
-                return QuantizedKVCache(groupSize: 64, bits: kvBits, maxSize: maxKVSize) as KVCache
-            }
-            if let maxKVSize = maxKVSize {
-                return RotatingKVCache(maxSize: maxKVSize, keep: 4) as KVCache
-            }
-            return KVCacheSimple()
+            return attentionCache.copy()
         }
+    }
+
+    /// Build the attention KV cache for a single full-attention layer, honoring
+    /// ``GenerateParameters`` memory controls. The GatedDelta (linear) recurrent
+    /// states are not windowed or quantized — they are fixed-size per-token states.
+    ///
+    /// Quantization wins over windowing when both are set: the quantized cache
+    /// is unbounded, awarding back the full context, and 4-bit KV at a capped
+    /// context window is small. The rotating-window cache is used when no
+    /// quantization applies (``RotatingKVCache.toQuantized()`` is not
+    /// implemented upstream, so a windowed cache cannot later be quantized).
+    private static func makeAttentionCache(parameters: GenerateParameters?) -> any KVCache {
+        if let (bits, groupSize) = resolveAttentionCacheQuantization(parameters),
+            parameters?.quantizedKVStart == 0
+        {
+            return QuantizedKVCache(groupSize: groupSize, bits: bits)
+        }
+
+        if let maxKVSize = parameters?.maxKVSize {
+            return RotatingKVCache(maxSize: maxKVSize, keep: 4)
+        }
+
+        return KVCacheSimple()
+    }
+
+    private static func resolveAttentionCacheQuantization(_ parameters: GenerateParameters?)
+        -> (bits: Int, groupSize: Int)?
+    {
+        if let scheme = parameters?.kvScheme, let resolved = resolveAffineScheme(scheme) {
+            return resolved
+        }
+        if let bits = parameters?.kvBits {
+            return (bits, parameters?.kvGroupSize ?? 64)
+        }
+        return nil
     }
 
     public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {

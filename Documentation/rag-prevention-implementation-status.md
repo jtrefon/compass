@@ -287,21 +287,21 @@ This document tracks the implementation status of the RAG enrichment and pre-wri
 ## 🔗 Related Files
 
 ### Implementation
-- `osx-ide/Services/RAG/RAGModels.swift`
-- `osx-ide/Services/RAG/RetrievalIntentClassifier.swift`
-- `osx-ide/Services/RAG/RAGEvidenceFusionRanker.swift`
-- `osx-ide/Services/RAG/CodebaseIndexRAGRetriever.swift`
-- `osx-ide/Services/RAG/RAGContextBuilder.swift`
-- `osx-ide/Services/RAG/Events/RAGRetrievalEvents.swift`
-- `osx-ide/Services/Prevention/PreWritePreventionEngine.swift`
-- `osx-ide/Services/AIToolExecutor.swift`
-- `osx-ide/Services/AIToolExecutor+Execution.swift`
+- `compass/Services/RAG/RAGModels.swift`
+- `compass/Services/RAG/RetrievalIntentClassifier.swift`
+- `compass/Services/RAG/RAGEvidenceFusionRanker.swift`
+- `compass/Services/RAG/CodebaseIndexRAGRetriever.swift`
+- `compass/Services/RAG/RAGContextBuilder.swift`
+- `compass/Services/RAG/Events/RAGRetrievalEvents.swift`
+- `compass/Services/Prevention/PreWritePreventionEngine.swift`
+- `compass/Services/AIToolExecutor.swift`
+- `compass/Services/AIToolExecutor+Execution.swift`
 
 ### Tests
-- `osx-ideTests/Services/RAG/RAGEvidenceFusionRankerTests.swift`
-- `osx-ideTests/Services/RAG/RetrievalIntentClassifierTests.swift`
-- `osx-ideTests/Services/Prevention/PreWritePreventionEngineTests.swift`
-- `osx-ideHarnessTests/RAGPreventionHarnessTests.swift`
+- `compassTests/Services/RAG/RAGEvidenceFusionRankerTests.swift`
+- `compassTests/Services/RAG/RetrievalIntentClassifierTests.swift`
+- `compassTests/Services/Prevention/PreWritePreventionEngineTests.swift`
+- `compassHarnessTests/RAGPreventionHarnessTests.swift`
 
 ### Documentation
 - `plans/rag-enrichment-mess-prevention-spec.md` - Original specification

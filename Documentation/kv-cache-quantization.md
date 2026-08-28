@@ -1,4 +1,4 @@
-# KV Cache Quantization in osx-ide
+# KV Cache Quantization in compass
 
 ## Terminology
 
@@ -53,8 +53,8 @@ The "4-bit KV Cache" toggle in Local Model Settings controls this feature.
 ### Environment Variable
 
 ```
-OSXIDE_LOCAL_MODEL_KV_CACHE_4BIT=1   # Enable
-OSXIDE_LOCAL_MODEL_KV_CACHE_4BIT=0   # Disable (default)
+COMPASS_LOCAL_MODEL_KV_CACHE_4BIT=1   # Enable
+COMPASS_LOCAL_MODEL_KV_CACHE_4BIT=0   # Disable (default)
 ```
 
 ### UserDefaults Key

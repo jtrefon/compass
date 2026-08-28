@@ -17,12 +17,12 @@ jobs:
       DMG_NAME: compass.dmg
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Select Xcode 26.1.1
-        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90
         with:
           xcode-version: "26.1.1"
 
@@ -193,8 +193,8 @@ jobs:
           ## Install
 
           - Download the DMG from this release, open it, and drag `Compass.app` into `Applications`.
-          - Homebrew convenience install:
-            `brew install --cask https://raw.githubusercontent.com/jtrefon/ai-ide/main/Casks/compass.rb`
+          - Homebrew convenience install (auto-taps the cask):
+            `brew install --cask jtrefon/compass/compass`
 
           ## macOS Security Note
 
@@ -213,7 +213,7 @@ jobs:
           EOF
 
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
         with:
           body_path: RELEASE_NOTES.md
           files: |

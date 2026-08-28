@@ -25,6 +25,8 @@ old_*.swift
 .build-tests/
 .build-tests/**
 .vscode/
+.windsurf/
+.hermes/
 .codacy/logs/
 .codacy/tools-configs/
 
@@ -98,3 +100,6 @@ xcuserdata/
 
 # Internal working docs — local only
 TECH_DEBT.md
+
+# Personal research attachments — never commit
+.hermes/desktop-attachments/*.docx

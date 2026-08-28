@@ -8,7 +8,7 @@ The agent panel implementation has several architectural issues causing UI glitc
 
 ### Issue 1: State Propagation Chain Complexity
 
-**Location:** [`ChatHistoryManager.swift`](osx-ide/Services/ChatHistoryManager.swift), [`ChatHistoryCoordinator.swift`](osx-ide/Services/ChatHistoryCoordinator.swift), [`ConversationManager.swift`](osx-ide/Services/ConversationManager.swift)
+**Location:** [`ChatHistoryManager.swift`](compass/Services/ChatHistoryManager.swift), [`ChatHistoryCoordinator.swift`](compass/Services/ChatHistoryCoordinator.swift), [`ConversationManager.swift`](compass/Services/ConversationManager.swift)
 
 **Problem:** There's a complex chain of state propagation:
 1. `ChatHistoryManager` is an `@MainActor ObservableObject` with `@Published var messages`
@@ -27,11 +27,11 @@ ChatHistoryManager.@Published messages
 **Issues:**
 - The `ChatHistoryCoordinator` is a pass-through that adds no value but adds complexity
 - Manual observation setup is fragile and duplicates SwiftUI's built-in observation
-- The `refreshTick` workaround in [`AIChatPanel.swift:107-111`](osx-ide/Components/AIChatPanel.swift:107) indicates the normal observation isn't working properly
+- The `refreshTick` workaround in [`AIChatPanel.swift:107-111`](compass/Components/AIChatPanel.swift:107) indicates the normal observation isn't working properly
 
 ### Issue 2: Draft Message Handling During Streaming
 
-**Location:** [`ConversationManager.swift:152-177`](osx-ide/Services/ConversationManager.swift:152), [`ChatHistoryManager.swift:39-45`](osx-ide/Services/ChatHistoryManager.swift:39)
+**Location:** [`ConversationManager.swift:152-177`](compass/Services/ConversationManager.swift:152), [`ChatHistoryManager.swift:39-45`](compass/Services/ChatHistoryManager.swift:39)
 
 **Problem:** When streaming starts:
 1. A draft message with content "Generating..." is appended (line 321-325)
@@ -53,7 +53,7 @@ public func append(_ message: ChatMessage) {
 
 ### Issue 3: Message Update Race Conditions
 
-**Location:** [`ConversationManager.swift:152-177`](osx-ide/Services/ConversationManager.swift:152)
+**Location:** [`ConversationManager.swift:152-177`](compass/Services/ConversationManager.swift:152)
 
 **Problem:** The streaming handler has potential race conditions:
 1. `activeStreamingRunId` and `draftAssistantMessageId` are checked separately
@@ -73,7 +73,7 @@ private func handleLocalModelStreamingChunk(_ event: LocalModelStreamingChunkEve
 
 ### Issue 4: Orchestration Flow Error Handling
 
-**Location:** [`ConversationSendCoordinator.swift:49-88`](osx-ide/Services/ConversationSendCoordinator.swift:49), [`FinalResponseHandler.swift:69-120`](osx-ide/Services/ConversationFlow/FinalResponseHandler.swift:69)
+**Location:** [`ConversationSendCoordinator.swift:49-88`](compass/Services/ConversationSendCoordinator.swift:49), [`FinalResponseHandler.swift:69-120`](compass/Services/ConversationFlow/FinalResponseHandler.swift:69)
 
 **Problem:** The orchestration flow has issues:
 1. `send()` method creates a draft message but doesn't handle all error paths
@@ -91,7 +91,7 @@ startSendTask → append draft "Generating..."
 
 ### Issue 5: UI Refresh Mechanism
 
-**Location:** [`AIChatPanel.swift:107-111`](osx-ide/Components/AIChatPanel.swift:107), [`MessageListView.swift:28-42`](osx-ide/Components/MessageListView.swift:28)
+**Location:** [`AIChatPanel.swift:107-111`](compass/Components/AIChatPanel.swift:107), [`MessageListView.swift:28-42`](compass/Components/MessageListView.swift:28)
 
 **Problem:** The UI uses workarounds to force refresh:
 1. `refreshTick` counter is incremented to force view updates
@@ -115,7 +115,7 @@ private var visibleMessagesSignature: String {
 
 ### Issue 6: Duplicate Message Storage References
 
-**Location:** [`ConversationManager.swift`](osx-ide/Services/ConversationManager.swift)
+**Location:** [`ConversationManager.swift`](compass/Services/ConversationManager.swift)
 
 **Problem:** `ConversationManager` has two ways to access messages:
 1. `historyCoordinator.messages` (used in most places)
@@ -222,22 +222,22 @@ graph TD
 ## Files to Modify
 
 1. **Remove:**
-   - `osx-ide/Services/ChatHistoryCoordinator.swift` (pass-through wrapper)
+   - `compass/Services/ChatHistoryCoordinator.swift` (pass-through wrapper)
 
 2. **Modify:**
-   - `osx-ide/Services/ConversationManager.swift` - Use ChatHistoryManager directly, fix streaming state
-   - `osx-ide/Services/ChatHistoryManager.swift` - Add draft message support, improve upsert
-   - `osx-ide/Components/AIChatPanel.swift` - Remove refreshTick workaround, fix observation
-   - `osx-ide/Components/MessageListView.swift` - Simplify change detection
-   - `osx-ide/Models/ChatMessage.swift` - Add isDraft flag
-   - `osx-ide/Models/ChatMessageVisibilityPolicy.swift` - Handle draft messages properly
-   - `osx-ide/Services/ConversationSendCoordinator.swift` - Use ChatHistoryManager directly
-   - `osx-ide/Services/ConversationFlow/FinalResponseHandler.swift` - Update reference
-   - `osx-ide/Services/ConversationFlow/ToolLoopHandler.swift` - Update reference
-   - `osx-ide/Services/ConversationFlow/InitialResponseHandler.swift` - Update reference
-   - `osx-ide/Services/ConversationFlow/QAReviewHandler.swift` - Update reference
-   - `osx-ide/Services/ConversationFlow/ReasoningCorrectionsHandler.swift` - Update reference
-   - `osx-ide/Services/Orchestration/Nodes/*.swift` - Update coordinator references to manager
+   - `compass/Services/ConversationManager.swift` - Use ChatHistoryManager directly, fix streaming state
+   - `compass/Services/ChatHistoryManager.swift` - Add draft message support, improve upsert
+   - `compass/Components/AIChatPanel.swift` - Remove refreshTick workaround, fix observation
+   - `compass/Components/MessageListView.swift` - Simplify change detection
+   - `compass/Models/ChatMessage.swift` - Add isDraft flag
+   - `compass/Models/ChatMessageVisibilityPolicy.swift` - Handle draft messages properly
+   - `compass/Services/ConversationSendCoordinator.swift` - Use ChatHistoryManager directly
+   - `compass/Services/ConversationFlow/FinalResponseHandler.swift` - Update reference
+   - `compass/Services/ConversationFlow/ToolLoopHandler.swift` - Update reference
+   - `compass/Services/ConversationFlow/InitialResponseHandler.swift` - Update reference
+   - `compass/Services/ConversationFlow/QAReviewHandler.swift` - Update reference
+   - `compass/Services/ConversationFlow/ReasoningCorrectionsHandler.swift` - Update reference
+   - `compass/Services/Orchestration/Nodes/*.swift` - Update coordinator references to manager
 
 3. **Add:**
-   - `osx-ide/Services/StreamingState.swift` - Consolidated streaming state (optional, may just fix in place)
+   - `compass/Services/StreamingState.swift` - Consolidated streaming state (optional, may just fix in place)

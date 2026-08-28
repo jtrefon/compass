@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The tool execution failure in osx-ide has **multiple root causes** that compound each other. The harness tests are correctly validating tool execution, but the underlying system has critical gaps in how tools are passed to and from the local model.
+The tool execution failure in compass has **multiple root causes** that compound each other. The harness tests are correctly validating tool execution, but the underlying system has critical gaps in how tools are passed to and from the local model.
 
 **Key Finding**: The model is generating reasoning content (`<ide_reasoning>` blocks) but **NOT generating native tool calls** (Tool calls: 0). This is because:
 
@@ -17,11 +17,11 @@ The tool execution failure in osx-ide has **multiple root causes** that compound
 ### Test Results (2026-02-14)
 
 ```
-Test Case '-[osx_ideHarnessTests.AgenticHarnessTests testHarnessCreatesSingleFile]' passed (63.522 seconds)
+Test Case '-[compassHarnessTests.AgenticHarnessTests testHarnessCreatesSingleFile]' passed (63.522 seconds)
 ❌ File was not created
 Assistant said: Hello! I'm your AI coding assistant. How can I help you today?...
 
-Test Case '-[osx_ideHarnessTests.AgenticHarnessTests testHarnessModelToolCallingCapability]' passed (14.703 seconds)
+Test Case '-[compassHarnessTests.AgenticHarnessTests testHarnessModelToolCallingCapability]' passed (14.703 seconds)
 Response content: <ide_reasoning>...</ide_reasoning>
 Tool calls: 0
 Model mlx-community/granite-4.0-h-micro-4bit@0a29e17 native tool calling: NO
@@ -29,7 +29,7 @@ Model mlx-community/granite-4.0-h-micro-4bit@0a29e17 native tool calling: NO
 
 ### What the Harness Tests Validate
 
-The harness tests in [`AgenticHarnessTests.swift`](osx-ideHarnessTests/AgenticHarnessTests.swift) are **correctly implemented**:
+The harness tests in [`AgenticHarnessTests.swift`](compassHarnessTests/AgenticHarnessTests.swift) are **correctly implemented**:
 
 1. **File creation validation** - Tests check if files actually exist on disk after the conversation
 2. **Tool execution trail** - Tests verify `ToolExecutionEnvelope` messages in conversation
@@ -44,7 +44,7 @@ The harness tests in [`AgenticHarnessTests.swift`](osx-ideHarnessTests/AgenticHa
 
 ### Issue 1: Redundant Tool Passing
 
-**Location**: [`LocalModelProcessAIService.swift`](osx-ide/Services/LocalModels/LocalModelProcessAIService.swift)
+**Location**: [`LocalModelProcessAIService.swift`](compass/Services/LocalModels/LocalModelProcessAIService.swift)
 
 The current implementation does BOTH:
 
@@ -331,7 +331,7 @@ ToolCall
 
 ### Granite's chat_template.jinja DOES Support Tools
 
-Located at: `~/Library/Application Support/osx-ide/local-models/mlx-community_granite-4.0-h-micro-4bit_0a29e17/chat_template.jinja`
+Located at: `~/Library/Application Support/compass/local-models/mlx-community_granite-4.0-h-micro-4bit_0a29e17/chat_template.jinja`
 
 The template has full tool support:
 
@@ -357,7 +357,7 @@ This matches the `.json` ToolCallFormat in MLXLLM!
 
 ### The ACTUAL Problem: Double Prompt Building
 
-The issue is in [`LocalModelProcessAIService.swift`](osx-ide/Services/LocalModels/LocalModelProcessAIService.swift):
+The issue is in [`LocalModelProcessAIService.swift`](compass/Services/LocalModels/LocalModelProcessAIService.swift):
 
 ```swift
 // Step 1: Build a TEXT prompt with prose tool descriptions

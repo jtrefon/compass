@@ -4,7 +4,7 @@
 
 After a comprehensive investigation of the tool execution system, I've identified **critical gaps** in the harness testing strategy that explain why tools appear to work in tests but may fail with real AI models. The harness tests use mock AI services that return pre-defined tool calls, bypassing the actual AI model's tool-calling behavior entirely.
 
-**UPDATE:** Real model harness tests have been added in [`osx-ideHarnessTests/RealModelHarnessTests.swift`](osx-ideHarnessTests/RealModelHarnessTests.swift) to validate the full pipeline with actual MLX model inference.
+**UPDATE:** Real model harness tests have been added in [`compassHarnessTests/RealModelHarnessTests.swift`](compassHarnessTests/RealModelHarnessTests.swift) to validate the full pipeline with actual MLX model inference.
 
 ---
 
@@ -12,7 +12,7 @@ After a comprehensive investigation of the tool execution system, I've identifie
 
 ### 1. Harness Tests Use Mock AI Service (Critical Issue)
 
-**Location:** [`osx-ideHarnessTests/AgenticHarnessTests.swift`](osx-ideHarnessTests/AgenticHarnessTests.swift)
+**Location:** [`compassHarnessTests/AgenticHarnessTests.swift`](compassHarnessTests/AgenticHarnessTests.swift)
 
 The harness tests use a `SequenceAIService` mock that returns pre-defined `AIToolCall` objects:
 
@@ -72,13 +72,13 @@ Individual Tool Execution (write_file, replace_in_file, etc.)
 ```
 
 **Key files:**
-- [`osx-ide/Services/ConversationSendCoordinator.swift`](osx-ide/Services/ConversationSendCoordinator.swift)
-- [`osx-ide/Services/ConversationFlow/ToolLoopHandler.swift`](osx-ide/Services/ConversationFlow/ToolLoopHandler.swift)
-- [`osx-ide/Services/AIToolExecutor+Batch.swift`](osx-ide/Services/AIToolExecutor+Batch.swift)
+- [`compass/Services/ConversationSendCoordinator.swift`](compass/Services/ConversationSendCoordinator.swift)
+- [`compass/Services/ConversationFlow/ToolLoopHandler.swift`](compass/Services/ConversationFlow/ToolLoopHandler.swift)
+- [`compass/Services/AIToolExecutor+Batch.swift`](compass/Services/AIToolExecutor+Batch.swift)
 
 ### 3. RAG Context Injection May Interfere with Tool Instructions
 
-**Location:** [`osx-ide/Services/AIInteractionCoordinator.swift`](osx-ide/Services/AIInteractionCoordinator.swift:77-90)
+**Location:** [`compass/Services/AIInteractionCoordinator.swift`](compass/Services/AIInteractionCoordinator.swift:77-90)
 
 ```swift
 let retriever: (any RAGRetriever)?
@@ -100,7 +100,7 @@ let augmentedContext = await RAGContextBuilder.buildContext(
 
 ### 4. Tool Definitions Are Passed to OpenRouter But Format May Vary
 
-**Location:** [`osx-ide/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift`](osx-ide/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift:194-205)
+**Location:** [`compass/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift`](compass/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift:194-205)
 
 ```swift
 internal func buildToolDefinitions(tools: [AITool]?) -> [[String: Any]]? {
@@ -121,7 +121,7 @@ internal func buildToolDefinitions(tools: [AITool]?) -> [[String: Any]]? {
 
 ### 5. Local Model Tool Calling Implementation
 
-**Location:** [`osx-ide/Services/LocalModels/LocalModelProcessAIService.swift`](osx-ide/Services/LocalModels/LocalModelProcessAIService.swift:98-140)
+**Location:** [`compass/Services/LocalModels/LocalModelProcessAIService.swift`](compass/Services/LocalModels/LocalModelProcessAIService.swift:98-140)
 
 The local model service handles tool calls via MLXLLM:
 
@@ -140,7 +140,7 @@ for await generation in stream {
 
 ### 6. Tool Awareness Prompt Exists But May Be Insufficient
 
-**Location:** [`osx-ide/Services/ToolAwarenessPrompt.swift`](osx-ide/Services/ToolAwarenessPrompt.swift)
+**Location:** [`compass/Services/ToolAwarenessPrompt.swift`](compass/Services/ToolAwarenessPrompt.swift)
 
 The system prompt includes tool awareness instructions, but:
 - It's text-only instructions, not structured tool definitions
@@ -205,7 +205,7 @@ flowchart TD
 
 ### Phase 1: Add Real AI Model Integration Tests
 
-1. **Create `osx-ideHarnessTests/RealAIToolExecutionTests.swift`**
+1. **Create `compassHarnessTests/RealAIToolExecutionTests.swift`**
    - Skip if no API key configured
    - Test actual OpenRouter model tool calling
    - Validate tool call structure from real responses

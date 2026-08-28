@@ -6,7 +6,7 @@
 
 ## Overview
 
-This report documents the benchmark results for embedding models bundled with osx-ide. All models were converted from ONNX to CoreML ML Program format for optimal Neural Engine acceleration on Apple Silicon.
+This report documents the benchmark results for embedding models bundled with compass. All models were converted from ONNX to CoreML ML Program format for optimal Neural Engine acceleration on Apple Silicon.
 
 ## Models Tested
 
@@ -165,9 +165,9 @@ To run the benchmark tests:
 
 ```bash
 # Via Xcode
-xcodebuild test -project osx-ide.xcodeproj -scheme osx-ide \
+xcodebuild test -project compass.xcodeproj -scheme compass \
   -destination 'platform=macOS' \
-  -only-testing:osx-ideTests/EmbeddingModelBenchmarkTests
+  -only-testing:compassTests/EmbeddingModelBenchmarkTests
 
 # Or run the standalone script
 swift scripts/run_embedding_benchmark.swift

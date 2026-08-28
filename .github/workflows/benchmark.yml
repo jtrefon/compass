@@ -13,7 +13,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve packages
         run: |
@@ -41,7 +41,7 @@ jobs:
           done
 
       - name: Upload benchmark JSON
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-latest
           path: .build-tests/benchmarks/latest.json

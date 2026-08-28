@@ -17,11 +17,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # astro@7 requires Node >= 22.12.0 (Node 20 fails at build time)
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 

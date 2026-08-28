@@ -13,8 +13,8 @@ Following the performance optimization work (quantization fix, prompt prefix cac
 #### 1.1 Reasoning Prompt Duplication
 
 **Problem:** The reasoning prompt is duplicated in two locations:
-- [`LocalModelProcessAIService.swift:376-405`](osx-ide/Services/LocalModels/LocalModelProcessAIService.swift:376)
-- [`OpenRouterAIService+ChatPreparation.swift:145-174`](osx-ide/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift:145)
+- [`LocalModelProcessAIService.swift:376-405`](compass/Services/LocalModels/LocalModelProcessAIService.swift:376)
+- [`OpenRouterAIService+ChatPreparation.swift:145-174`](compass/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift:145)
 
 **Impact:** Maintenance burden, risk of inconsistency
 
@@ -32,8 +32,8 @@ extension ToolAwarenessPrompt {
 #### 1.2 System Content Building Duplication
 
 **Problem:** Both services implement `buildSystemContent()` with similar logic:
-- [`LocalModelProcessAIService.swift:349-374`](osx-ide/Services/LocalModels/LocalModelProcessAIService.swift:349)
-- [`OpenRouterAIService+ChatPreparation.swift:94-114`](osx-ide/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift:94)
+- [`LocalModelProcessAIService.swift:349-374`](compass/Services/LocalModels/LocalModelProcessAIService.swift:349)
+- [`OpenRouterAIService+ChatPreparation.swift:94-114`](compass/Services/OpenRouterAI/OpenRouterAIService+ChatPreparation.swift:94)
 
 **Solution:** Create a shared `SystemContentBuilder` service
 
@@ -41,7 +41,7 @@ extension ToolAwarenessPrompt {
 
 ### 2. God Class: LocalModelProcessAIService
 
-**Problem:** The [`LocalModelProcessAIService`](osx-ide/Services/LocalModels/LocalModelProcessAIService.swift:1) actor has grown to 407 lines with multiple responsibilities:
+**Problem:** The [`LocalModelProcessAIService`](compass/Services/LocalModels/LocalModelProcessAIService.swift:1) actor has grown to 407 lines with multiple responsibilities:
 
 | Responsibility | Lines | Should Be |
 |---------------|-------|-----------|
@@ -112,8 +112,8 @@ actor ModelLifecycleManager {
 ### 4. Settings Duplication
 
 **Problem:** Settings keys are duplicated between:
-- [`LocalModelSelectionStore.swift:5-6`](osx-ide/Services/LocalModels/LocalModelSelectionStore.swift:5)
-- [`LocalModelSettingsViewModel.swift:41-42`](osx-ide/Services/LocalModels/LocalModelSettingsViewModel.swift:41)
+- [`LocalModelSelectionStore.swift:5-6`](compass/Services/LocalModels/LocalModelSelectionStore.swift:5)
+- [`LocalModelSettingsViewModel.swift:41-42`](compass/Services/LocalModels/LocalModelSettingsViewModel.swift:41)
 
 ```swift
 // LocalModelSelectionStore
@@ -139,7 +139,7 @@ enum LocalModelSettingsKeys {
 
 #### 5.1 AIService Protocol Convenience Methods
 
-**Problem:** The [`AIService`](osx-ide/Services/AIServiceProtocol.swift:1) protocol includes convenience methods that have identical implementations in all conforming types:
+**Problem:** The [`AIService`](compass/Services/AIServiceProtocol.swift:1) protocol includes convenience methods that have identical implementations in all conforming types:
 
 ```swift
 func explainCode(_ code: String) async throws -> String
@@ -164,7 +164,7 @@ extension AIService {
 
 #### 5.2 Model File Storing Protocol Nested in Service
 
-**Problem:** [`ModelFileStoring`](osx-ide/Services/LocalModels/LocalModelProcessAIService.swift:46) is nested inside the service actor, making it inaccessible for testing/mocking.
+**Problem:** [`ModelFileStoring`](compass/Services/LocalModels/LocalModelProcessAIService.swift:46) is nested inside the service actor, making it inaccessible for testing/mocking.
 
 **Solution:** Move to top-level protocol
 ```swift
@@ -219,7 +219,7 @@ enum LocalModelError: LocalizedError {
 
 **Recommended Additions:**
 ```
-osx-ideTests/
+compassTests/
 ├── LocalModels/
 │   ├── NativeMLXGeneratorTests.swift
 │   ├── LocalModelDownloaderTests.swift
