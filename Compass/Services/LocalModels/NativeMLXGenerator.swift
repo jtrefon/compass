@@ -54,10 +54,7 @@ struct PrefixCacheContext: Sendable {
 
 actor NativeMLXGenerator: LocalModelGenerating {
     private let eventBus: EventBusProtocol
-    private var containersByModelDirectory: [URL: ModelContainer] = [:]
-    private var inFlightLoads: [URL: Task<ModelContainer, Error>] = [:]
-    private var accessOrder: [URL] = []
-    private let maxCachedModels = 1
+    private let modelRepository: MLXModelRepository
     private var generationCount: Int = 0
     /// Generations currently executing; the unload path waits for these
     /// (defense in depth — the pressure handler already holds
@@ -69,17 +66,11 @@ actor NativeMLXGenerator: LocalModelGenerating {
     private var promptCacheByConversation: [String: PromptCacheEntry] = [:]
     private var savedPrefixCacheHashes: Set<String> = []
     /// LRU access order for eviction — Dictionary key iteration is hash-based,
-    /// so a naive keys.first eviction could drop the ACTIVE conversation's
-    /// cache while a stale one stays pinned.
+    private let kvCacheManager: MLXKVCacheManager
     private var promptCacheAccessOrder: [String] = []
-    /// KV caches pin hundreds of MB to GBs of memory per conversation; cap the
-    /// retained set so long sessions do not accumulate every conversation's
-    /// cache forever.
-    private static let maxPromptCacheConversations = 2
+    private static let maxPromptCacheConversations = 1
 
     private func promptCacheKey(conversationId: String, modelDirectory: URL) -> String {
-        // Keyed by model too — a cross-model KV cache (different layer counts /
-        // head dims) would crash with a shape mismatch or silently corrupt output.
         "\(conversationId):\(modelDirectory.standardizedFileURL.path)"
     }
 
@@ -87,8 +78,25 @@ actor NativeMLXGenerator: LocalModelGenerating {
         NativeMLXGenerator(eventBus: NoOpEventBus())
     }()
 
-    init(eventBus: EventBusProtocol) {
+    private let memoryMonitor: any EngineMemoryMonitoring
+    private let generationService: MLXGenerationService
+
+    init(
+        eventBus: EventBusProtocol,
+        memoryMonitor: any EngineMemoryMonitoring = ProcessMemoryMonitor(),
+        modelRepository: MLXModelRepository = MLXModelRepository(),
+        kvCacheManager: MLXKVCacheManager = MLXKVCacheManager()
+    ) {
         self.eventBus = eventBus
+        self.memoryMonitor = memoryMonitor
+        self.modelRepository = modelRepository
+        self.kvCacheManager = kvCacheManager
+        self.generationService = MLXGenerationService(
+            modelRepository: modelRepository,
+            kvCacheManager: kvCacheManager,
+            memoryMonitor: memoryMonitor,
+            eventBus: eventBus
+        )
         // Memory budget: do NOT clamp mlx's memoryLimit to a tiny hard cap —
         // malloc then blocks on every allocation over it (a 2.5GB model under
         // a 3GB limit made prefill/generation wait on scheduled tasks, ~4-10x
@@ -101,7 +109,8 @@ actor NativeMLXGenerator: LocalModelGenerating {
            let limitMB = Int(configured), limitMB > 0 {
             Memory.memoryLimit = limitMB * 1024 * 1024
         }
-        Task { await Self.logDeviceAndMemoryInfo() }
+        let monitorCopy = memoryMonitor
+        Task { await monitorCopy.logDeviceInfo() }
     }
 
     nonisolated static func logDeviceAndMemoryInfo() async {
@@ -148,6 +157,12 @@ actor NativeMLXGenerator: LocalModelGenerating {
         // Serialize with FIM and other MLX engines — see MLXInferenceLock.
         try await MLXInferenceLock.shared.acquire()
         try Task.checkCancellation()
+        // Chat/agent work has foreground priority. FIM is useful while the
+        // editor is idle, but retaining its weights alongside Qwen consumes a
+        // large portion of unified memory for no concurrent benefit. Holding
+        // the shared lock means an active FIM stream has finished before its
+        // container is released.
+        await InferenceUnloadRegistry.shared.unloadAll(labels: [InferenceUnloadRegistry.fimLabel])
         activeGenerationCount += 1
         defer {
             activeGenerationCount -= 1
@@ -160,7 +175,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         )
 
         let preparedUserInput = userInput
-        let rssLimitMB = Self.resolvedRSSLimitMB()
+        let rssLimitMB = memoryMonitor.resolvedLimitMB()
         let generationStart = ContinuousClock.now
 
         let parameters = GenerateParameters(
@@ -177,7 +192,8 @@ actor NativeMLXGenerator: LocalModelGenerating {
         let cacheEntry = resolveCacheEntry(
             conversationId: conversationId,
             modelDirectory: modelDirectory,
-            prefixCache: prefixCache
+            prefixCache: prefixCache,
+            inferenceConfiguration: inferenceConfiguration
         )
 
         do {
@@ -189,15 +205,15 @@ actor NativeMLXGenerator: LocalModelGenerating {
             )
 
             generationCount += 1
-            logMLXMemorySnapshot()
+            memoryMonitor.logSnapshot(generationCount: generationCount)
             persistPrefixCacheIfNeeded(
                 prefixCache: prefixCache,
                 modelDirectory: modelDirectory,
                 toolCallFormat: toolCallFormat,
                 inferenceConfiguration: inferenceConfiguration
             )
-            if Self.shouldUnloadModelAfterGeneration() {
-                unloadModel(modelDirectory: modelDirectory, reason: "post_generation_env_flag")
+            if memoryMonitor.shouldUnloadAfterGeneration() {
+                await unloadModel(modelDirectory: modelDirectory, reason: "post_generation_env_flag")
             }
 
             return response
@@ -207,7 +223,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
             // dropped every conversation's KV cache. Only load-time/RSS
             // failures and explicit unload requests should tear it down.
             if !(error is CancellationError) && !Task.isCancelled {
-                unloadModel(modelDirectory: modelDirectory, reason: "generation_error")
+                await unloadModel(modelDirectory: modelDirectory, reason: "generation_error")
             }
             throw error
         }
@@ -243,9 +259,15 @@ actor NativeMLXGenerator: LocalModelGenerating {
         }
     }
 
-    private func resolveCacheEntry(conversationId: String?, modelDirectory: URL, prefixCache: PrefixCacheContext? = nil) -> PromptCacheEntry? {
+    private func resolveCacheEntry(
+        conversationId: String?,
+        modelDirectory: URL,
+        prefixCache: PrefixCacheContext? = nil,
+        inferenceConfiguration: LocalModelInferenceConfiguration
+    ) -> PromptCacheEntry? {
         guard let conversationId else { return nil }
-        let key = promptCacheKey(conversationId: conversationId, modelDirectory: modelDirectory)
+        let cachePolicy = "ctx=\(inferenceConfiguration.contextLength):kv=\(inferenceConfiguration.maxKVSize):q4=\(inferenceConfiguration.kvCache4BitEnabled):prefix=\(prefixCache?.hash ?? "none")"
+        let key = "\(promptCacheKey(conversationId: conversationId, modelDirectory: modelDirectory)):\(cachePolicy)"
         if let existing = promptCacheByConversation[key] {
             // touch for LRU
             promptCacheAccessOrder.removeAll { $0 == key }
@@ -434,13 +456,13 @@ nonisolated private static let maxPrefixCacheFiles = 8
     ) async throws -> AIServiceResponse {
         let defaultDevice = Device.defaultDevice()
         let deviceType = defaultDevice.deviceType?.rawValue ?? "unknown"
-        try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "before_container_load")
-        let rssBeforeLoadMB = Self.currentProcessRSSMB()
+        try memoryMonitor.throwIfExceeded(limitMB: rssLimitMB, phase: "before_container_load")
+        let rssBeforeLoadMB = memoryMonitor.currentRSSMB()
         let loadStart = ContinuousClock.now
         let container = try await loadContainerCached(modelDirectory: modelDirectory, toolCallFormat: toolCallFormat)
         let loadDuration = loadStart.duration(to: ContinuousClock.now)
-        let rssAfterLoadMB = Self.currentProcessRSSMB()
-        try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "after_container_load")
+        let rssAfterLoadMB = memoryMonitor.currentRSSMB()
+        try memoryMonitor.throwIfExceeded(limitMB: rssLimitMB, phase: "after_container_load")
         await AIToolTraceLogger.shared.log(type: "mlx.model_loaded", data: [
             "runId": runId ?? "",
             "modelId": modelId,
@@ -449,16 +471,35 @@ nonisolated private static let maxPrefixCacheFiles = 8
             "rssAfterLoadMB": rssAfterLoadMB
         ])
         let capturedInput = UnsafeValue(value: preparedUserInput)
+        let monitorForGen = memoryMonitor
         return try await container.perform { context in
-            try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "before_generation")
+            try monitorForGen.throwIfExceeded(limitMB: rssLimitMB, phase: "before_generation")
 
             let input = try await context.processor.prepare(input: capturedInput.value)
             let promptTokenCount = input.text.tokens.size
+            let reservedOutputTokens = inferenceConfiguration.maxOutputTokens
+            guard promptTokenCount + reservedOutputTokens <= inferenceConfiguration.contextLength else {
+                throw AppError.aiServiceError(
+                    "Local request exceeds the configured context window: \(promptTokenCount) prompt tokens + \(reservedOutputTokens) reserved output tokens exceed \(inferenceConfiguration.contextLength)."
+                )
+            }
             let promptTokenIds = input.text.tokens.asArray(Int.self)
+            // Publish initial context estimate for live status bar (mirrors cloud path)
+            if let runId {
+                let initialEstimate = promptTokenCount
+                Task { @MainActor in
+                    eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: initialEstimate))
+                }
+            }
             await AIToolTraceLogger.shared.log(type: "mlx.prompt_prepared", data: [
                 "runId": runId ?? "",
                 "modelId": modelId,
-                "promptTokens": promptTokenCount
+                "promptTokens": promptTokenCount,
+                "contextLength": inferenceConfiguration.contextLength,
+                "reservedOutputTokens": reservedOutputTokens,
+                "contextHeadroomTokens": inferenceConfiguration.contextLength - promptTokenCount - reservedOutputTokens,
+                "kvCache4Bit": inferenceConfiguration.kvCache4BitEnabled,
+                "residentConversationCaches": promptCacheByConversation.count
             ])
 
             let (kvCache, effectiveInput) = try self.resolveKVCache(
@@ -626,10 +667,13 @@ nonisolated private static let maxPrefixCacheFiles = 8
             case .chunk(let text):
                 result.output.append(text)
                 if let runId, !text.isEmpty {
-                    // Always publish the first chunk (short completions may
-                    // otherwise never stream), then throttle to every 8th.
-                    if result.chunkCount == 1 || result.chunkCount % 8 == 0 {
-                        eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: text))
+                    eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: text))
+                    // Live context: update estimate every chunk (was throttled 8, now live)
+                    if result.chunkCount % 4 == 0 {
+                        let estimate = input.text.tokens.size + recorder.tokenIDs.count
+                        Task { @MainActor in
+                            eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: estimate))
+                        }
                     }
                 }
             case .info:
@@ -642,6 +686,12 @@ nonisolated private static let maxPrefixCacheFiles = 8
         }
 
         result.generatedTokenIds = recorder.tokenIDs
+        if let runId {
+            let finalEstimate = input.text.tokens.size + recorder.tokenIDs.count
+            Task { @MainActor in
+                eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: finalEstimate, isFinal: true))
+            }
+        }
         return result
     }
 
@@ -841,9 +891,12 @@ nonisolated private static let maxPrefixCacheFiles = 8
         if let persistKVTo {
             persistConversationCaches(to: persistKVTo)
         }
-        containersByModelDirectory.removeAll()
-        inFlightLoads.removeAll()
-        accessOrder.removeAll()
+        // KV arrays are active MLX allocations, not allocator-cache entries.
+        // Dropping only model containers left their conversation caches pinned
+        // after a critical-pressure unload.
+        promptCacheByConversation.removeAll()
+        promptCacheAccessOrder.removeAll()
+        await modelRepository.unloadAll()
         Memory.clearCache()
     }
 
@@ -868,66 +921,17 @@ nonisolated private static let maxPrefixCacheFiles = 8
         }
     }
 
-    func unloadModel(modelDirectory: URL, reason: String = "unknown") {
+    func unloadModel(modelDirectory: URL, reason: String = "unknown") async {
         synchronizeMLXStream()
-        let cacheKey = modelDirectory.resolvingSymlinksInPath().standardizedFileURL
-        containersByModelDirectory.removeValue(forKey: cacheKey)
-        inFlightLoads.removeValue(forKey: cacheKey)
-        accessOrder.removeAll { $0 == cacheKey }
+        await modelRepository.unload(modelDirectory: modelDirectory)
         promptCacheByConversation.removeAll()
         Memory.clearCache()
     }
 
     private func loadContainerCached(modelDirectory: URL, toolCallFormat: ToolCallFormat? = nil) async throws -> ModelContainer {
-        let cacheKey = modelDirectory.resolvingSymlinksInPath().standardizedFileURL
-
-        if let existing = containersByModelDirectory[cacheKey] {
-            accessOrder.removeAll { $0 == cacheKey }
-            accessOrder.append(cacheKey)
-            return existing
-        }
-
-        if let existingTask = inFlightLoads[cacheKey] {
-            return try await existingTask.value
-        }
-
-        if containersByModelDirectory.count >= maxCachedModels, let oldest = accessOrder.first {
-            containersByModelDirectory.removeValue(forKey: oldest)
-            accessOrder.removeFirst()
-        }
-
-        let configuration = ModelConfiguration(directory: cacheKey, toolCallFormat: toolCallFormat)
-        let loadTask = Task<ModelContainer, Error> {
-            try await self.loadModelContainer(
-                configuration: configuration,
-                modelDirectory: cacheKey
-            )
-        }
-        inFlightLoads[cacheKey] = loadTask
-
-        let container: ModelContainer
-        do {
-            container = try await loadTask.value
-        } catch {
-            inFlightLoads.removeValue(forKey: cacheKey)
-            throw error
-        }
-
-        inFlightLoads.removeValue(forKey: cacheKey)
-        containersByModelDirectory[cacheKey] = container
-        accessOrder.append(cacheKey)
-        return container
+        try await modelRepository.load(modelDirectory: modelDirectory, toolCallFormat: toolCallFormat)
     }
 
-    private func loadModelContainer(
-        configuration _: ModelConfiguration,
-        modelDirectory: URL
-    ) async throws -> ModelContainer {
-        let tokenizerLoader = LocalTokenizerLoader(directory: modelDirectory)
-        // Fixed chat model (Qwen3.5-4B) is text-only — always the LLM factory.
-        return try await LLMModelFactory.shared.loadContainer(
-            from: modelDirectory, using: tokenizerLoader)
-    }
 }
 
 /// Bridges the huggingface swift-transformers AutoTokenizer into the

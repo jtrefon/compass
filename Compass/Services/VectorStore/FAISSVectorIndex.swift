@@ -6,7 +6,6 @@ public final class FAISSVectorIndex: VectorIndex, @unchecked Sendable {
 
     private let factoryString: String
     private var index: FAISSIndexRef?
-    private let queue: DispatchQueue
 
     public init(
         dimensions: Int,
@@ -14,11 +13,6 @@ public final class FAISSVectorIndex: VectorIndex, @unchecked Sendable {
     ) {
         self.dimensions = dimensions
         self.factoryString = factoryString
-        self.queue = DispatchQueue(
-            label: "com.vectorstore.faiss.\(UUID().uuidString)",
-            qos: .userInitiated,
-            attributes: .concurrent
-        )
     }
 
     deinit {
