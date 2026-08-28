@@ -250,7 +250,7 @@ struct GeneralSettingsTab: View {
                                 .font(.caption)
                             Text(NSLocalizedString("settings.defaults.reset.warning", comment: ""))
                                 .font(.caption2)
-                                .foregroundStyle(.red.opacity(0.8))
+                                .foregroundStyle(AppConstants.Color.alertError)
                         }
 
                         Spacer()

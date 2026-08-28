@@ -43,7 +43,7 @@ struct SettingsView: View {
             // Native Glass Background Effects
             SettingsBackgroundView()
 
-            VStack(spacing: 16) {
+            VStack(spacing: AppConstants.Settings.cardPadding) {
                 TabView {
                     GeneralSettingsTab(ui: ui)
                         .tabItem {
@@ -76,15 +76,21 @@ struct SettingsView: View {
                         }
                 }
             }
-            .padding(24)
+            .padding(AppConstants.Layout.spacingXL)
         }
-        .frame(minWidth: 720, idealWidth: 760, minHeight: 560, idealHeight: 620)
+        .frame(
+            minWidth: AppConstants.Settings.windowMinWidth,
+            idealWidth: AppConstants.Settings.windowIdealWidth,
+            minHeight: AppConstants.Settings.windowMinHeight,
+            idealHeight: AppConstants.Settings.windowIdealHeight
+        )
     }
 }
 
 private struct SettingsBackgroundView: View {
     var body: some View {
-        AppConstants.Color.surfaceBackground
+        Color.clear
+            .nativeGlassBackground(.sheet, cornerRadius: 0)
             .ignoresSafeArea()
     }
 }

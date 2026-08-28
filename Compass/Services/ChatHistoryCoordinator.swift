@@ -16,12 +16,18 @@ public struct ConversationEnvelope: Sendable {
 }
 
 /// Public API to the conversation context. `_committed` is the single source
-/// of truth — append-only, MainActor-confined. No message is ever removed,
-/// replaced, or reordered.
+/// of truth — MainActor-confined, append-only within the bounded window.
+/// No message is ever replaced or reordered; oldest messages are evicted
+/// when `maxCommittedCount` is exceeded (keeps head system + trailing window
+/// so tool-call/result pairs are not split).
 @MainActor
 final class ChatHistoryCoordinator: ObservableObject {
     // MARK: - Committed history (single source of truth)
 
+    /// Bounded to prevent unbounded memory/disk growth in long sessions.
+    /// `PipelineProcessor` already bounds the *request* view, but storage
+    /// must also be bounded (20 sends × ~60 msgs = 1200 without cap).
+    static let maxCommittedCount = 500
     private var _committed: [ChatMessage] = []
 
     /// The full, unaltered conversation chain. Every message ever pushed, in order.
@@ -38,19 +44,22 @@ final class ChatHistoryCoordinator: ObservableObject {
     /// SwiftUI observes this. Never sent to the model — use `allMessages` for that.
     @Published private(set) var messages: [ChatMessage] = []
 
+    // Streaming buffer lives here so `clearStreamingBuffer()` can reset it
+    // without the history needing a back-reference to the coordinator.
+    private let streamingBuffer = StreamingOutputBuffer()
+    private var lastStreamingContent = ""
+    private var lastStreamingReasoning = ""
+
     // MARK: - Envelope
 
     private var envelope: ConversationEnvelope
     var currentConversationId: String { envelope.id.uuidString }
     var conversationEnvelope: ConversationEnvelope { envelope }
 
-    var eventBus: (any EventBusProtocol)?
-
     // MARK: - Init
 
-    init(projectRoot: URL? = nil, envelope: ConversationEnvelope = ConversationEnvelope(), eventBus: (any EventBusProtocol)? = nil) {
+    init(envelope: ConversationEnvelope = ConversationEnvelope(), eventBus: (any EventBusProtocol)? = nil) {
         self.envelope = envelope
-        self.eventBus = eventBus
     }
 
     // MARK: - Append-only writes
@@ -71,8 +80,16 @@ final class ChatHistoryCoordinator: ObservableObject {
             draft = message
         }
         _committed.append(message)
+        evictIfNeeded()
         envelope.updatedAt = Date()
         recompose()
+    }
+
+    private func evictIfNeeded() {
+        guard _committed.count > Self.maxCommittedCount else { return }
+        let overflow = _committed.count - Self.maxCommittedCount
+        // Keep newest `max` messages; drop oldest. This is O(n) but n=500, rare.
+        _committed.removeFirst(overflow)
     }
 
     // MARK: - Draft
@@ -86,6 +103,7 @@ final class ChatHistoryCoordinator: ObservableObject {
             _committed[idx] = message
         } else {
             _committed.append(message)
+            evictIfNeeded()
         }
         draft = nil
         recompose()
@@ -120,7 +138,8 @@ final class ChatHistoryCoordinator: ObservableObject {
     }
 
     func restoreCommitted(_ messages: [ChatMessage]) {
-        _committed = messages
+        _committed = messages.filter { !$0.isDraft }
+        evictIfNeeded()
         recompose()
     }
 
@@ -154,13 +173,45 @@ final class ChatHistoryCoordinator: ObservableObject {
         recompose()
     }
 
+    func clearStreamingBuffer() {
+        streamingBuffer.clear()
+        lastStreamingContent = ""
+        lastStreamingReasoning = ""
+    }
+
+    // MARK: - Streaming helpers (used by ConversationStreamingCoordinator)
+
+    func appendStreamingContent(_ chunk: String) -> (content: String, reasoning: String?) {
+        streamingBuffer.appendContent(chunk)
+        streamingBuffer.flushClassification()
+        let content = streamingBuffer.hasContent ? streamingBuffer.content : ""
+        let reasoning: String? = streamingBuffer.hasReasoning ? streamingBuffer.reasoning : nil
+        let shouldUpdate = content != lastStreamingContent || reasoning != lastStreamingReasoning
+        guard shouldUpdate else { return (lastStreamingContent, lastStreamingReasoning.isEmpty ? nil : lastStreamingReasoning) }
+        lastStreamingContent = content
+        lastStreamingReasoning = reasoning ?? ""
+        return (content, reasoning)
+    }
+
+    func appendStreamingReasoning(_ chunk: String) -> (content: String, reasoning: String?) {
+        streamingBuffer.appendReasoning(chunk)
+        let content = streamingBuffer.hasContent ? streamingBuffer.content : ""
+        let reasoning: String? = streamingBuffer.hasReasoning ? streamingBuffer.reasoning : nil
+        let shouldUpdate = content != lastStreamingContent || reasoning != lastStreamingReasoning
+        guard shouldUpdate else { return (lastStreamingContent, lastStreamingReasoning.isEmpty ? nil : lastStreamingReasoning) }
+        lastStreamingContent = content
+        lastStreamingReasoning = reasoning ?? ""
+        return (content, reasoning)
+    }
+
     // MARK: - Display composition
 
     private func recompose() {
         var display = _committed
 
-        // Overlay live tool messages
-        for (_, msg) in liveToolMessages {
+        // Overlay live tool messages in stable order
+        let sortedLive = liveToolMessages.values.sorted { $0.timestamp < $1.timestamp }
+        for msg in sortedLive {
             if let idx = display.firstIndex(where: { $0.toolCallId == msg.toolCallId && $0.toolCallId != nil }) {
                 display[idx] = msg
             } else {
@@ -199,6 +250,7 @@ extension ChatHistoryCoordinator {
     /// Append multiple messages atomically (for session restore).
     func append(contentsOf messages: [ChatMessage]) async {
         _committed.append(contentsOf: messages)
+        evictIfNeeded()
         envelope.updatedAt = Date()
         recompose()
     }
@@ -208,7 +260,12 @@ extension ChatHistoryCoordinator {
     func insert(_ message: ChatMessage, at index: Int) {
         let safeIndex = min(max(0, index), _committed.endIndex)
         _committed.insert(message, at: safeIndex)
+        evictIfNeeded()
         envelope.updatedAt = Date()
         recompose()
     }
 }
+
+// MARK: - ConversationHistoryProviding
+
+extension ChatHistoryCoordinator: ConversationHistoryProviding {}

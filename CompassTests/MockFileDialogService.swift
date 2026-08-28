@@ -1,6 +1,7 @@
 #if DEBUG
 import Foundation
 import UniformTypeIdentifiers
+@testable import Compass
 
 class MockFileDialogService: FileDialogServiceProtocol {
     func openFileOrFolder() async -> URL? { nil }

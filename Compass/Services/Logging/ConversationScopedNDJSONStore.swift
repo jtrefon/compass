@@ -11,12 +11,14 @@ enum ConversationScopedNDJSONStore {
             .appendingPathComponent(conversationId, isDirectory: true)
     }
 
+    /// Appends through the serialized `NDJSONAppendStore` — directory creation,
+    /// handle reuse, and failure surfacing all live there.
     static func appendLine(
         _ line: Data,
         conversationId: String,
         fileName: String,
         projectRoot: URL?
-    ) throws {
+    ) async throws {
         guard let projectRoot else {
             // No project root - cannot log (this shouldn't happen in normal operation)
             return
@@ -24,8 +26,7 @@ enum ConversationScopedNDJSONStore {
 
         // Write ONLY to project directory (no Application Support)
         let projectDir = projectConversationDirectory(projectRoot: projectRoot, conversationId: conversationId)
-        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
         let projectFileURL = projectDir.appendingPathComponent(fileName)
-        try NDJSONLogFileWriter.append(line: line, to: projectFileURL)
+        await NDJSONAppendStore.shared.append(line, to: projectFileURL)
     }
 }

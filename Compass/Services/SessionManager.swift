@@ -311,20 +311,43 @@ final class SessionManager: ObservableObject {
     func updateProjectRoot(_ newRoot: URL, input: inout String, mode: inout AIMode) {
         projectRoot = newRoot
 
+        // Preserve existing order/snapshots — don't reset to a single entry.
+        // The old code did `conversationSessionOrder = [migratedSessionId]` which
+        // wiped 142 sessions down to 1 on every restart, emptying the "all
+        // sessions" button. Now we keep the loaded order and just ensure the
+        // current session is present.
         let migratedSessionId = historyCoordinator.currentConversationId
+        if !conversationSessionOrder.contains(migratedSessionId) {
+            conversationSessionOrder.append(migratedSessionId)
+        }
         currentSessionId = migratedSessionId
-        conversationSessionOrder = [migratedSessionId]
-        let snapshot = SessionSnapshot(
-            messages: historyCoordinator.committedMessages,
-            mode: mode,
-            input: input,
-            subject: "",
-            createdAt: Date(),
-            updatedAt: Date(),
-            closedAt: nil
-        )
-        conversationSessionSnapshots = [migratedSessionId: snapshot]
-        Self.saveSnapshot(sessionId: migratedSessionId, snapshot: snapshot, projectRoot: projectRoot)
+
+        // Self-heal: if in-memory history is empty but disk has non-empty, keep disk.
+        if historyCoordinator.committedMessages.isEmpty,
+           let existing = Self.loadSnapshot(sessionId: migratedSessionId, projectRoot: projectRoot),
+           !existing.messages.isEmpty {
+            conversationSessionSnapshots[migratedSessionId] = existing
+            refreshTabs()
+            Self.saveSessionOrder(conversationSessionOrder)
+            Self.saveSelectedId(currentSessionId)
+            return
+        }
+
+        // Only snapshot if we have something to save — don't overwrite a
+        // non-empty disk file with an empty in-memory history.
+        if !historyCoordinator.committedMessages.isEmpty || conversationSessionSnapshots[migratedSessionId] == nil {
+            let snapshot = SessionSnapshot(
+                messages: historyCoordinator.committedMessages,
+                mode: mode,
+                input: input,
+                subject: historyCoordinator.conversationEnvelope.subject,
+                createdAt: conversationSessionSnapshots[migratedSessionId]?.createdAt ?? Date(),
+                updatedAt: Date(),
+                closedAt: nil
+            )
+            conversationSessionSnapshots[migratedSessionId] = snapshot
+            Self.saveSnapshot(sessionId: migratedSessionId, snapshot: snapshot, projectRoot: projectRoot)
+        }
         refreshTabs()
         Self.saveSessionOrder(conversationSessionOrder)
         Self.saveSelectedId(currentSessionId)

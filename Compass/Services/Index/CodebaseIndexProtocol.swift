@@ -5,7 +5,7 @@ public protocol CodebaseIndexProtocol: Sendable {
     func start()
     func stop()
 
-    var database: DatabaseStore { get }
+    var database: DatabaseManager { get }
 
     func setEnabled(_ enabled: Bool)
     func reindexProject()
