@@ -7,9 +7,9 @@ public struct SymbolSearchResult: Sendable {
 }
 
 public struct QueryService: Sendable {
-    private let database: DatabaseStore
+    private let database: DatabaseManager
 
-    public init(database: DatabaseStore) {
+    public init(database: DatabaseManager) {
         self.database = database
     }
 

@@ -5,7 +5,12 @@ import Foundation
 /// future inference service register a labeled unload hook here; the
 /// pressure handler unloads selectively (FIM only on warning) or everything
 /// (critical) in one pass.
-final class InferenceUnloadRegistry: @unchecked Sendable {
+///
+/// **Design rationale:**
+/// - Converted from `class + NSLock + @unchecked Sendable` to an `actor`.
+///   The handler array is mutable shared state; actor isolation serializes
+///   access without manual lock discipline.
+actor InferenceUnloadRegistry {
     static let shared = InferenceUnloadRegistry()
 
     static let chatLabel = "chat"
@@ -16,33 +21,21 @@ final class InferenceUnloadRegistry: @unchecked Sendable {
         let body: @Sendable () async -> Void
     }
 
-    private let lock = NSLock()
     private var handlers: [Handler] = []
 
     func register(label: String, _ handler: @escaping @Sendable () async -> Void) {
-        lock.lock()
         handlers.append(Handler(label: label, body: handler))
-        lock.unlock()
     }
 
     /// Unloads all handlers, or only those matching `labels` when provided.
-    /// Test hygiene: clears all registered handlers.
     func removeAllHandlers() {
-        lock.lock()
         handlers.removeAll()
-        lock.unlock()
     }
 
     func unloadAll(labels: Set<String>? = nil) async {
-        let snapshot = snapshotHandlers()
+        let snapshot = handlers
         for handler in snapshot where labels == nil || labels?.contains(handler.label) == true {
             await handler.body()
         }
-    }
-
-    private func snapshotHandlers() -> [Handler] {
-        lock.lock()
-        defer { lock.unlock() }
-        return handlers
     }
 }

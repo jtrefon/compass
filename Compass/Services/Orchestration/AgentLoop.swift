@@ -59,6 +59,7 @@ struct AgentLoop {
         var taskPlan: TaskPlan?
         var response: AIServiceResponse?
         var transitionCount = 0
+        var lastToolResults: [ChatMessage] = []
 
         while transitionCount < Self.maxTransitions {
             transitionCount += 1
@@ -141,6 +142,7 @@ struct AgentLoop {
                 response = turn
                 if let toolCalls = turn.toolCalls, !toolCalls.isEmpty {
                     let results = await commitAndExecute(toolCalls: toolCalls, response: turn, tools: executionTools)
+                    lastToolResults = results
                     // A tool that returned an error must be RETRIED with the
                     // error visible in context — otherwise the failed edit
                     // becomes the final answer ("My apologies...").
@@ -205,14 +207,18 @@ struct AgentLoop {
                         role: .user,
                         content: "Continue from where you left off — summarize progress so far and resume the task. Do not restart from the beginning."
                     ))
-                    await appendSnapshot(phase: phase, iteration: transitionCount, response: response)
+                    await appendSnapshot(
+                        phase: phase, iteration: transitionCount, response: response,
+                        failureReason: "empty_response_after_work")
                     continue
                 }
             } else if let response, Self.hasVisibleContent(response) {
                 emptyRecoveryCount = 0
             }
 
-            await appendSnapshot(phase: phase, iteration: transitionCount, response: response)
+            await appendSnapshot(
+                phase: phase, iteration: transitionCount, response: response,
+                toolResults: lastToolResults)
         }
 
         // P6: graceful finalize instead of throwing — jump to the summary path
@@ -223,7 +229,13 @@ struct AgentLoop {
                 content: "Approaching the step budget — wrap up now: summarize what has been completed and list any remaining steps."
             ))
             let final = try await summarizeFinal()
-            await appendSnapshot(phase: "final_response", iteration: transitionCount, response: final)
+            await appendSnapshot(
+                phase: "final_response", iteration: transitionCount, response: final,
+                toolResults: lastToolResults,
+                planSummary: taskPlan.map { plan in
+                    let completed = plan.items.filter { $0.status == .completed }.count
+                    return String(format: "%d/%d items completed", completed, plan.items.count)
+                })
             return final
         }
 
@@ -342,7 +354,14 @@ struct AgentLoop {
 
     // MARK: - Snapshots
 
-    private func appendSnapshot(phase: String, iteration: Int, response: AIServiceResponse?) async {
+    private func appendSnapshot(
+        phase: String,
+        iteration: Int,
+        response: AIServiceResponse?,
+        failureReason: String? = nil,
+        toolResults: [ChatMessage] = [],
+        planSummary: String? = nil
+    ) async {
         let snapshot = OrchestrationRunSnapshot(
             runId: request.runId,
             conversationId: request.conversationId,
@@ -351,7 +370,7 @@ struct AgentLoop {
             timestamp: Date(),
             userInput: request.userInput,
             assistantDraft: response?.content,
-            failureReason: nil,
+            failureReason: failureReason,
             toolCalls: (response?.toolCalls ?? []).map {
                 OrchestrationRunSnapshot.ToolCallSummary(
                     id: $0.id,
@@ -359,8 +378,17 @@ struct AgentLoop {
                     argumentKeys: Array($0.arguments.keys).sorted()
                 )
             },
-            toolResults: [],
-            planSummary: nil
+            toolResults: toolResults.compactMap { message in
+                guard message.toolCallId != nil else { return nil }
+                return OrchestrationRunSnapshot.ToolResultSummary(
+                    toolCallId: message.toolCallId ?? "",
+                    toolName: message.toolName ?? "unknown",
+                    status: message.toolStatus.map { String(describing: $0) } ?? "unknown",
+                    targetFile: nil,
+                    outputPreview: String(message.content.prefix(200))
+                )
+            },
+            planSummary: planSummary
         )
         try? await OrchestrationRunStore.shared.appendSnapshot(snapshot)
     }

@@ -65,7 +65,6 @@ enum LocalModelInferenceOverrides {
         let envTopP = parseFloat(value("COMPASS_LOCAL_MODEL_TOP_P"))
         let envRepetitionPenalty = parseOptionalFloat(value("COMPASS_LOCAL_MODEL_REPETITION_PENALTY"))
         let envRepetitionContextSize = parseInt(value("COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE"))
-        let envKV4Bit = value("COMPASS_LOCAL_MODEL_KV_CACHE_4BIT")
 
         let contextLength = clamp(
             envContext ?? defaultContextLength,
@@ -82,12 +81,11 @@ enum LocalModelInferenceOverrides {
             min: 64,
             max: 8_192
         )
-        let kvCache4BitEnabled: Bool
-        if let envKV4Bit {
-            kvCache4BitEnabled = envKV4Bit == "1" ? true : envKV4Bit == "0" ? false : defaultKVCache4BitEnabled
-        } else {
-            kvCache4BitEnabled = defaultKVCache4BitEnabled
-        }
+        // 4-bit KV is now permanent — ignore the old settings toggle and the
+        // env var (kept for backward compat in LocalModelSelectionStore, but
+        // the inference config no longer consults it). The effective value is
+        // still gated by `supportsQuantizedKVCache` in LocalModelProcessAIService.
+        let kvCache4BitEnabled = true
         let prefillStepSize = clamp(
             envPrefill ?? 512,
             min: 64,

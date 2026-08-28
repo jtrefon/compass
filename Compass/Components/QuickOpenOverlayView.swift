@@ -21,8 +21,8 @@ struct QuickOpenOverlayView: View {
 
     private var overlayHeader: OverlayHeaderConfiguration {
         OverlayHeaderConfiguration(
-            title: OverlayLocalizer.localized("quick_open.title"),
-            placeholder: OverlayLocalizer.localized("quick_open.placeholder"),
+            title: NSLocalizedString("quick_open.title", comment: ""),
+            placeholder: NSLocalizedString("quick_open.placeholder", comment: ""),
             query: $query,
             textFieldMinWidth: AppConstants.Overlay.textFieldMinWidth,
             showsProgress: isSearching,
@@ -39,7 +39,7 @@ struct QuickOpenOverlayView: View {
         overlayScaffold(using: overlayHeader) {
             List {
                 if !recentCandidates().isEmpty && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Section(OverlayLocalizer.localized("quick_open.recent")) {
+                    Section(NSLocalizedString("quick_open.recent", comment: "")) {
                         ForEach(recentCandidates(), id: \.self) { path in
                             Button(action: { open(path: path, openToSide: false) }) {
                                 Text(path)
@@ -49,7 +49,7 @@ struct QuickOpenOverlayView: View {
                     }
                 }
 
-                Section(OverlayLocalizer.localized("quick_open.results")) {
+                Section(NSLocalizedString("quick_open.results", comment: "")) {
                     ForEach(results, id: \.self) { path in
                         Button(action: { open(path: path, openToSide: NSEvent.modifierFlags.contains(.command)) }) {
                             Text(path)

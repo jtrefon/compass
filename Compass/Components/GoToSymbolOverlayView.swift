@@ -24,8 +24,8 @@ struct GoToSymbolOverlayView: View {
 
     private var overlayHeader: OverlayHeaderConfiguration {
         OverlayHeaderConfiguration(
-            title: OverlayLocalizer.localized("go_to_symbol.title"),
-            placeholder: OverlayLocalizer.localized("go_to_symbol.placeholder"),
+            title: NSLocalizedString("go_to_symbol.title", comment: ""),
+            placeholder: NSLocalizedString("go_to_symbol.placeholder", comment: ""),
             query: $query,
             textFieldMinWidth: AppConstants.Overlay.textFieldMinWidth,
             showsProgress: isSearching,

@@ -82,7 +82,7 @@ final class LocalModelInferenceConfigurationTests: XCTestCase {
         )
     }
 
-    func testKVCache4BitOffByDefault() async {
+    func testKVCache4BitOnByDefault() async {
         let suiteName = "LocalModelInferenceConfigurationTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -90,7 +90,7 @@ final class LocalModelInferenceConfigurationTests: XCTestCase {
             settingsStore: SettingsStore(userDefaults: defaults)
         )
         let enabled = await store.isKVCache4BitEnabled()
-        XCTAssertFalse(enabled, "4-bit KV must be opt-in, not the default")
+        XCTAssertTrue(enabled, "4-bit KV is the default long-context memory policy")
     }
 
     func testChatModelExposes262KCapability() {

@@ -28,14 +28,13 @@ struct ReasoningOutcomeMessageView: View {
                         .padding(.horizontal, AppConstants.Layout.spacingSm)
                         .padding(.vertical, AppConstants.Layout.spacingXXS)
                         .background(outcome.deliveryState == .done ? AppConstants.Color.statusSuccessSubtle : AppConstants.Color.statusWarningSubtle)
-                        .foregroundColor(outcome.deliveryState == .done ? .green : .orange)
+                        .foregroundColor(outcome.deliveryState == .done ? AppConstants.Color.statusSuccess : AppConstants.Color.statusWarning)
                         .cornerRadius(AppConstants.Layout.cornerSm)
                 }
             }
             .padding(.horizontal, AppConstants.Layout.spacingMd)
             .padding(.vertical, AppConstants.Layout.spacingSm)
-            .background(AppConstants.Color.surfaceCard)
-            .cornerRadius(AppConstants.Layout.cornerXL)
+            .nativeGlassBackground(.panel, cornerRadius: AppConstants.Layout.cornerLg)
         }
     }
 
