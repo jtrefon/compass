@@ -33,22 +33,34 @@ jobs:
       - name: Install libomp (OpenMP)
         run: brew install libomp
 
-      - name: Resolve + Build for Testing
+      - name: Resolve Package Dependencies
         run: |
           PROJECT="$(ls -d *.xcodeproj | head -1)"
           SCHEME="$(basename "$PROJECT" .xcodeproj)"
-          echo "Building $PROJECT (scheme $SCHEME)"
+          echo "Resolving $PROJECT (scheme $SCHEME)"
+          # NOTE: xcodebuild may crash here (exit 134) when EventSource 1.5.x
+          # is resolved — its Package.swift uses SwiftPM traits (SE-0449) which
+          # trigger an Xcode workspace-registration bug. The checkouts are
+          # created before the crash, so the build step below still succeeds.
           xcodebuild \
             -resolvePackageDependencies \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -derivedDataPath "$DERIVED_DATA"
+            -derivedDataPath "$DERIVED_DATA" \
+            -skipPackagePluginValidation \
+            || true
+
+      - name: Build for Testing
+        run: |
+          PROJECT="$(ls -d *.xcodeproj | head -1)"
+          SCHEME="$(basename "$PROJECT" .xcodeproj)"
           xcodebuild \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -configuration Debug \
             -derivedDataPath "$DERIVED_DATA" \
             -destination 'platform=macOS' \
+            -skipPackagePluginValidation \
             build-for-testing \
             CODE_SIGNING_ALLOWED=NO
 
