@@ -13,7 +13,8 @@ prepare_derived_data_packages() {
     xcodebuild -resolvePackageDependencies \
         -project "$PROJECT_NAME.xcodeproj" \
         -scheme "$SCHEME" \
-        -derivedDataPath "$derived_data_path" >/dev/null
+        -derivedDataPath "$derived_data_path" \
+        -skipPackagePluginValidation >/dev/null || true
 }
 
 collect_descendant_pids() {
@@ -232,11 +233,13 @@ build_app() {
     xcodebuild -resolvePackageDependencies \
         -project "$PROJECT_NAME.xcodeproj" \
         -scheme "$SCHEME" \
-        -derivedDataPath "$DERIVED_DATA_PATH_APP" >/dev/null
+        -derivedDataPath "$DERIVED_DATA_PATH_APP" \
+        -skipPackagePluginValidation >/dev/null || true
     xcodebuild -quiet -project "$PROJECT_NAME.xcodeproj" \
                -scheme "$SCHEME" \
                -configuration Debug \
                -derivedDataPath "$DERIVED_DATA_PATH_APP" \
+               -skipPackagePluginValidation \
                build
     copy_embedding_models
 }
