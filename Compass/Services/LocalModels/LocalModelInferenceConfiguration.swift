@@ -125,7 +125,7 @@ enum LocalModelInferenceOverrides {
         // (`kv4=` in makePrefixCacheContext) — the next generation re-prefills.
         let kvCache4BitEnabled = parseBool(value("COMPASS_LOCAL_MODEL_KV_CACHE_4BIT")) ?? defaultKVCache4BitEnabled
         let prefillStepSize = clamp(
-            envPrefill ?? 512,
+            envPrefill ?? 1024,
             min: 64,
             max: 4_096
         )
