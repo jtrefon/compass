@@ -776,8 +776,8 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 if let runId, !text.isEmpty {
                     // Batch streaming chunks: accumulate text and publish on a
                     // time throttle (~33ms = 30fps) to avoid per-token
-                    // main-thread dispatches. At 25 t/s this cuts event bus
-                    // traffic from 25 events/sec to ~1 event/sec (the UI
+                    // main-thread dispatches. At 30 t/s this cuts event bus
+                    // traffic from 30 events/sec to ~1 event/sec (the UI
                     // renders at 60fps but text updates at 30fps are smooth).
                     streamingChunkBuffer.append(text)
                     let now = ContinuousClock.now
