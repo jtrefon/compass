@@ -680,7 +680,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         // token recorder — the generic generate() covers the docs but hides the
         // sampled IDs we need for robust KV-cache reuse bookkeeping.
         let recorder = TokenIDRecorder(upstream: parameters.processor())
-        let iterator = try TokenIterator(
+        var iterator = try TokenIterator(
             input: input,
             model: context.model,
             cache: kvCache,
@@ -693,37 +693,71 @@ actor NativeMLXGenerator: LocalModelGenerating {
             quantizedKVStart: parameters.quantizedKVStart,
             kvScheme: parameters.kvScheme
         )
-        let (stream, _) = MLXLMCommon.generateTask(
-            promptTokenCount: input.text.tokens.size,
-            modelConfiguration: context.configuration,
-            tokenizer: context.tokenizer,
-            iterator: iterator,
-            tools: nil
-        )
+
+        // ---- Direct iterator loop (bypasses generateTask/AsyncStream) ----
+        // The vendored generateTask wraps the iterator in a Task + AsyncStream,
+        // adding a suspension/context-switch per token. Running the iterator
+        // directly eliminates that overhead — each token goes through:
+        //   iterator.next() → detokenizer → stopFilter → toolCallProcessor
+        // with zero async hops.
+        let tokenizer = context.tokenizer
+        let stopStrings = context.configuration.effectiveStopStrings
+        let toolCallFormat = context.configuration.toolCallFormat ?? .json
+        var detokenizer = NaiveStreamingDetokenizer(tokenizer: tokenizer)
+        var stopFilter = DirectStopStringFilter(stopStrings: stopStrings)
+        let toolCallProcessor = ToolCallProcessor(format: toolCallFormat, tools: nil)
+
+        // Build stop token IDs (mirrors vendored buildStopTokenIds).
+        var stopTokenIds = context.configuration.eosTokenIds
+        if let eosId = tokenizer.eosTokenId {
+            stopTokenIds.insert(eosId)
+        }
+        for token in context.configuration.extraEOSTokens {
+            if let id = tokenizer.convertTokenToId(token) {
+                stopTokenIds.insert(id)
+            }
+        }
+        let unknownTokenId = tokenizer.unknownTokenId
+
         var result = StreamResult()
-        // Chunk-level timing: average tps (mlx.generate_complete) cannot
-        // distinguish steady-slow decode from stall bursts. Sample the first
-        // ~16 chunks + a 1/50 cadence afterwards to expose intra-generation
-        // stalls (memory allocation waits, compressor hits).
         let chunkTimingStart = ContinuousClock.now
         var lastChunkTiming = chunkTimingStart
         var chunkTimingLogCount = 0
-        // Streaming chunk batching: accumulate text and flush on a time
-        // throttle to reduce per-token main-thread dispatches.
         var streamingChunkBuffer = ""
         var lastChunkFlush = chunkTimingStart
 
-        for await generation in stream {
+        var genStartTime = Date.timeIntervalSinceReferenceDate
+        var promptTime: TimeInterval = 0
+        var tokenCount = 0
+        var stopReason: GenerateStopReason?
+
+        tokenLoop: while let token = iterator.next() {
             if Task.isCancelled {
-                throw CancellationError()
+                stopReason = .cancelled
+                break
             }
+
+            if promptTime == 0 {
+                let now = Date.timeIntervalSinceReferenceDate
+                promptTime = now - genStartTime
+                genStartTime = now
+            }
+
+            // Check for end-of-sequence tokens
+            if token == unknownTokenId || stopTokenIds.contains(token) {
+                iterator.discardGeneratedToken()
+                stopReason = .stop
+                break
+            }
+
+            tokenCount += 1
+            result.chunkCount += 1
+
             if result.chunkCount % 50 == 0 {
                 try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "streaming")
             }
-            result.chunkCount += 1
-            // Every chunk in the first 16, then every 50th — bounded log volume.
-            // Gated by TelemetryGate: the entire timing block is compiled out
-            // in Release (zero overhead — no ContinuousClock calls, no math).
+
+            // Telemetry-gated chunk timing (compiled out in Release).
             if TelemetryGate.isEnabled, chunkTimingLogCount < 16 || result.chunkCount % 50 == 0 {
                 let now = ContinuousClock.now
                 let sinceLastMs = Self.milliseconds(lastChunkTiming.duration(to: now))
@@ -770,48 +804,79 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 ])
             }
 
-            switch generation {
-            case .chunk(let text):
-                result.output.append(text)
-                if let runId, !text.isEmpty {
-                    // Batch streaming chunks: accumulate text and publish on a
-                    // time throttle (~33ms = 30fps) to avoid per-token
-                    // main-thread dispatches. At 30 t/s this cuts event bus
-                    // traffic from 30 events/sec to ~1 event/sec (the UI
-                    // renders at 60fps but text updates at 30fps are smooth).
-                    streamingChunkBuffer.append(text)
-                    let now = ContinuousClock.now
-                    let sinceLastFlushMs = Self.milliseconds(lastChunkFlush.duration(to: now))
-                    if sinceLastFlushMs >= Self.streamingFlushIntervalMs {
-                        let batch = streamingChunkBuffer
-                        streamingChunkBuffer = ""
-                        lastChunkFlush = now
-                        eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: batch))
-                        // Live context: update estimate with each flush —
-                        // one main-actor hop per ~33ms instead of per token.
-                        // Use the FULL prompt length (not the trimmed suffix
-                        // input): suffix-only made the gauge oscillate ~1-2k
-                        // per turn while the model actually ran at 18-24k.
-                        let estimate = fullPromptTokenCount + recorder.tokenCount
-                        Task { @MainActor in
-                            eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: estimate))
-                        }
-                    }
+            // Detokenize → stop string filter → tool call processor
+            detokenizer.append(token: token)
+            if let chunk = detokenizer.next() {
+                let filterResult = stopFilter.process(chunk)
+                if let text = filterResult.text {
+                    processTextChunk(
+                        text, toolCallProcessor: toolCallProcessor,
+                        result: &result, runId: runId, eventBus: eventBus,
+                        streamingChunkBuffer: &streamingChunkBuffer,
+                        lastChunkFlush: &lastChunkFlush,
+                        fullPromptTokenCount: fullPromptTokenCount,
+                        recorder: recorder
+                    )
                 }
-            case .info:
-                if case .info(let info) = generation {
-                    result.completionInfo = info
+                if filterResult.stopped {
+                    stopReason = .stop
+                    break tokenLoop
                 }
-            case .toolCall(let toolCall):
-                result.collectedToolCalls.append(Self.makeAIToolCall(from: toolCall))
             }
         }
 
-        // Flush any remaining buffered streaming text after the loop ends.
+        if stopReason == nil {
+            if Task.isCancelled {
+                stopReason = .cancelled
+            } else if let maxTokens = iterator.maxTokens, iterator.tokenCount >= maxTokens {
+                stopReason = .length
+            } else {
+                stopReason = .cancelled
+            }
+        }
+
+        // Finish stop string filter (flush any buffered text).
+        if let text = stopFilter.finish() {
+            processTextChunk(
+                text, toolCallProcessor: toolCallProcessor,
+                result: &result, runId: runId, eventBus: eventBus,
+                streamingChunkBuffer: &streamingChunkBuffer,
+                lastChunkFlush: &lastChunkFlush,
+                fullPromptTokenCount: fullPromptTokenCount,
+                recorder: recorder
+            )
+        }
+
+        // Process EOS for tool calls (flush any buffered non-tool text).
+        if let bufferedText = toolCallProcessor.processEOS(returnBufferedText: true),
+           !bufferedText.isEmpty
+        {
+            result.output.append(bufferedText)
+            if let runId, !bufferedText.isEmpty {
+                streamingChunkBuffer.append(bufferedText)
+            }
+        }
+
+        // Collect tool calls.
+        for toolCall in toolCallProcessor.toolCalls {
+            result.collectedToolCalls.append(Self.makeAIToolCall(from: toolCall))
+        }
+
+        // Flush any remaining buffered streaming text.
         if let runId, !streamingChunkBuffer.isEmpty {
             eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: streamingChunkBuffer))
             streamingChunkBuffer = ""
         }
+
+        // Build completion info (mirrors vendored generateLoopTask).
+        let generateTime = Date.timeIntervalSinceReferenceDate - genStartTime
+        result.completionInfo = GenerateCompletionInfo(
+            promptTokenCount: input.text.tokens.size,
+            generationTokenCount: tokenCount,
+            promptTime: promptTime + iterator.promptPrefillTime,
+            generationTime: generateTime,
+            stopReason: stopReason ?? .cancelled
+        )
 
         let generatedTokenIds = recorder.tokenIDs
         result.generatedTokenIds = generatedTokenIds
@@ -822,6 +887,41 @@ actor NativeMLXGenerator: LocalModelGenerating {
             }
         }
         return result
+    }
+
+    /// Process a decoded text chunk through the tool call processor and
+    /// streaming event bus. Inlined from the vendored TextToolTokenLoopHandler
+    /// to avoid AsyncStream overhead.
+    private nonisolated func processTextChunk(
+        _ text: String,
+        toolCallProcessor: ToolCallProcessor,
+        result: inout StreamResult,
+        runId: String?,
+        eventBus: EventBusProtocol,
+        streamingChunkBuffer: inout String,
+        lastChunkFlush: inout ContinuousClock.Instant,
+        fullPromptTokenCount: Int,
+        recorder: TokenIDRecorder
+    ) {
+        guard !text.isEmpty else { return }
+        if let textToYield = toolCallProcessor.processChunk(text) {
+            result.output.append(textToYield)
+            if let runId, !textToYield.isEmpty {
+                streamingChunkBuffer.append(textToYield)
+                let now = ContinuousClock.now
+                let sinceLastFlushMs = Self.milliseconds(lastChunkFlush.duration(to: now))
+                if sinceLastFlushMs >= Self.streamingFlushIntervalMs {
+                    let batch = streamingChunkBuffer
+                    streamingChunkBuffer = ""
+                    lastChunkFlush = now
+                    eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: batch))
+                    let estimate = fullPromptTokenCount + recorder.tokenCount
+                    Task { @MainActor in
+                        eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: estimate))
+                    }
+                }
+            }
+        }
     }
 
     private nonisolated func buildGenerationResponse(
@@ -1157,5 +1257,81 @@ struct LocalTokenizerLoader: MLXLMCommon.TokenizerLoader {
             }
         }
         return Bridge(upstream: upstream)
+    }
+}
+
+/// Lightweight stop-string filter — reimplements the vendored
+/// `StopStringFilter` (which is internal) for the direct iterator loop.
+/// Buffers text that might be a partial stop string and emits only the
+/// safe (non-matching) prefix.
+struct DirectStopStringFilter {
+    let stopStrings: [String]
+    var buffer = ""
+    var stopped = false
+
+    init(stopStrings: Set<String>) {
+        self.stopStrings = stopStrings.filter { !$0.isEmpty }.sorted {
+            if $0.count == $1.count {
+                return $0 < $1
+            }
+            return $0.count > $1.count
+        }
+    }
+
+    private var isEnabled: Bool { !stopStrings.isEmpty }
+
+    mutating func process(_ chunk: String) -> (text: String?, stopped: Bool) {
+        guard !stopped else { return (nil, true) }
+        guard isEnabled else { return (chunk.isEmpty ? nil : chunk, false) }
+
+        buffer += chunk
+
+        if let stopRange = earliestStopRange(in: buffer) {
+            let text = String(buffer[..<stopRange.lowerBound])
+            buffer = ""
+            stopped = true
+            return (text.isEmpty ? nil : text, true)
+        }
+
+        let suffixLength = longestStopPrefixSuffixLength(in: buffer)
+        let emitEnd = buffer.index(buffer.endIndex, offsetBy: -suffixLength)
+        let text = String(buffer[..<emitEnd])
+        buffer = String(buffer[emitEnd...])
+        return (text.isEmpty ? nil : text, false)
+    }
+
+    mutating func finish() -> String? {
+        guard isEnabled, !stopped, !buffer.isEmpty else { return nil }
+        let text = buffer
+        buffer = ""
+        return text
+    }
+
+    private func earliestStopRange(in text: String) -> Range<String.Index>? {
+        var earliest: Range<String.Index>?
+        for stopString in stopStrings {
+            guard let range = text.range(of: stopString) else { continue }
+            if let current = earliest {
+                if range.lowerBound < current.lowerBound { earliest = range }
+            } else {
+                earliest = range
+            }
+        }
+        return earliest
+    }
+
+    private func longestStopPrefixSuffixLength(in text: String) -> Int {
+        var longest = 0
+        for stopString in stopStrings {
+            let maxLength = Swift.min(text.count, stopString.count - 1)
+            guard maxLength > longest else { continue }
+            for length in stride(from: maxLength, through: longest + 1, by: -1) {
+                if text.suffix(length) == stopString.prefix(length) {
+                    longest = length
+                    break
+                }
+            }
+        }
+        return longest
     }
 }
