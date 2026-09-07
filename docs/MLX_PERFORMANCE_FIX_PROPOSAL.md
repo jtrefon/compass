@@ -1,8 +1,22 @@
 # MLX Inference Performance Fix Proposal
 
-> **Status:** Awaiting sign-off
+> **Status:** Implemented — Phases 1-4 complete
 > **Date:** September 2026
 > **Investigation:** See `MLX_PERFORMANCE_ROOT_CAUSE_ANALYSIS.md` (session telemetry from `~/Projects/WordPress/.ide/logs/ai-trace.ndjson`)
+
+## Results Summary
+
+| Metric | Baseline | Phase 1+2 | Phase 3 | Phase 4 (final) |
+|--------|----------|-----------|---------|-----------------|
+| **Decode t/s** | 13 t/s | 25.3 t/s | 29.4 t/s | **30.2 t/s** |
+| **Prefill t/s** | 85-200 | 362 t/s | 369 t/s | **~330 t/s** |
+| **Improvement** | 1x | 1.9x | 2.3x | **2.3x** |
+
+Target: ~50 t/s. Achieved: 30.2 t/s (60% of target, 2.3x over baseline).
+
+The remaining gap is from Qwen3.5's hybrid architecture (24 SSM + 8 attention layers)
+where the attention layers cannot be compiled (growing KV cache offsets) and the
+theoretical weight-bandwidth limit (~60 t/s for 2GB 4-bit weights at 120 GB/s).
 
 ## Problem Statement
 
