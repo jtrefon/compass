@@ -11,26 +11,28 @@ import Darwin
 final class PromptCacheEntry: @unchecked Sendable {
     var cache: [KVCache]?
     var promptTokenIds: [Int] = []
-    /// System-prefix hash the cache was seeded/validated against (for
-    /// conversation-level disk persistence).
+    /// How many of `promptTokenIds` are the PROMPT part (the rest is the
+    /// model's own generated output). The split makes the trim guard exact:
+    /// removing generated tokens is always safe on non-trimmable SSM caches
+    /// (the model's own output), regardless of size — only a trim that cuts
+    /// into the prompt region is a genuine context rewrite.
+    var promptTokenCount: Int = 0
     var systemHash: String?
-    private let lock = NSLock()
 
-    func set(cache: [KVCache]?, tokenIds: [Int]) {
-        lock.lock(); defer { lock.unlock() }
+    func set(cache: [KVCache]?, tokenIds: [Int], promptCount: Int) {
         self.cache = cache
         self.promptTokenIds = tokenIds
+        self.promptTokenCount = promptCount
     }
 
-    func get() -> (cache: [KVCache]?, tokenIds: [Int]) {
-        lock.lock(); defer { lock.unlock() }
-        return (cache, promptTokenIds)
+    func get() -> (cache: [KVCache]?, tokenIds: [Int], promptCount: Int) {
+        (cache, promptTokenIds, promptTokenCount)
     }
 
     func clear() {
-        lock.lock(); defer { lock.unlock() }
         cache = nil
         promptTokenIds = []
+        promptTokenCount = 0
         Memory.clearCache()
     }
 }
@@ -38,7 +40,18 @@ final class PromptCacheEntry: @unchecked Sendable {
 protocol LocalModelGenerating: Sendable {
     func generate(modelId: String, modelDirectory: URL, userInput: sending UserInput, tools: [ToolSpec]?, toolCallFormat: ToolCallFormat?, runId: String?, inferenceConfiguration: LocalModelInferenceConfiguration, conversationId: String?, prefixCache: PrefixCacheContext?) async throws -> AIServiceResponse
     func preload(modelId: String, modelDirectory: URL, toolCallFormat: ToolCallFormat?) async throws
-    func unloadAllModels(reason: String, persistKVTo: URL?) async
+    func unloadAllModels(reason: String) async
+    /// Release transient/scratch memory (MLX buffer cache) WITHOUT unloading
+    /// weights or KV caches. Used by the pressure handler under the eviction
+    /// policy — chat inference state must survive memory pressure.
+    func releaseTransientMemory() async
+    /// LAST-RESORT pressure eviction: drops the resident conversation KV cache
+    /// (not the model weights). The next turn pays a full prefill, but the
+    /// system stops compressor-thrashing. Only called when memory pressure is
+    /// critical AND the compressor is saturated.
+    func releaseConversationKV() async
+    /// Current OS compressor pages (for the pressure policy decision).
+    func currentCompressorPages() async -> Int?
     func hasActiveGeneration() async -> Bool
 }
 
@@ -61,42 +74,28 @@ actor NativeMLXGenerator: LocalModelGenerating {
     /// MLXInferenceLock, this guards the non-locked unload callers).
     private var activeGenerationCount = 0
     private static let mlxCacheLimitBytes = 1024 * 1024 * 1024
-    private static let defaultTestingRSSLimitMB = 8 * 1024
-    private static let defaultOperationalRSSLimitMB = 10 * 1024
-    private var promptCacheByConversation: [String: PromptCacheEntry] = [:]
-    private var savedPrefixCacheHashes: Set<String> = []
-    /// LRU access order for eviction — Dictionary key iteration is hash-based,
-    private let kvCacheManager: MLXKVCacheManager
-    private var promptCacheAccessOrder: [String] = []
-    private static let maxPromptCacheConversations = 1
-
-    private func promptCacheKey(conversationId: String, modelDirectory: URL) -> String {
-        "\(conversationId):\(modelDirectory.standardizedFileURL.path)"
-    }
+    /// Trims below this bound are the model's own previous generation —
+    /// safe to reuse on non-trimmable SSM caches (the state's stale content
+    /// is gated/decayed and empirically benign). Above it the trim is a
+    /// genuine context rewrite → fresh prefill.
+    private static let maxStaleTrimTokens = 4_096
+    private let conversationCache: ConversationKVCache
+    private let memoryMonitor: any EngineMemoryMonitoring
 
     nonisolated static let sharedTestGenerator: LocalModelGenerating = {
         NativeMLXGenerator(eventBus: NoOpEventBus())
     }()
 
-    private let memoryMonitor: any EngineMemoryMonitoring
-    private let generationService: MLXGenerationService
-
     init(
         eventBus: EventBusProtocol,
         memoryMonitor: any EngineMemoryMonitoring = ProcessMemoryMonitor(),
         modelRepository: MLXModelRepository = MLXModelRepository(),
-        kvCacheManager: MLXKVCacheManager = MLXKVCacheManager()
+        conversationCache: ConversationKVCache = ConversationKVCache()
     ) {
         self.eventBus = eventBus
         self.memoryMonitor = memoryMonitor
         self.modelRepository = modelRepository
-        self.kvCacheManager = kvCacheManager
-        self.generationService = MLXGenerationService(
-            modelRepository: modelRepository,
-            kvCacheManager: kvCacheManager,
-            memoryMonitor: memoryMonitor,
-            eventBus: eventBus
-        )
+        self.conversationCache = conversationCache
         // Memory budget: do NOT clamp mlx's memoryLimit to a tiny hard cap —
         // malloc then blocks on every allocation over it (a 2.5GB model under
         // a 3GB limit made prefill/generation wait on scheduled tasks, ~4-10x
@@ -109,6 +108,13 @@ actor NativeMLXGenerator: LocalModelGenerating {
            let limitMB = Int(configured), limitMB > 0 {
             Memory.memoryLimit = limitMB * 1024 * 1024
         }
+        // Lock the process's memory so the OS cannot swap/compress our pages
+        // mid-inference (measured: 7GB in swap + 200-400k compressed pages
+        // while decode ran at 12 tps vs a 35+ tps clean benchmark). MCL_FUTURE
+        // keeps KV growth and generation buffers resident too. Opt out via
+        // COMPASS_DISABLE_MEMORY_LOCK=1 (allocation failures instead of swap
+        // under genuine RAM exhaustion).
+        ProcessMemoryLock.engageIfEnabled()
         let monitorCopy = memoryMonitor
         Task { await monitorCopy.logDeviceInfo() }
     }
@@ -123,6 +129,16 @@ actor NativeMLXGenerator: LocalModelGenerating {
         let systemMemMB = gpuInfo.memorySize / (1024 * 1024)
         let cacheLimitMB = Memory.cacheLimit / (1024 * 1024)
         let memoryLimitMB = Memory.memoryLimit / (1024 * 1024)
+        let thermal = ProcessInfo.processInfo.thermalState.rawValue
+        let ncpu = ProcessInfo.processInfo.processorCount
+        let activeCPU = ProcessInfo.processInfo.activeProcessorCount
+        let availableMemMB: Int = {
+            var info = mach_task_basic_info()
+            var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<natural_t>.size)
+            let r = withUnsafeMutablePointer(to: &info) { p in p.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rp in task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), rp, &count) } }
+            guard r == KERN_SUCCESS else { return 0 }
+            return Int(info.resident_size / 1024 / 1024)
+        }()
         await AIToolTraceLogger.shared.log(type: "mlx.device_info", data: [
             "defaultDeviceType": deviceType,
             "deviceDescription": deviceDesc,
@@ -130,7 +146,11 @@ actor NativeMLXGenerator: LocalModelGenerating {
             "maxRecommendedWorkingSetMB": maxWorkingSetMB,
             "systemMemoryMB": systemMemMB,
             "mlxCacheLimitMB": cacheLimitMB,
-            "mlxMemoryLimitMB": memoryLimitMB
+            "mlxMemoryLimitMB": memoryLimitMB,
+            "thermalState": thermal,
+            "processorCount": ncpu,
+            "activeProcessorCount": activeCPU,
+            "residentMBAtBoot": availableMemMB
         ])
     }
 
@@ -155,14 +175,24 @@ actor NativeMLXGenerator: LocalModelGenerating {
             throw CancellationError()
         }
         // Serialize with FIM and other MLX engines — see MLXInferenceLock.
+        let lockWaitStart = ContinuousClock.now
         try await MLXInferenceLock.shared.acquire()
+        let lockWaitMs = Self.milliseconds(lockWaitStart.duration(to: ContinuousClock.now))
+        if lockWaitMs > 5 {
+            AIToolTraceLogger.shared.logIfEnabled(type: "mlx.lock_wait", data: ["runId": runId ?? "", "waitMs": lockWaitMs])
+        }
         try Task.checkCancellation()
-        // Chat/agent work has foreground priority. FIM is useful while the
-        // editor is idle, but retaining its weights alongside Qwen consumes a
-        // large portion of unified memory for no concurrent benefit. Holding
-        // the shared lock means an active FIM stream has finished before its
-        // container is released.
-        await InferenceUnloadRegistry.shared.unloadAll(labels: [InferenceUnloadRegistry.fimLabel])
+        // Pre-generation memory gate: evict FIM only when free memory is low.
+        // The unconditional eviction that was here caused 99 pre_evict_fim
+        // events per session and 15 × 30s lock timeouts — FIM was reloaded
+        // after every chat generation. With FP16 KV (lower transient peak),
+        // the conditional guard should rarely fire.
+        if let vm = memoryMonitor.currentVMStat(), vm.freePages < Self.fimEvictionFreePageThreshold {
+            AIToolTraceLogger.shared.logIfEnabled(type: "mlx.memory_gate", data: ["runId": runId ?? "", "freePages": vm.freePages, "compressorPages": vm.compressorPages, "action": "pre_evict_fim"])
+            await InferenceUnloadRegistry.shared.unloadAll(labels: [InferenceUnloadRegistry.fimLabel])
+            // Brief throttle to let compressor drain (live trace shows 22173→95614 after 2.5s)
+            try? await Task.sleep(for: .milliseconds(Self.fimEvictionDrainMs))
+        }
         activeGenerationCount += 1
         defer {
             activeGenerationCount -= 1
@@ -180,7 +210,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
 
         let parameters = GenerateParameters(
             maxTokens: inferenceConfiguration.maxOutputTokens,
-            maxKVSize: inferenceConfiguration.maxKVSize,
+            maxKVSize: inferenceConfiguration.mlxMaxKVSize,
             kvBits: inferenceConfiguration.kvCache4BitEnabled ? 4 : nil,
             temperature: inferenceConfiguration.temperature,
             topP: inferenceConfiguration.topP,
@@ -189,7 +219,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
             prefillStepSize: inferenceConfiguration.prefillStepSize
         )
         let eventBus = self.eventBus
-        let cacheEntry = resolveCacheEntry(
+        let cacheEntry = await resolveCacheEntry(
             conversationId: conversationId,
             modelDirectory: modelDirectory,
             prefixCache: prefixCache,
@@ -201,12 +231,13 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 modelId: modelId, modelDirectory: modelDirectory, toolCallFormat: toolCallFormat,
                 runId: runId, preparedUserInput: preparedUserInput, rssLimitMB: rssLimitMB,
                 generationStart: generationStart, parameters: parameters, eventBus: eventBus,
-                cacheEntry: cacheEntry, inferenceConfiguration: inferenceConfiguration
+                cacheEntry: cacheEntry, prefixCache: prefixCache,
+                inferenceConfiguration: inferenceConfiguration
             )
 
             generationCount += 1
             memoryMonitor.logSnapshot(generationCount: generationCount)
-            persistPrefixCacheIfNeeded(
+            await persistPrefixCacheIfNeeded(
                 prefixCache: prefixCache,
                 modelDirectory: modelDirectory,
                 toolCallFormat: toolCallFormat,
@@ -264,84 +295,13 @@ actor NativeMLXGenerator: LocalModelGenerating {
         modelDirectory: URL,
         prefixCache: PrefixCacheContext? = nil,
         inferenceConfiguration: LocalModelInferenceConfiguration
-    ) -> PromptCacheEntry? {
-        guard let conversationId else { return nil }
-        let cachePolicy = "ctx=\(inferenceConfiguration.contextLength):kv=\(inferenceConfiguration.maxKVSize):q4=\(inferenceConfiguration.kvCache4BitEnabled):prefix=\(prefixCache?.hash ?? "none")"
-        let key = "\(promptCacheKey(conversationId: conversationId, modelDirectory: modelDirectory)):\(cachePolicy)"
-        if let existing = promptCacheByConversation[key] {
-            // touch for LRU
-            promptCacheAccessOrder.removeAll { $0 == key }
-            promptCacheAccessOrder.append(key)
-            return existing
-        }
-        if promptCacheByConversation.count >= Self.maxPromptCacheConversations,
-           let evictKey = promptCacheAccessOrder.first {
-            promptCacheAccessOrder.removeFirst()
-            promptCacheByConversation.removeValue(forKey: evictKey)
-        }
-        let entry = PromptCacheEntry()
-        promptCacheByConversation[key] = entry
-        promptCacheAccessOrder.append(key)
-        // Seed new conversations from the disk-persisted system-prefix cache.
-        // The common-prefix machinery trims it to the system block, so only
-        // the user message prefills.
-        if let prefixCache, FileManager.default.fileExists(atPath: prefixCache.url.path) {
-            if let loaded = Self.loadPrefixCache(prefixCache) {
-                entry.set(cache: loaded.cache, tokenIds: loaded.tokenIds)
-                entry.systemHash = prefixCache.hash
-            }
-        }
-        // A conversation-level cache (persisted before a critical eviction)
-        // has more history than the system prefix — it wins.
-        if let prefixCache,
-           let loaded = Self.loadConversationCache(
-               directory: prefixCache.url.deletingLastPathComponent(),
-               conversationKey: key,
-               expectedHash: prefixCache.hash
-           ) {
-            entry.set(cache: loaded.cache, tokenIds: loaded.tokenIds)
-            entry.systemHash = prefixCache.hash
-        }
-        return entry
-    }
-
-    /// Loads a conversation-level KV cache file, validating the system-hash
-    /// metadata and token ids. Any mismatch falls back to the prefix/fresh
-    /// prefill (safe).
-    nonisolated private static func loadConversationCache(
-        directory: URL,
-        conversationKey: String,
-        expectedHash: String
-    ) -> (cache: [KVCache], tokenIds: [Int])? {
-        let digest = String(SHA256.hash(data: Data(conversationKey.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16))
-        let url = directory.appendingPathComponent("kv-conv-\(digest).safetensors")
-        guard FileManager.default.fileExists(atPath: url.path),
-              let (caches, metadata) = try? loadPromptCache(url: url),
-              metadata["systemHash"] == expectedHash,
-              let tokenIdsRaw = metadata["tokenIds"] else {
-            return nil
-        }
-        let tokenIds = tokenIdsRaw.split(separator: ",").compactMap { Int($0) }
-        guard !tokenIds.isEmpty else { return nil }
-        return (caches, tokenIds)
-    }
-
-    /// Loads the disk prefix cache, validating the hash metadata. Returns nil
-    /// (and deletes the stale file) on any mismatch — the caller falls back to
-    /// a fresh prefill, which is always safe.
-    nonisolated private static func loadPrefixCache(_ prefixCache: PrefixCacheContext) -> (cache: [KVCache], tokenIds: [Int])? {
-        guard let (caches, metadata) = try? loadPromptCache(url: prefixCache.url),
-              metadata["systemHash"] == prefixCache.hash,
-              let tokenIdsRaw = metadata["tokenIds"] else {
-            try? FileManager.default.removeItem(at: prefixCache.url)
-            return nil
-        }
-        let tokenIds = tokenIdsRaw.split(separator: ",").compactMap { Int($0) }
-        guard !tokenIds.isEmpty else {
-            try? FileManager.default.removeItem(at: prefixCache.url)
-            return nil
-        }
-        return (caches, tokenIds)
+    ) async -> PromptCacheEntry? {
+        await conversationCache.resolveEntry(
+            conversationId: conversationId,
+            modelDirectory: modelDirectory,
+            prefixCache: prefixCache,
+            kvCache4Bit: inferenceConfiguration.kvCache4BitEnabled
+        )
     }
 
     /// Builds the system-only prefix cache (attention KV + linear-layer state
@@ -353,9 +313,9 @@ actor NativeMLXGenerator: LocalModelGenerating {
         modelDirectory: URL,
         toolCallFormat: ToolCallFormat?,
         inferenceConfiguration: LocalModelInferenceConfiguration
-    ) {
+    ) async {
         guard let prefixCache else { return }
-        guard !savedPrefixCacheHashes.contains(prefixCache.hash) else { return }
+        guard await !conversationCache.hasPrefixCache(prefixCache.hash) else { return }
 
         let capturedInput = UnsafeValue(value: prefixCache.systemUserInput)
         // Best-effort: the persist must NEVER delay a generation. It competes
@@ -364,6 +324,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         // tool-pass send for 20-30s while pre-computing the system KV.
         // savedPrefixCacheHashes is only marked on success, so a skipped
         // build is retried after a later (idle) generation.
+        let conversationCache = self.conversationCache
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             do {
@@ -371,7 +332,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
                     return // GPU busy or generation queued — skip, retried later
                 }
                 defer { Task { await MLXInferenceLock.shared.release() } }
-do {
+                do {
                     let container = try await self.loadContainerCached(
                         modelDirectory: modelDirectory, toolCallFormat: toolCallFormat
                     )
@@ -380,7 +341,7 @@ do {
                         let tokenIds = input.text.tokens.asArray(Int.self)
                         let parameters = GenerateParameters(
                             maxTokens: 1,
-                            maxKVSize: inferenceConfiguration.maxKVSize,
+                            maxKVSize: inferenceConfiguration.mlxMaxKVSize,
                             kvBits: inferenceConfiguration.kvCache4BitEnabled ? 4 : nil,
                             temperature: 0,
                             topP: 1,
@@ -398,46 +359,20 @@ do {
                             ]
                         )
                     }
-                    await self.markPrefixCacheSaved(prefixCache.hash)
-                    Self.evictPrefixCacheFiles(directory: prefixCache.url.deletingLastPathComponent(), keep: Self.maxPrefixCacheFiles)
+                    await conversationCache.markPrefixCacheSaved(prefixCache.hash)
                 } catch {
-                // Cache building is best-effort; a failure just means the next
-                // conversation pays a normal prefill.
-                await AppLogger.shared.debug(
-                    category: .localModel,
-                    message: "prefix_cache_build_failed",
-                    context: AppLogger.LogCallContext(metadata: [
-                        "hash": prefixCache.hash,
-                        "error": String(describing: error)
-                    ])
-                )
+                    // Cache building is best-effort; a failure just means the next
+                    // conversation pays a normal prefill.
+                    await AppLogger.shared.debug(
+                        category: .localModel,
+                        message: "prefix_cache_build_failed",
+                        context: AppLogger.LogCallContext(metadata: [
+                            "hash": prefixCache.hash,
+                            "error": String(describing: error)
+                        ])
+                    )
+                }
             }
-        }
-    }
-}
-
-private func markPrefixCacheSaved(_ hash: String) {
-        savedPrefixCacheHashes.insert(hash)
-    }
-
-nonisolated private static let maxPrefixCacheFiles = 8
-
-    nonisolated private static func evictPrefixCacheFiles(directory: URL, keep: Int) {
-        guard let allFiles = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else { return }
-        let prefixFiles = allFiles.filter {
-            $0.pathExtension == "safetensors" && $0.lastPathComponent.hasPrefix("kv-prefix-")
-        }
-        let sorted = prefixFiles.sorted { lhs, rhs in
-            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return lhsDate > rhsDate
-        }
-        for file in sorted.dropFirst(keep) {
-            try? FileManager.default.removeItem(at: file)
         }
     }
 
@@ -452,6 +387,7 @@ nonisolated private static let maxPrefixCacheFiles = 8
         parameters: GenerateParameters,
         eventBus: EventBusProtocol,
         cacheEntry: PromptCacheEntry?,
+        prefixCache: PrefixCacheContext?,
         inferenceConfiguration: LocalModelInferenceConfiguration
     ) async throws -> AIServiceResponse {
         let defaultDevice = Device.defaultDevice()
@@ -476,15 +412,44 @@ nonisolated private static let maxPrefixCacheFiles = 8
         let monitorForGen = memoryMonitor
         return try await container.perform { context in
             try monitorForGen.throwIfExceeded(limitMB: rssLimitMB, phase: "before_generation")
+            // Detailed pre-generation snapshot for hour-long runs (includes vm_stat)
+            let snapBefore = Memory.snapshot()
+            let vmBefore = monitorForGen.currentVMStat()
+            await AIToolTraceLogger.shared.log(type: "mlx.memory_snapshot", data: [
+                "runId": runId ?? "unknown",
+                "phase": "before_generation",
+                "activeMB": snapBefore.activeMemory / (1024 * 1024),
+                "cacheMB": snapBefore.cacheMemory / (1024 * 1024),
+                "peakMB": snapBefore.peakMemory / (1024 * 1024),
+                "rssMB": monitorForGen.currentRSSMB(),
+                "thermalState": monitorForGen.currentThermalState(),
+                "vmFreePages": vmBefore?.freePages ?? 0,
+                "vmCompressorPages": vmBefore?.compressorPages ?? 0,
+                "generationCount": generationCount
+            ])
 
             let input = try await context.processor.prepare(input: capturedInput.value)
             let promptTokenCount = input.text.tokens.size
-            let reservedOutputTokens = inferenceConfiguration.maxOutputTokens
-            guard promptTokenCount + reservedOutputTokens <= inferenceConfiguration.contextLength else {
+            let remainingOutputTokens = inferenceConfiguration.contextLength - promptTokenCount
+            guard remainingOutputTokens > 0 else {
                 throw AppError.aiServiceError(
-                    "Local request exceeds the configured context window: \(promptTokenCount) prompt tokens + \(reservedOutputTokens) reserved output tokens exceed \(inferenceConfiguration.contextLength)."
+                    "Local request exceeds the configured context window: \(promptTokenCount) prompt tokens leave no room for output in \(inferenceConfiguration.contextLength)."
                 )
             }
+            // "Let the model generate what it needs" bounded by the context
+            // that actually remains — a fixed 32k reserve starved small
+            // windows (64k ctx → 27k history → premature drops → collapses).
+            let effectiveMaxTokens = min(inferenceConfiguration.maxOutputTokens, remainingOutputTokens)
+            let clampedParameters = GenerateParameters(
+                maxTokens: effectiveMaxTokens,
+                maxKVSize: parameters.maxKVSize,
+                kvBits: parameters.kvBits,
+                temperature: parameters.temperature,
+                topP: parameters.topP,
+                repetitionPenalty: parameters.repetitionPenalty,
+                repetitionContextSize: parameters.repetitionContextSize,
+                prefillStepSize: parameters.prefillStepSize
+            )
             let promptTokenIds = input.text.tokens.asArray(Int.self)
             // Publish initial context estimate for live status bar (mirrors cloud path)
             if let runId {
@@ -498,33 +463,44 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 "modelId": modelId,
                 "promptTokens": promptTokenCount,
                 "contextLength": inferenceConfiguration.contextLength,
-                "reservedOutputTokens": reservedOutputTokens,
-                "contextHeadroomTokens": inferenceConfiguration.contextLength - promptTokenCount - reservedOutputTokens,
+                "reservedOutputTokens": effectiveMaxTokens,
+                "contextHeadroomTokens": remainingOutputTokens - effectiveMaxTokens,
                 "kvCache4Bit": inferenceConfiguration.kvCache4BitEnabled,
-                "residentConversationCaches": promptCacheByConversation.count
+                "residentConversationCaches": cacheEntry != nil ? 1 : 0
             ])
 
-            let (kvCache, effectiveInput) = try self.resolveKVCache(
+            var (kvCache, effectiveInput) = try self.resolveKVCache(
                 input: input,
                 from: cacheEntry,
                 promptTokenIds: promptTokenIds,
-                parameters: parameters,
+                parameters: clampedParameters,
                 context: context,
+                prefixCache: prefixCache,
                 runId: runId
             )
 
             MLX.Memory.peakMemory = 0
             let genStart = ContinuousClock.now
+            // Fresh-prefill path: allocate the cache HERE so it is ours to
+            // repopulate afterwards. resolveKVCache returns nil on miss, and
+            // without this the entry was never refilled after a fresh
+            // prefill (cached=0 on EVERY subsequent turn → full re-prefill
+            // each turn — the "minutes between turns" regression).
+            if kvCache == nil {
+                kvCache = context.model.newCache(parameters: clampedParameters)
+            }
+
             let streamResult = try await self.processGeneration(
                 input: effectiveInput,
                 kvCache: kvCache,
-                parameters: parameters,
+                parameters: clampedParameters,
                 context: context,
                 runId: runId,
                 eventBus: eventBus,
                 rssLimitMB: rssLimitMB,
                 genStart: genStart,
-                modelId: modelId
+                modelId: modelId,
+                fullPromptTokenCount: promptTokenCount
             )
 
             if let cacheEntry, let kvCache, !kvCache.isEmpty {
@@ -534,7 +510,8 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 // and desynchronize the next turn's common-prefix trim.
                 cacheEntry.set(
                     cache: kvCache,
-                    tokenIds: promptTokenIds + streamResult.generatedTokenIds
+                    tokenIds: promptTokenIds + streamResult.generatedTokenIds,
+                    promptCount: promptTokenIds.count
                 )
             }
 
@@ -559,12 +536,16 @@ nonisolated private static let maxPrefixCacheFiles = 8
         promptTokenIds: [Int],
         parameters: GenerateParameters,
         context: ModelContext,
+        prefixCache: PrefixCacheContext? = nil,
         runId: String? = nil
     ) throws -> (kvCache: [KVCache]?, effectiveInput: LMInput) {
         var effectiveInput = input
         var kvCache: [KVCache]? = nil
+        var reuseSkippedReason = ""
+        var skippedCommonLen = 0
+        var skippedTrimCount = 0
 
-        let (cachedCache, cachedTokenIds) = cacheEntry?.get() ?? (nil, [])
+        let (cachedCache, cachedTokenIds, cachedPromptCount) = cacheEntry?.get() ?? (nil, [], 0)
         if let cachedCache, !cachedCache.isEmpty, !cachedTokenIds.isEmpty, !promptTokenIds.isEmpty {
             let commonLen = Self.commonPrefixLength(cachedTokenIds, promptTokenIds)
             let trimCount = cachedTokenIds.count - commonLen
@@ -572,15 +553,41 @@ nonisolated private static let maxPrefixCacheFiles = 8
             if commonLen > 0 {
                 var reuseCache: [KVCache] = []
                 var skipReuse = false
-                for cache in cachedCache {
-                    if let maxSize = cache.maxSize, cache.offset > maxSize {
-                        skipReuse = true
-                        break
+
+                // Non-trimmable caches (MambaCache in Qwen 3.5) cannot be
+                // rewound, but a SMALL trim only removes the model's own
+                // previous generation (50-4000 tokens, heavily decayed by the
+                // SSM gating) — empirically safe (hours of 46-56k reuse).
+                // A trim that stays inside the GENERATED region is safe at ANY
+                // size by that same rationale (the entry's prompt/generated
+                // split makes this exact — long 8K generations no longer break
+                // the chain). A trim cutting into the PROMPT region is a
+                // genuine context rewrite and must not run on top of stale
+                // recurrent state — bounded by maxStaleTrimTokens. The
+                // original guard skipped reuse on ANY trim, which killed the
+                // chain on turn 1 (system-prefix seed has a ~4-token drift)
+                // and re-prefilled the full 13k prompt on EVERY turn.
+                let trimIsGeneratedOnly = commonLen >= cachedPromptCount
+                if !trimIsGeneratedOnly, trimCount > Self.maxStaleTrimTokens,
+                   cachedCache.contains(where: { !$0.isTrimmable }) {
+                    skipReuse = true
+                    reuseSkippedReason = "non_trimmable_large_trim"
+                    skippedCommonLen = commonLen
+                    skippedTrimCount = trimCount
+                }
+
+                if !skipReuse {
+                    for cache in cachedCache {
+                        if let maxSize = cache.maxSize, cache.offset > maxSize {
+                            skipReuse = true
+                            reuseSkippedReason = "offset_exceeds_max_size"
+                            break
+                        }
+                        if trimCount > 0 {
+                            _ = cache.trim(trimCount)
+                        }
+                        reuseCache.append(cache)
                     }
-                    if trimCount > 0 {
-                        _ = cache.trim(trimCount)
-                    }
-                    reuseCache.append(cache)
                 }
 
                 if !skipReuse, commonLen < promptTokenIds.count {
@@ -606,44 +613,53 @@ nonisolated private static let maxPrefixCacheFiles = 8
         }
 
         if kvCache == nil {
+            // STAGED FALLBACK: exact-prefix reuse was rejected (history
+            // divergence), but the system block is stable — restore its KV
+            // (full SSM state) from the disk prefix cache and prefill only
+            // the remainder. This bounds every divergence recovery to
+            // prompt - systemPrefix instead of a full re-prefill, and keeps
+            // the reuse chain alive (entry is repopulated post-generation).
+            if let cacheEntry, let prefixCache,
+               FileManager.default.fileExists(atPath: prefixCache.url.path),
+               let loaded = ConversationKVCache.loadPrefixCache(prefixCache) {
+                cacheEntry.set(cache: loaded.cache, tokenIds: loaded.tokenIds, promptCount: loaded.tokenIds.count)
+                cacheEntry.systemHash = prefixCache.hash
+                let systemCommonLen = Self.commonPrefixLength(loaded.tokenIds, promptTokenIds)
+                let systemTrim = loaded.tokenIds.count - systemCommonLen
+                if systemCommonLen > 0, systemTrim <= Self.maxStaleTrimTokens {
+                    var recovered: [KVCache] = []
+                    var recoveredOK = true
+                    for c in loaded.cache {
+                        if let maxSize = c.maxSize, c.offset > maxSize {
+                            recoveredOK = false
+                            break
+                        }
+                        if systemTrim > 0 {
+                            _ = c.trim(systemTrim)
+                        }
+                        recovered.append(c)
+                    }
+                    if recoveredOK {
+                        let suffixTokens = Array(promptTokenIds[systemCommonLen...])
+                        effectiveInput = LMInput(
+                            text: LMInput.Text(tokens: MLXArray(suffixTokens)),
+                            image: nil, video: nil
+                        )
+                        kvCache = recovered
+                        reuseSkippedReason = "recovered_via_system_prefix"
+                    }
+                }
+            }
+        }
+
+        if kvCache == nil {
             if let cacheEntry {
                 cacheEntry.clear()
             }
             kvCache = context.model.newCache(parameters: parameters)
         }
 
-        // Comprehensive KV telemetry for 30k diagnosis — was 0 fields before
-        let (cachedCount, cachedOffset, cachedMaxSize) = {
-            if let c = cacheEntry?.get().cache?.first {
-                return (cacheEntry?.get().cache?.count ?? 0, c.offset, c.maxSize ?? 0)
-            }
-            return (0, 0, 0)
-        }()
-        let hit = kvCache != nil && !(cacheEntry?.get().cache?.isEmpty ?? true) && effectiveInput.text.tokens.size < promptTokenIds.count
-        let logRunId = runId ?? "unknown"
-        let logCommonLen = (cacheEntry?.get().tokenIds.count ?? 0) > 0 ? Self.commonPrefixLength(cacheEntry!.get().tokenIds, promptTokenIds) : 0
-        let logSuffixLen = effectiveInput.text.tokens.size
-        let logPromptLen = promptTokenIds.count
-        let logTrimCount = (cacheEntry?.get().tokenIds.count ?? 0) - logCommonLen
-        let logHit = hit
-        let logCachedCount = cachedCount
-        let logCachedOffset = cachedOffset
-        let logCachedMaxSize = cachedMaxSize
-        Task {
-            await AIToolTraceLogger.shared.log(type: "mlx.kv_cache", data: [
-                "runId": logRunId,
-                "hit": logHit,
-                "commonLen": logCommonLen,
-                "suffixLen": logSuffixLen,
-                "promptLen": logPromptLen,
-                "trimCount": logTrimCount,
-                "cachedCount": logCachedCount,
-                "cachedOffset": logCachedOffset,
-                "cachedMaxSize": logCachedMaxSize,
-                "kvCache4Bit": parameters.kvBits == 4,
-                "cacheKind": "rotating-full"
-            ])
-        }
+        Self.logKVTelemetry(cacheEntry: cacheEntry, kvCache: kvCache, effectiveInput: effectiveInput, promptTokenIds: promptTokenIds, runId: runId, parameters: parameters, reuseSkippedReason: reuseSkippedReason, skippedCommonLen: skippedCommonLen, skippedTrimCount: skippedTrimCount)
 
         return (kvCache, effectiveInput)
     }
@@ -657,7 +673,8 @@ nonisolated private static let maxPrefixCacheFiles = 8
         eventBus: EventBusProtocol,
         rssLimitMB: Int,
         genStart: ContinuousClock.Instant,
-        modelId: String
+        modelId: String,
+        fullPromptTokenCount: Int
     ) async throws -> StreamResult {
         // Low-level iterator so we can wrap the sampling pipeline with a
         // token recorder — the generic generate() covers the docs but hides the
@@ -670,7 +687,11 @@ nonisolated private static let maxPrefixCacheFiles = 8
             processor: recorder,
             sampler: parameters.sampler(),
             prefillStepSize: parameters.prefillStepSize,
-            maxTokens: parameters.maxTokens
+            maxTokens: parameters.maxTokens,
+            kvBits: parameters.kvBits,
+            kvGroupSize: parameters.kvGroupSize,
+            quantizedKVStart: parameters.quantizedKVStart,
+            kvScheme: parameters.kvScheme
         )
         let (stream, _) = MLXLMCommon.generateTask(
             promptTokenCount: input.text.tokens.size,
@@ -680,6 +701,13 @@ nonisolated private static let maxPrefixCacheFiles = 8
             tools: nil
         )
         var result = StreamResult()
+        // Chunk-level timing: average tps (mlx.generate_complete) cannot
+        // distinguish steady-slow decode from stall bursts. Sample the first
+        // ~16 chunks + a 1/50 cadence afterwards to expose intra-generation
+        // stalls (memory allocation waits, compressor hits).
+        let chunkTimingStart = ContinuousClock.now
+        var lastChunkTiming = chunkTimingStart
+        var chunkTimingLogCount = 0
 
         for await generation in stream {
             if Task.isCancelled {
@@ -689,14 +717,51 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 try Self.throwIfProcessRSSExceeded(limitMB: rssLimitMB, phase: "streaming")
             }
             result.chunkCount += 1
+            // Every chunk in the first 16, then every 50th — bounded log volume.
+            // Gated by TelemetryGate: no-op in Release (zero overhead).
+            if chunkTimingLogCount < 16 || result.chunkCount % 50 == 0 {
+                let now = ContinuousClock.now
+                let sinceLastMs = Self.milliseconds(lastChunkTiming.duration(to: now))
+                let sinceStartMs = Self.milliseconds(chunkTimingStart.duration(to: now))
+                if sinceLastMs >= 10 {
+                    let logRunId = runId ?? "unknown"
+                    let logChunk = result.chunkCount
+                    let logTokens = recorder.tokenCount
+                    let logSinceLastMs = sinceLastMs
+                    let logSinceStartMs = sinceStartMs
+                    let logInstantTps = sinceLastMs > 0 ? round(1000.0 / Double(sinceLastMs)) : 0
+                    let logStallMs = sinceLastMs > 500 ? sinceLastMs : 0
+                    AIToolTraceLogger.shared.logIfEnabled(type: "mlx.chunk_timing", data: [
+                        "runId": logRunId,
+                        "chunk": logChunk,
+                        "tokens": logTokens,
+                        "sinceLastMs": logSinceLastMs,
+                        "sinceStartMs": logSinceStartMs,
+                        "instantTps": logInstantTps,
+                        "stallMs": logStallMs
+                    ])
+                }
+                lastChunkTiming = now
+                chunkTimingLogCount += 1
+            }
             if result.chunkCount == 1 {
                 let prefillMs = Self.milliseconds(genStart.duration(to: ContinuousClock.now))
-                await AIToolTraceLogger.shared.log(type: "mlx.first_token", data: [
+                let effectivePromptTokens = input.text.tokens.size
+                AIToolTraceLogger.shared.logIfEnabled(type: "mlx.first_token", data: [
                     "runId": runId ?? "",
                     "modelId": modelId,
                     "prefillMs": prefillMs,
-                    "promptTokens": result.chunkCount,
-                    "promptTokensPerSecond": result.chunkCount > 0 ? Double(result.chunkCount) / (Double(prefillMs) / 1000.0) : 0
+                    "promptTokens": effectivePromptTokens,
+                    "promptTokensPerSecond": effectivePromptTokens > 0 && prefillMs > 0 ? Double(effectivePromptTokens) / (Double(prefillMs) / 1000.0) : 0,
+                    "chunkCount": result.chunkCount
+                ])
+                AIToolTraceLogger.shared.logIfEnabled(type: "mlx.inference_timeline", data: [
+                    "runId": runId ?? "",
+                    "modelId": modelId,
+                    "phase": "ttft",
+                    "prefillMs": prefillMs,
+                    "promptTokens": effectivePromptTokens,
+                    "prefillTokensPerSecond": effectivePromptTokens > 0 && prefillMs > 0 ? Double(effectivePromptTokens) / (Double(prefillMs) / 1000.0) : 0
                 ])
             }
 
@@ -705,9 +770,14 @@ nonisolated private static let maxPrefixCacheFiles = 8
                 result.output.append(text)
                 if let runId, !text.isEmpty {
                     eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: text))
-                    // Live context: update estimate every chunk (was throttled 8, now live)
-                    if result.chunkCount % 4 == 0 {
-                        let estimate = input.text.tokens.size + recorder.tokenIDs.count
+                    // Live context: update estimate every 16th chunk — a
+                    // main-actor hop per update; 16 keeps the gauge smooth
+                    // (~2x/sec at 30 t/s) without per-chunk cross-thread cost.
+                    // Use the FULL prompt length (not the trimmed suffix input):
+                    // suffix-only made the gauge oscillate ~1-2k per turn while
+                    // the model actually ran at 18-24k.
+                    if result.chunkCount % 16 == 0 {
+                        let estimate = fullPromptTokenCount + recorder.tokenCount
                         Task { @MainActor in
                             eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: estimate))
                         }
@@ -722,9 +792,10 @@ nonisolated private static let maxPrefixCacheFiles = 8
             }
         }
 
-        result.generatedTokenIds = recorder.tokenIDs
+        let generatedTokenIds = recorder.tokenIDs
+        result.generatedTokenIds = generatedTokenIds
         if let runId {
-            let finalEstimate = input.text.tokens.size + recorder.tokenIDs.count
+            let finalEstimate = fullPromptTokenCount + generatedTokenIds.count
             Task { @MainActor in
                 eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: finalEstimate, isFinal: true))
             }
@@ -768,6 +839,8 @@ nonisolated private static let maxPrefixCacheFiles = 8
             genTokens = streamResult.chunkCount
             genTps = 0
         }
+        let vm = self.memoryMonitor.currentVMStat()
+        let thermal = self.memoryMonitor.currentThermalState()
         await AIToolTraceLogger.shared.log(type: "mlx.generate_complete", data: [
             "runId": runId ?? "",
             "modelId": modelId,
@@ -786,6 +859,9 @@ nonisolated private static let maxPrefixCacheFiles = 8
             "rssBeforeLoadMB": rssBeforeLoadMB,
             "rssAfterLoadMB": rssAfterLoadMB,
             "rssAfterGenMB": Self.currentProcessRSSMB(),
+            "thermalState": thermal,
+            "vmFreePages": vm?.freePages ?? 0,
+            "vmCompressorPages": vm?.compressorPages ?? 0,
             "contextLength": inferenceConfiguration.contextLength,
             "maxKVSize": inferenceConfiguration.maxKVSize,
             "maxOutputTokens": inferenceConfiguration.maxOutputTokens,
@@ -806,74 +882,40 @@ nonisolated private static let maxPrefixCacheFiles = 8
         let loadDuration = loadStart.duration(to: ContinuousClock.now)
     }
 
-    private func synchronizeMLXStream() {
-        Stream().synchronize()
-    }
-
-    private func logMLXMemorySnapshot() {
-        let snapshot = Memory.snapshot()
-        let activeMB = snapshot.activeMemory / (1024 * 1024)
-        let cacheMB = snapshot.cacheMemory / (1024 * 1024)
-        let peakMB = snapshot.peakMemory / (1024 * 1024)
-        Task {
-            await AIToolTraceLogger.shared.log(type: "mlx.memory_snapshot", data: [
-                "generationCount": generationCount,
-                "activeMB": activeMB,
-                "cacheMB": cacheMB,
-                "peakMB": peakMB
-            ])
-        }
-    }
-
     private func logMemorySnapshot(phase: String, runId: String?) async {
+        guard TelemetryGate.isEnabled else { return }
         let snapshot = Memory.snapshot()
         let rssMB = memoryMonitor.currentRSSMB()
+        // genPeakMB is the allocator HIGH-WATER mark since the last generation
+        // reset (transient prefill activations spike it, then free) — it is
+        // NOT resident memory. activeMB (weights + live KV) and cacheMB
+        // (bounded 1GB buffer pool) are the "how much is held" metrics.
         await AIToolTraceLogger.shared.log(type: "mlx.memory_snapshot", data: [
             "runId": runId ?? "unknown",
             "phase": phase,
             "activeMB": snapshot.activeMemory / (1024 * 1024),
             "cacheMB": snapshot.cacheMemory / (1024 * 1024),
-            "peakMB": snapshot.peakMemory / (1024 * 1024),
+            "genPeakMB": snapshot.peakMemory / (1024 * 1024),
             "rssMB": rssMB,
             "generationCount": generationCount
         ])
     }
 
-    nonisolated private static func resolvedRSSLimitMB() -> Int {
-        let environment = ProcessInfo.processInfo.environment
-        if let configured = environment["COMPASS_LOCAL_MODEL_MAX_RSS_MB"],
-           let parsed = Int(configured),
-           parsed > 0 {
-            return parsed
-        }
-
-        return AppRuntimeEnvironment.launchContext.isTesting
-            ? defaultTestingRSSLimitMB
-            : defaultOperationalRSSLimitMB
-    }
-
-    nonisolated private static func shouldUnloadModelAfterGeneration() -> Bool {
-        let environment = ProcessInfo.processInfo.environment
-        if let configured = environment["COMPASS_LOCAL_MODEL_UNLOAD_AFTER_GENERATION"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        {
-            switch configured {
-            case "1", "true", "yes":
-                return true
-            case "0", "false", "no":
-                return false
-            default:
-                break
-            }
-        }
-
-        return false
-    }
-
     nonisolated private static func milliseconds(_ duration: Duration) -> Int {
         Int((Double(duration.components.seconds) * 1000) + (Double(duration.components.attoseconds) / 1_000_000_000_000_000))
     }
+
+    // MARK: - Memory gate constants
+
+    /// Free page count below which FIM is evicted before chat generation.
+    /// 20k pages ≈ 78 MB free — below this, the compressor thrashes and
+    /// decode stalls reach 30+ seconds. Evicting FIM frees ~1.5 GB.
+    nonisolated private static let fimEvictionFreePageThreshold = 20_000
+
+    /// Pause after FIM eviction to let the compressor drain before starting
+    /// generation. Live trace shows compressor pages dropping from 327k to
+    /// 95k within ~2.5s of eviction; 200ms is the minimum useful pause.
+    nonisolated private static let fimEvictionDrainMs = 200
 
     nonisolated private static func throwIfProcessRSSExceeded(limitMB: Int, phase: String) throws {
         let rssMB = currentProcessRSSMB()
@@ -924,65 +966,131 @@ nonisolated private static let maxPrefixCacheFiles = 8
         activeGenerationCount > 0
     }
 
-    /// Unloads every chat container + KV cache. When `persistKVTo` is set
-    /// (critical memory pressure), each conversation's KV cache is written to
-    /// disk first so the next turn restores it instead of re-prefilling the
-    /// full history. Waits (bounded) for in-flight generations.
+    func currentCompressorPages() async -> Int? {
+        memoryMonitor.currentVMStat()?.compressorPages
+    }
+
+    /// Unloads every chat container + KV cache. Waits (bounded) for in-flight
+    /// generations.
     ///
     /// The wait MUST be async: the in-flight generation's `activeGenerationCount`
     /// decrement runs on this actor, so a synchronous busy-wait here would block
     /// the very task that ends the generation (measured as a 30s stall).
-    func unloadAllModels(reason: String = "unknown", persistKVTo: URL? = nil) async {
+    ///
+    /// Callers are policy-gated — chat inference state is only unloaded on
+    /// provider changes (offline toggle, model switch) or errors, never on
+    /// memory pressure.
+    func unloadAllModels(reason: String = "unknown") async {
         let deadline = ContinuousClock.now + .seconds(30)
         while activeGenerationCount > 0, ContinuousClock.now < deadline {
             if Task.isCancelled { break }
             try? await Task.sleep(for: .milliseconds(50))
         }
-        synchronizeMLXStream()
-        if let persistKVTo {
-            persistConversationCaches(to: persistKVTo)
-        }
+        Stream().synchronize()
+        // Persist the resident conversation KV to disk so a session break
+        // resumes with a disk-load + delta instead of a full re-prefill.
+        // Best-effort; bounded disk usage.
+        await persistActiveConversation()
         // KV arrays are active MLX allocations, not allocator-cache entries.
         // Dropping only model containers left their conversation caches pinned
         // after a critical-pressure unload.
-        promptCacheByConversation.removeAll()
-        promptCacheAccessOrder.removeAll()
+        await conversationCache.clearAll()
         await modelRepository.unloadAll()
         Memory.clearCache()
     }
 
-    /// Best-effort disk persist of every in-memory conversation KV cache.
-    /// Files: kv-conv-<sha256(conversationKey).prefix(16)>.safetensors with
-    /// tokenIds + systemHash metadata; resolveCacheEntry restores them.
-    private func persistConversationCaches(to dir: URL) {
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        for (key, entry) in promptCacheByConversation {
-            let (cache, tokenIds) = entry.get()
-            guard let cache, !cache.isEmpty, !tokenIds.isEmpty else { continue }
-            let digest = String(SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16))
-            let url = dir.appendingPathComponent("kv-conv-\(digest).safetensors")
-            try? savePromptCache(
-                url: url,
-                cache: cache,
-                metadata: [
-                    "tokenIds": tokenIds.map(String.init).joined(separator: ","),
-                    "systemHash": entry.systemHash ?? "",
-                ]
-            )
-        }
+    /// Persists the single resident conversation's KV to disk (Fix 3). Called
+    /// on unload/session end so the next run of the same conversation resumes
+    /// fast. Best-effort, bounded by `maxConversationCacheFiles`.
+    private func persistActiveConversation() async {
+        // The generator knows the active conversation from the last resolve;
+        // re-resolve it from the cache's single resident entry.
+        await conversationCache.persistActiveConversationIfPossible()
     }
 
-    func unloadModel(modelDirectory: URL, reason: String = "unknown") async {
-        synchronizeMLXStream()
-        await modelRepository.unload(modelDirectory: modelDirectory)
-        promptCacheByConversation.removeAll()
+    /// Releases transient/scratch memory WITHOUT unloading weights or KV
+    /// caches — chat inference state must survive memory pressure (eviction
+    /// policy: provider changes only). The MLX buffer cache is GPU scratch
+    /// (not weights/KV); dropping it is safe and frees allocator headroom.
+    func releaseTransientMemory() async {
+        Stream().synchronize()
         Memory.clearCache()
+        await AIToolTraceLogger.shared.log(type: "mlx.transient_release", data: [
+            "reason": "memory_pressure_critical",
+            "residentMB": memoryMonitor.currentRSSMB()
+        ])
+    }
+
+    /// LAST-RESORT pressure eviction: drops the resident conversation KV cache
+    /// (not the model weights). The next turn pays a full prefill, but the
+    /// system stops compressor-thrashing. Only called when memory pressure is
+    /// critical AND the compressor is saturated.
+    func releaseConversationKV() async {
+        Stream().synchronize()
+        await conversationCache.clearAll()
+        Memory.clearCache()
+        await AIToolTraceLogger.shared.log(type: "mlx.transient_release", data: [
+            "reason": "pressure_critical_conversation_kv",
+            "residentMB": memoryMonitor.currentRSSMB()
+        ])
     }
 
     private func loadContainerCached(modelDirectory: URL, toolCallFormat: ToolCallFormat? = nil) async throws -> ModelContainer {
         try await modelRepository.load(modelDirectory: modelDirectory, toolCallFormat: toolCallFormat)
     }
 
+    func unloadModel(modelDirectory: URL, reason: String = "unknown") async {
+        Stream().synchronize()
+        await persistActiveConversation()
+        await conversationCache.clearAll()
+        await modelRepository.unload(modelDirectory: modelDirectory)
+        Memory.clearCache()
+    }
+
+    private static func logKVTelemetry(
+        cacheEntry: PromptCacheEntry?,
+        kvCache: [KVCache]?,
+        effectiveInput: LMInput,
+        promptTokenIds: [Int],
+        runId: String?,
+        parameters: GenerateParameters,
+        reuseSkippedReason: String?,
+        skippedCommonLen: Int?,
+        skippedTrimCount: Int?
+    ) {
+        let (cachedCount, cachedOffset, cachedMaxSize) = {
+            if let c = cacheEntry?.get().cache?.first {
+                return (cacheEntry?.get().cache?.count ?? 0, c.offset, c.maxSize ?? 0)
+            }
+            return (0, 0, 0)
+        }()
+        let hit = kvCache != nil && !(cacheEntry?.get().cache?.isEmpty ?? true) && effectiveInput.text.tokens.size < promptTokenIds.count
+        let logCommonLen: Int
+        if let tokenIds = cacheEntry?.get().tokenIds, tokenIds.count > 0 {
+            logCommonLen = commonPrefixLength(tokenIds, promptTokenIds)
+        } else {
+            logCommonLen = 0
+        }
+        let logTrimCount = (cacheEntry?.get().tokenIds.count ?? 0) - logCommonLen
+        AIToolTraceLogger.shared.logIfEnabled(type: "mlx.kv_cache", data: [
+            "runId": runId ?? "unknown",
+            "hit": hit,
+            "commonLen": logCommonLen,
+            "suffixLen": effectiveInput.text.tokens.size,
+            "promptLen": promptTokenIds.count,
+            "trimCount": logTrimCount,
+            "cachedCount": cachedCount,
+            "cachedOffset": cachedOffset,
+            "cachedMaxSize": cachedMaxSize,
+            "reuseSkippedReason": reuseSkippedReason as Any,
+            "skippedCommonLen": skippedCommonLen as Any,
+            "skippedTrimCount": skippedTrimCount as Any,
+            "kvCache4Bit": parameters.kvBits == 4,
+            "cacheKind": "rotating-full",
+            "maxKVSize": parameters.maxKVSize,
+            "prefillStepSize": parameters.prefillStepSize
+        ])
+    }
 }
 
 /// Bridges the huggingface swift-transformers AutoTokenizer into the

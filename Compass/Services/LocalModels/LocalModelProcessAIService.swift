@@ -41,9 +41,6 @@ actor LocalModelProcessAIService: AIService {
     private var lifecycleObservers: [NSObjectProtocol] = []
     private let activityCoordinator: (any AgentActivityCoordinating)?
     private let launchContext: AppLaunchContext
-    /// Latest project root (for the KV cache dir when the pressure handler
-    /// persists conversation caches before a critical eviction).
-    private var lastProjectRoot: URL?
     private var cachedTokenizer: (directory: URL, tokenizer: any Tokenizers.Tokenizer)?
     private var tokenizerLoadInFlight: Task<(URL, any Tokenizers.Tokenizer)?, Never>?
 
@@ -79,24 +76,46 @@ actor LocalModelProcessAIService: AIService {
         self.memoryPressureObserver = memoryPressureObserverFactory { level in
             Task.detached(priority: .utility) {
                 let generationInFlight = await generatorForPressureHandling.hasActiveGeneration()
+                let vmFree = ProcessInfo.processInfo.environment["COMPASS_DISABLE_VM_TELEMETRY"] == nil ? "tracked" : "disabled"
+                // Structured trace: pressure detail for regression diagnosis
+                await AIToolTraceLogger.shared.log(type: "mlx.pressure", data: [
+                    "timestamp": ISO8601DateFormatter().string(from: Date()),
+                    "level": level == .critical ? "critical" : "warning",
+                    "generationInFlight": generationInFlight,
+                    "thermalState": ProcessInfo.processInfo.thermalState.rawValue,
+                    "vmHint": vmFree
+                ])
                 await AppLogger.shared.warning(
                     category: .localModel,
                     message: "memory_pressure_unload",
                     context: AppLogger.LogCallContext(metadata: [
                         "timestamp": ISO8601DateFormatter().string(from: Date()),
                         "level": level == .critical ? "critical" : "warning",
-                        "generationInFlight": String(generationInFlight)
+                        "generationInFlight": String(generationInFlight),
+                        "thermalState": String(ProcessInfo.processInfo.thermalState.rawValue)
                     ])
                 )
                 if Task.isCancelled { return }
                 do {
                     try await MLXInferenceLock.shared.acquire()
                     defer { Task { await MLXInferenceLock.shared.release() } }
-                    switch level {
-                    case .warning:
+                    // Unified policy (MemoryPressurePolicy): one home for the
+                    // eviction decision. .warning → FIM; .critical → FIM +
+                    // buffer cache; .critical + compressor saturated →
+                    // also drop the conversation KV (last resort).
+                    let compressorPages = await generatorForPressureHandling.currentCompressorPages()
+                    let actions = MemoryPressurePolicy.actions(
+                        for: level,
+                        compressorPages: compressorPages
+                    )
+                    if actions.contains(.evictFIM) {
                         await InferenceUnloadRegistry.shared.unloadAll(labels: [InferenceUnloadRegistry.fimLabel])
-                    case .critical:
-                        await InferenceUnloadRegistry.shared.unloadAll()
+                    }
+                    if actions.contains(.releaseBufferCache) {
+                        await generatorForPressureHandling.releaseTransientMemory()
+                    }
+                    if actions.contains(.releaseConversationKV) {
+                        await generatorForPressureHandling.releaseConversationKV()
                     }
                 } catch {
                     // Cancellation (or a transient wait failure): nothing to
@@ -104,17 +123,6 @@ actor LocalModelProcessAIService: AIService {
                 }
             }
         }
-
-        // Chat generator participates in the registry so a single memory-
-        // pressure pass unloads every inference container (chat + FIM).
-        Task { await InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.chatLabel) { [weak self] in
-            guard let self else { return }
-            let persistDir = await self.lastProjectRoot?
-                .appendingPathComponent(".ide", isDirectory: true)
-                .appendingPathComponent("cache", isDirectory: true)
-            await generatorForPressureHandling.unloadAllModels(
-                reason: "memory_pressure", persistKVTo: persistDir)
-        } }
 
         if !launchContext.isTesting {
             Task {
@@ -142,7 +150,9 @@ actor LocalModelProcessAIService: AIService {
         }
 
         let modelDirectory = try fileStore.chatRuntimeModelDirectory()
-        ensureTokenizerLoaded(modelDirectory: modelDirectory)
+        // Ensure exact tokenizer for budget stability: approximate (count+3)/4 vs
+        // exact encode caused common 8281 drift between turns.
+        await ensureTokenizerLoaded(modelDirectory: modelDirectory)
         let storedContextLength = await selectionStore.contextLength()
         let kvCache4BitEnabled = await selectionStore.isKVCache4BitEnabled()
         let effectiveKVCache4Bit = kvCache4BitEnabled && model.supportsQuantizedKVCache
@@ -164,19 +174,13 @@ actor LocalModelProcessAIService: AIService {
             defaultRepetitionContextSize: defaultSampling.repetitionContextSize,
             defaultKVCache4BitEnabled: effectiveKVCache4Bit
         )
+        // NO output cap: local tokens are free — capping (was 1024) truncated
+        // whole-file edit calls mid-tool-call and starved the thinking budget
+        // (enable_thinking shares the same token pool). The model runs to EOS
+        // or the context bounds.
         let safeInferenceConfiguration = model.supportsQuantizedKVCache
             ? inferenceConfiguration
-            : LocalModelInferenceConfiguration(
-                contextLength: inferenceConfiguration.contextLength,
-                maxKVSize: inferenceConfiguration.maxKVSize,
-                maxOutputTokens: inferenceConfiguration.maxOutputTokens,
-                prefillStepSize: inferenceConfiguration.prefillStepSize,
-                temperature: inferenceConfiguration.temperature,
-                topP: inferenceConfiguration.topP,
-                repetitionPenalty: inferenceConfiguration.repetitionPenalty,
-                repetitionContextSize: inferenceConfiguration.repetitionContextSize,
-                kvCache4BitEnabled: true
-            )
+            : inferenceConfiguration.with(kvCache4BitEnabled: false)
         let settings = settingsStore.load(includeApiKey: false)
         
         // Build system content for caching
@@ -190,21 +194,42 @@ actor LocalModelProcessAIService: AIService {
 
         let conversationId = request.conversationId
 
-        let budgetedMessages = promptBuilder.budgetMessages(
+        let (budgetedMessages, adjustedSystemContent, budgetMessageTokens) = promptBuilder.budgetMessages(
             testBudget.retainedMessages,
             explicitContext: request.context,
             systemContent: systemContent,
             inferenceConfiguration: inferenceConfiguration,
             approximateTokenCount: { [self] in approximateTokenCount($0) }
         )
+        // Telemetry reuses the total budgetMessages already computed — the
+        // messages are never dropped, so retained == totalBeforeBudget, and
+        // re-encoding the full history twice more cost seconds of CPU per send
+        // (measured: 3x full-history BPE encode at 41K tokens per turn).
+        let retainedTokens = budgetMessageTokens
+        let totalBeforeBudget = budgetMessageTokens
         await AIToolTraceLogger.shared.log(type: "mlx.budget", data: [
             "runId": request.runId ?? "",
             "retainedMessages": budgetedMessages.count,
-            "retainedTokens": budgetedMessages.reduce(0) { $0 + approximateTokenCount($1.content) },
-            "droppedMessages": testBudget.retainedMessages.count - budgetedMessages.count,
-            "droppedTokens": (testBudget.retainedMessages.count - budgetedMessages.count) * 100, // approx
+            "retainedTokens": retainedTokens,
+            "totalBeforeBudgetTokens": totalBeforeBudget,
             "systemTokens": approximateTokenCount(systemContent),
-            "explicitContextTokens": request.context.map { approximateTokenCount($0) } ?? 0
+            "systemTokensAdjusted": approximateTokenCount(adjustedSystemContent),
+            "explicitContextTokens": request.context.map { approximateTokenCount($0) } ?? 0,
+            "contextLength": inferenceConfiguration.contextLength,
+            "maxKVSize": inferenceConfiguration.maxKVSize,
+            "headroomTokens": inferenceConfiguration.contextLength - retainedTokens - approximateTokenCount(adjustedSystemContent) - inferenceConfiguration.maxOutputTokens
+        ])
+        await AIToolTraceLogger.shared.log(type: "mlx.config", data: [
+            "runId": request.runId ?? "",
+            "modelId": model.id,
+            "contextLength": inferenceConfiguration.contextLength,
+            "maxKVSize": inferenceConfiguration.maxKVSize,
+            "maxOutputTokens": inferenceConfiguration.maxOutputTokens,
+            "prefillStepSize": inferenceConfiguration.prefillStepSize,
+            "temperature": inferenceConfiguration.temperature,
+            "topP": inferenceConfiguration.topP,
+            "kvCache4Bit": inferenceConfiguration.kvCache4BitEnabled,
+            "cacheKind": inferenceConfiguration.cacheKind
         ])
 
         // Convert AITool to ToolSpec for MLXLLM
@@ -215,14 +240,14 @@ actor LocalModelProcessAIService: AIService {
             modelId: model.id,
             modelToolCallFormat: .json,
             toolSpecs: toolSpecs,
-            systemContentLength: systemContent.count,
+            systemContentLength: adjustedSystemContent.count,
             messageCount: budgetedMessages.count
         )
         await AIToolTraceLogger.shared.log(type: "mlx.send_message", data: [
             "runId": request.runId ?? "",
             "modelId": model.id,
-            "systemPromptChars": systemContent.count,
-            "systemPromptApproxTokens": approximateTokenCount(systemContent),
+            "systemPromptChars": adjustedSystemContent.count,
+            "systemPromptApproxTokens": approximateTokenCount(adjustedSystemContent),
             "messageCount": budgetedMessages.count,
             "toolCount": toolSpecs?.count ?? 0,
             "mode": request.mode?.rawValue ?? "unknown",
@@ -244,7 +269,7 @@ actor LocalModelProcessAIService: AIService {
         let rawMessages = promptBuilder.buildRawMessages(
             messages: budgetedMessages,
             explicitContext: request.context,
-            systemContent: systemContent
+            systemContent: adjustedSystemContent
         )
 
         // TELEMETRY: Log raw message structure for "what did the model see" diagnosis
@@ -270,12 +295,9 @@ actor LocalModelProcessAIService: AIService {
         // Disk-persisted system-prefix cache: new conversations load the
         // pre-computed KV of the system block and prefill only the user
         // message (snappy session/tab startup).
-        if let projectRoot = request.projectRoot {
-            lastProjectRoot = projectRoot
-        }
         let prefixCache = makePrefixCacheContext(
             projectRoot: request.projectRoot,
-            systemContent: systemContent,
+            systemContent: adjustedSystemContent,
             toolSpecs: toolSpecs,
             additionalContext: additionalContext,
             inferenceConfiguration: safeInferenceConfiguration,
@@ -332,17 +354,41 @@ actor LocalModelProcessAIService: AIService {
         await preloadCurrentModel(unloadExistingModels: false)
     }
 
+    /// Memoized per-message token counts. Messages are append-only and
+    /// immutable, so a message's count never changes across tool-loop
+    /// iterations — re-encoding the whole history with the real BPE tokenizer
+    /// on every send cost seconds of CPU per turn at 40K+ tokens (the
+    /// "pause between agentic turns"). Keyed by content hash; Swift's Hasher
+    /// is stable within a process lifetime, which is all a memo needs.
+    /// Reset when it grows past the cap (conversation switch).
+    private var tokenCountMemo: [Int: Int] = [:]
+    private static let tokenCountMemoCap = 2_048
+
     private func approximateTokenCount(_ text: String) -> Int {
         guard !text.isEmpty else { return 0 }
+        let key = text.hashValue
+        if let memoized = tokenCountMemo[key] { return memoized }
+        let count: Int
         if let cached = cachedTokenizer {
-            return cached.tokenizer.encode(text: text, addSpecialTokens: false).count
+            count = cached.tokenizer.encode(text: text, addSpecialTokens: false).count
+        } else {
+            count = max(1, (text.count + 3) / 4)
         }
-        return max(1, (text.count + 3) / 4)
+        if tokenCountMemo.count >= Self.tokenCountMemoCap {
+            tokenCountMemo.removeAll()
+        }
+        tokenCountMemo[key] = count
+        return count
     }
 
-    private func ensureTokenizerLoaded(modelDirectory: URL) {
+    private func ensureTokenizerLoaded(modelDirectory: URL) async {
         if cachedTokenizer != nil { return }
-        if tokenizerLoadInFlight != nil { return }
+        if let inFlight = tokenizerLoadInFlight {
+            if let result = await inFlight.value {
+                setCachedTokenizer(result.0, result.1)
+            }
+            return
+        }
         let dir = modelDirectory
         tokenizerLoadInFlight = Task<(URL, any Tokenizers.Tokenizer)?, Never> {
             do {
@@ -352,18 +398,11 @@ actor LocalModelProcessAIService: AIService {
                 return nil
             }
         }
-        Task { [weak self] in
-            guard let self else { return }
-            if let result = await self.tokenizerLoadInFlight?.value {
-                await self.setCachedTokenizer(result.0, result.1)
-            } else {
-                await self.clearTokenizerLoadInFlight()
-            }
+        if let result = await tokenizerLoadInFlight?.value {
+            setCachedTokenizer(result.0, result.1)
+        } else {
+            tokenizerLoadInFlight = nil
         }
-    }
-
-    private func clearTokenizerLoadInFlight() {
-        tokenizerLoadInFlight = nil
     }
 
     private func setCachedTokenizer(_ directory: URL, _ tokenizer: any Tokenizers.Tokenizer) {
@@ -394,7 +433,7 @@ actor LocalModelProcessAIService: AIService {
             await preloadCurrentModel(unloadExistingModels: true)
             return
         }
-        await generator.unloadAllModels(reason: "offline_mode_disabled", persistKVTo: nil)
+        await generator.unloadAllModels(reason: "offline_mode_disabled")
     }
 
     private func preloadCurrentModel(unloadExistingModels: Bool) async {
@@ -403,7 +442,7 @@ actor LocalModelProcessAIService: AIService {
 
         do {
             if unloadExistingModels {
-                await generator.unloadAllModels(reason: "preload_reload", persistKVTo: nil)
+                await generator.unloadAllModels(reason: "preload_reload")
             }
             let modelDirectory = try fileStore.chatRuntimeModelDirectory()
             if let activityCoordinator {
@@ -437,6 +476,10 @@ actor LocalModelProcessAIService: AIService {
     /// root, or the system block is empty). The hash covers everything that
     /// shapes the system prefix: prompt text, tool schemas, and KV-affecting
     /// config.
+    ///
+    /// **Stability guarantee:** every hashed input is byte-identical across
+    /// requests with the same system content and tools. The hash changes
+    /// ONLY when the rendered system prompt or tool schemas actually change.
     private func makePrefixCacheContext(
         projectRoot: URL?,
         systemContent: String,
@@ -449,6 +492,18 @@ actor LocalModelProcessAIService: AIService {
         guard let projectRoot else { return nil }
         guard !systemContent.isEmpty else { return nil }
 
+        // Debug assertion: toolSpecs must be deterministic — two calls with
+        // the same inputs produce identical canonical JSON. This catches
+        // non-deterministic tool-spec serialization (floating-point rounding,
+        // unordered keys in rawMessageValue, etc.) before it causes hash
+        // churn mid-session.
+#if DEBUG
+        if let toolSpecs, let canonical = Self.canonicalJSON(toolSpecs) {
+            let second = Self.canonicalJSON(toolSpecs)
+            assert(second == canonical, "toolSpecs canonical JSON is not deterministic")
+        }
+#endif
+
         var hasher = SHA256()
         hasher.update(data: Data(systemContent.utf8))
         if let toolSpecs,
@@ -456,7 +511,14 @@ actor LocalModelProcessAIService: AIService {
             hasher.update(data: Data(canonicalTools.utf8))
         }
         hasher.update(data: Data(model.id.utf8))
-        hasher.update(data: Data("kv4=\(inferenceConfiguration.kvCache4BitEnabled) kv=\(inferenceConfiguration.maxKVSize) ctx=\(inferenceConfiguration.contextLength) pf=\(inferenceConfiguration.prefillStepSize)".utf8))
+        if let additionalContext, let canonicalCtx = Self.canonicalJSON(additionalContext) {
+            hasher.update(data: Data(canonicalCtx.utf8))
+        }
+        // Context window / maxKVSize intentionally NOT hashed: the cached KV
+        // content is independent of them (only quantization and the system
+        // prefix shape matter). Including them orphaned the resident cache on
+        // every slider change → full re-prefill.
+        hasher.update(data: Data("kv4=\(inferenceConfiguration.kvCache4BitEnabled)".utf8))
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         let hash = String(digest.prefix(32))
 
@@ -474,12 +536,49 @@ actor LocalModelProcessAIService: AIService {
             tools: toolSpecs,
             additionalContext: additionalContext
         )
+
+        // Telemetry: log hash inputs so future hash churn can be diagnosed
+        // from traces without needing disk files.
+        Task { await AIToolTraceLogger.shared.log(type: "mlx.prefix_hash", data: [
+            "hash": hash,
+            "systemChars": systemContent.count,
+            "hasTools": toolSpecs != nil,
+            "hasAdditionalContext": additionalContext != nil,
+            "kv4Bit": inferenceConfiguration.kvCache4BitEnabled,
+            "modelId": model.id
+        ]) }
+
         return PrefixCacheContext(url: url, hash: hash, systemUserInput: systemOnly)
+    }
+
+    /// Computes the prefix-cache hash from raw inputs. Exposed as `nonisolated
+    /// static` so tests can verify hash stability without instantiating the
+    /// full service.
+    nonisolated static func computePrefixHash(
+        systemContent: String,
+        toolSpecs: [[String: any Sendable]]?,
+        modelId: String,
+        additionalContext: [String: any Sendable]?,
+        kv4BitEnabled: Bool
+    ) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data(systemContent.utf8))
+        if let toolSpecs,
+           let canonicalTools = Self.canonicalJSON(toolSpecs) {
+            hasher.update(data: Data(canonicalTools.utf8))
+        }
+        hasher.update(data: Data(modelId.utf8))
+        if let additionalContext, let canonicalCtx = Self.canonicalJSON(additionalContext) {
+            hasher.update(data: Data(canonicalCtx.utf8))
+        }
+        hasher.update(data: Data("kv4=\(kv4BitEnabled)".utf8))
+        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return String(digest.prefix(32))
     }
 
     /// Deterministic JSON (recursively sorted keys) so the prefix-cache hash
     /// is stable across requests — JSONSerialization key order is not.
-    nonisolated private static func canonicalJSON(_ value: Any) -> String? {
+    nonisolated static func canonicalJSON(_ value: Any) -> String? {
         switch value {
         case let dict as [String: Any]:
             let parts = dict.keys.sorted().compactMap { key -> String? in

@@ -3,15 +3,45 @@ import SwiftUI
 
 // swiftlint:disable file_length
 
+// MARK: - Telemetry gate
+
+/// Compile-time telemetry gate. In Release builds (without
+/// `COMPASS_TELEMETRY_ENABLED=1`), all telemetry calls are eliminated at
+/// compile time — zero runtime overhead. In Debug, full telemetry is active.
+/// To enable telemetry in a Release benchmark:
+/// `COMPASS_CONFIG=Release COMPASS_TELEMETRY_ENABLED=1 ./run.sh benchmark-local`
+enum TelemetryGate {
+    #if COMPASS_TELEMETRY_ENABLED
+    static let isEnabled = true
+    #else
+    static let isEnabled = false
+    #endif
+}
+
 // MARK: - Tool trace logger
 
-@MainActor
-final class AIToolTraceLogger {
+/// Thread-safe NDJSON trace logger. Not `@MainActor` — file I/O is serialized
+/// via an internal `DispatchQueue`, and mutable properties are guarded by
+/// `lock`. This avoids main-thread hops from perf-sensitive call sites
+/// (decode loop, memory gate) that would otherwise need `await` for every
+/// telemetry write.
+final class AIToolTraceLogger: @unchecked Sendable {
     static let shared = AIToolTraceLogger()
 
-    private var projectRoot: URL?
-    private var fileHandle: FileHandle?
+    private let lock = NSLock()
+    private var _projectRoot: URL?
+    private var _fileHandle: FileHandle?
     private let queue = DispatchQueue(label: "com.Compass.ai-trace")
+
+    private var fileHandle: FileHandle? {
+        lock.lock(); defer { lock.unlock() }
+        return _fileHandle
+    }
+
+    private var projectRoot: URL? {
+        lock.lock(); defer { lock.unlock() }
+        return _projectRoot
+    }
 
     func log(type: String, data: [String: Any]) {
         var payload = data
@@ -20,11 +50,21 @@ final class AIToolTraceLogger {
         guard let line = (try? JSONSerialization.data(withJSONObject: payload)) ?? nil,
               let lineData = line as Data? else { return }
         let logLine = lineData + Data("\n".utf8)
-        queue.async { [weak self] in
-            guard let self else { return }
-            guard let fileHandle = self.fileHandle else { return }
-            try? fileHandle.write(contentsOf: logLine)
+        let handle = fileHandle
+        queue.async {
+            guard let handle else { return }
+            try? handle.write(contentsOf: logLine)
         }
+    }
+
+    /// Conditional log — no-op when `TelemetryGate.isEnabled` is false (Release).
+    /// Use for perf-sensitive telemetry (per-chunk timing, memory snapshots).
+    /// Critical-path telemetry (once-per-generation events) should use ``log``
+    /// directly. The `@inline(__always)` ensures the guard is optimized out.
+    @inline(__always)
+    func logIfEnabled(type: String, data: [String: Any]) {
+        guard TelemetryGate.isEnabled else { return }
+        log(type: type, data: data)
     }
 
     func setProjectRoot(_ root: URL) {
@@ -35,12 +75,12 @@ final class AIToolTraceLogger {
         do {
             let handle = try FileHandle(forWritingTo: fileURL)
             handle.seekToEndOfFile()
-            fileHandle = handle
+            lock.lock(); _fileHandle = handle; _projectRoot = root; lock.unlock()
         } catch {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-            fileHandle = try? FileHandle(forWritingTo: fileURL)
+            let handle = try? FileHandle(forWritingTo: fileURL)
+            lock.lock(); _fileHandle = handle; _projectRoot = root; lock.unlock()
         }
-        projectRoot = root
     }
 
     /// Per-session cutoff: truncate ai-trace.ndjson on new session, keep previous as .bak.
@@ -48,7 +88,9 @@ final class AIToolTraceLogger {
     /// so the live file is always current session only (no sifting through 3 fixed issues' history).
     func startNewSession(conversationId: String) {
         queue.async { [weak self] in
-            guard let self, let root = self.projectRoot else { return }
+            guard let self else { return }
+            let root = self.projectRoot
+            guard let root else { return }
             let logsDir = root.appendingPathComponent(".ide", isDirectory: true).appendingPathComponent("logs", isDirectory: true)
             let fileURL = logsDir.appendingPathComponent("ai-trace.ndjson")
             let bakURL = logsDir.appendingPathComponent("ai-trace.\(conversationId).bak.ndjson")
@@ -56,7 +98,7 @@ final class AIToolTraceLogger {
             // Check if current file's last session.start is already this conversationId
             if let handle = self.fileHandle {
                 try? handle.close()
-                self.fileHandle = nil
+                self.lock.lock(); self._fileHandle = nil; self.lock.unlock()
             }
             if FileManager.default.fileExists(atPath: fileURL.path) {
                 let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
@@ -73,12 +115,13 @@ final class AIToolTraceLogger {
                 }
             }
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-            self.fileHandle = try? FileHandle(forWritingTo: fileURL)
+            let handle = try? FileHandle(forWritingTo: fileURL)
+            self.lock.lock(); self._fileHandle = handle; self.lock.unlock()
             // Marker so the new file is self-describing
             var payload: [String: Any] = ["type": "session.start", "conversationId": conversationId]
             payload["timestamp"] = ISO8601DateFormatter().string(from: Date())
             if let line = try? JSONSerialization.data(withJSONObject: payload),
-               let handle = self.fileHandle {
+               let handle {
                 try? handle.write(contentsOf: line + Data("\n".utf8))
             }
         }

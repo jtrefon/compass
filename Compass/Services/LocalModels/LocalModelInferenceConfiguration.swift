@@ -14,6 +14,31 @@ struct LocalModelInferenceConfiguration: Sendable, Equatable, Hashable {
     var cacheKind: String {
         maxKVSize < contextLength ? "rotating-window" : "rotating-full"
     }
+
+    /// The KV cache max size passed to MLX. When set, the attention layers use
+    /// a bounded cache (either `QuantizedKVCache` with a size cap or
+    /// `RotatingKVCache` depending on the 4-bit toggle) — oldest tokens are
+    /// evicted once the window is full. The GatedDeltaNet (SSM) layers remain
+    /// unbounded (compact fixed-size state with natural gated decay).
+    /// Half the context window is a reasonable default: it bounds attention
+    /// memory while the SSM layers retain compressed long-range information.
+    var mlxMaxKVSize: Int? { contextLength / 2 }
+
+    /// Copy-with for a single field — idiomatic Swift value-semantics update.
+    /// Avoids verbose full-initializer reconstruction at call sites.
+    func with(kvCache4BitEnabled: Bool) -> LocalModelInferenceConfiguration {
+        LocalModelInferenceConfiguration(
+            contextLength: contextLength,
+            maxKVSize: maxKVSize,
+            maxOutputTokens: maxOutputTokens,
+            prefillStepSize: prefillStepSize,
+            temperature: temperature,
+            topP: topP,
+            repetitionPenalty: repetitionPenalty,
+            repetitionContextSize: repetitionContextSize,
+            kvCache4BitEnabled: kvCache4BitEnabled
+        )
+    }
 }
 
 enum LocalModelInferenceOverrides {
@@ -66,8 +91,15 @@ enum LocalModelInferenceOverrides {
         let envRepetitionPenalty = parseOptionalFloat(value("COMPASS_LOCAL_MODEL_REPETITION_PENALTY"))
         let envRepetitionContextSize = parseInt(value("COMPASS_LOCAL_MODEL_REPETITION_CONTEXT_SIZE"))
 
+        // 262k restore flag: COMPASS_LOCAL_MODEL_CONTEXT_262K=1 forces max (was flat pre-regression)
+        let requestedContext: Int? = {
+            if let v = value("COMPASS_LOCAL_MODEL_CONTEXT_262K")?.lowercased(), ["1","true","yes"].contains(v) {
+                return Self.maxModelContextLength
+            }
+            return envContext ?? defaultContextLength
+        }()
         let contextLength = clamp(
-            envContext ?? defaultContextLength,
+            requestedContext ?? defaultContextLength,
             min: 256,
             max: Self.maxModelContextLength
         )
@@ -79,13 +111,19 @@ enum LocalModelInferenceOverrides {
         let maxOutputTokens = clamp(
             envMaxOutput ?? defaultMaxOutputTokens,
             min: 64,
-            max: 8_192
+            max: Self.maxModelContextLength
         )
-        // 4-bit KV is now permanent — ignore the old settings toggle and the
-        // env var (kept for backward compat in LocalModelSelectionStore, but
-        // the inference config no longer consults it). The effective value is
-        // still gated by `supportsQuantizedKVCache` in LocalModelProcessAIService.
-        let kvCache4BitEnabled = true
+        // KV quantization: env knob (COMPASS_LOCAL_MODEL_KV_CACHE_4BIT=1 → 4-bit,
+        // forwarded by run.sh into local-bench.conf) wins, otherwise the
+        // settings toggle (`defaultKVCache4BitEnabled`, default FP16). FP16
+        // enables fused flash attention (MLXFast.scaledDotProductAttention) —
+        // no score matrix materialization, lower transient peak, faster decode.
+        // 4-bit forces non-fused quantized attention (quantizedScaledDotProductAttention)
+        // which materializes a full [B, heads, L, kL] score matrix during prefill.
+        // The effective value is still gated by `supportsQuantizedKVCache` in
+        // LocalModelProcessAIService. A flip re-hashes the prefix cache
+        // (`kv4=` in makePrefixCacheContext) — the next generation re-prefills.
+        let kvCache4BitEnabled = parseBool(value("COMPASS_LOCAL_MODEL_KV_CACHE_4BIT")) ?? defaultKVCache4BitEnabled
         let prefillStepSize = clamp(
             envPrefill ?? 512,
             min: 64,
@@ -168,6 +206,14 @@ enum LocalModelInferenceOverrides {
         }
         guard let value = Float(trimmed) else { return nil }
         return .some(value)
+    }
+
+    nonisolated private static func parseBool(_ rawValue: String?) -> Bool? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if ["1", "true", "yes", "on"].contains(trimmed) { return true }
+        if ["0", "false", "no", "off"].contains(trimmed) { return false }
+        return nil
     }
 
     nonisolated private static func clamp(_ value: Int, min minimum: Int, max maximum: Int) -> Int {

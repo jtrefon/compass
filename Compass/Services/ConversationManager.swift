@@ -298,10 +298,12 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         toolExecutor.updateProjectRoot(newRoot)
         lifecycleCoordinator.configureLoggingStores(root: newRoot)
 
-        saveCurrentSessionSnapshot()
-
-        clearConversation()
-
+        // SessionManager.updateProjectRoot persists the outgoing project's
+        // state to its OWN (old) root first, then re-hydrates the new project's
+        // registry and restores its selected session. It must NOT be preceded
+        // by saveCurrentSessionSnapshot() or clearConversation() here — that
+        // combination used to snapshot the empty boot-time history over the
+        // real project's session files and wipe the restored session.
         sessionCoordinator.updateProjectRoot(newRoot, input: &currentInput, mode: &currentMode)
 
         lifecycleCoordinator.initializeLogging(root: newRoot, eventBus: eventBus)

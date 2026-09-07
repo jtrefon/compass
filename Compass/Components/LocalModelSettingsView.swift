@@ -3,6 +3,15 @@ import SwiftUI
 struct LocalModelSettingsView: View {
     @ObservedObject var viewModel: LocalModelSettingsViewModel
 
+    private var kvCacheCaption: String {
+        let ctx = Int(viewModel.contextLength)
+        let q4MB = LocalModelSettingsViewModel.estimatedKVCacheMB(contextLength: ctx, kvBits: 4)
+        let fp16MB = LocalModelSettingsViewModel.estimatedKVCacheMB(contextLength: ctx, kvBits: 16)
+        return viewModel.kvCache4BitEnabled
+            ? "4-bit KV: ~\(q4MB) MB resident at \(ctx) tokens. Uses non-fused quantized attention (slower decode, larger transient peak). Best for 32+ GB machines with long contexts."
+            : "FP16 KV: ~\(fp16MB) MB resident at \(ctx) tokens. Uses fused flash attention (faster decode, lower transient peak). Recommended for 16 GB machines."
+    }
+
     var body: some View {
         Form {
             Section {
@@ -15,6 +24,12 @@ struct LocalModelSettingsView: View {
                 Slider(value: $viewModel.contextLength, in: 2048...262_144, step: 1024) {
                     Text("Context Length: \(Int(viewModel.contextLength)) tokens")
                 }
+
+                Toggle("Quantize KV cache (4-bit)", isOn: $viewModel.kvCache4BitEnabled)
+
+                Text(kvCacheCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {

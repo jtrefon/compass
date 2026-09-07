@@ -34,6 +34,19 @@ final class LocalModelSettingsViewModel: ObservableObject {
         }
     }
 
+    /// 4-bit KV quantization toggle (default off). FP16 enables flash
+    /// attention (fused kernel, no score matrix materialization) — faster
+    /// decode and lower transient memory peak. 4-bit saves resident KV
+    /// memory but forces non-fused quantized attention, which materializes
+    /// a large attention score matrix during prefill. On 16 GB machines,
+    /// FP16 is the better default; 32+ GB users may prefer 4-bit for longer
+    /// contexts.
+    @Published var kvCache4BitEnabled: Bool {
+        didSet {
+            persistKVCache4BitEnabled()
+        }
+    }
+
     @Published private(set) var status = Status(kind: .idle, message: "Local models not configured.")
     @Published private(set) var isDownloading = false
     @Published private(set) var progressFraction: Double = 0
@@ -43,6 +56,16 @@ final class LocalModelSettingsViewModel: ObservableObject {
     private let downloader: LocalModelDownloader
     private let settingsStore: SettingsStore
     private let selectionStore: LocalModelSelectionStore
+
+    /// Qwen3.5-4B KV shape (config.json): 32 layers, 4 KV heads, head_dim 256,
+    /// K+V. Bytes per token: layers × kv_heads × head_dim × 2 × (2 fp16 | 0.5 q4).
+    static let kvBytesPerToken4Bit = 32 * 4 * 256 * 2 / 4
+    static let kvBytesPerTokenFP16 = 32 * 4 * 256 * 2 * 2
+
+    static func estimatedKVCacheMB(contextLength: Int, kvBits: Int) -> Int {
+        let bytesPerToken = kvBits == 4 ? kvBytesPerToken4Bit : kvBytesPerTokenFP16
+        return Int(Int64(contextLength) * Int64(bytesPerToken) / 1_048_576)
+    }
 
     init(
         downloader: LocalModelDownloader = LocalModelDownloader(),
@@ -58,6 +81,7 @@ final class LocalModelSettingsViewModel: ObservableObject {
         self.contextLength = ctx > 0
             ? Double(min(ctx, chatModel.maxContextLength))
             : Double(chatModel.defaultContextLength)
+        self.kvCache4BitEnabled = settingsStore.bool(forKey: LocalModelSettingsKeys.kvCache4BitEnabled, default: false)
         updateOfflineStatusMessage()
     }
 
@@ -115,6 +139,13 @@ final class LocalModelSettingsViewModel: ObservableObject {
         let length = Int(self.contextLength)
         Task {
             await selectionStore.setContextLength(length)
+        }
+    }
+
+    private func persistKVCache4BitEnabled() {
+        let enabled = self.kvCache4BitEnabled
+        Task {
+            await selectionStore.setKVCache4BitEnabled(enabled)
         }
     }
 
