@@ -17,12 +17,25 @@ public struct ClosedConversation: Identifiable, Equatable, Codable {
     public let title: String
     public let closedAt: Date
     public let messageCount: Int
+    public let byteSize: Int
 
-    public init(id: String, title: String, closedAt: Date, messageCount: Int) {
+    public init(id: String, title: String, closedAt: Date, messageCount: Int, byteSize: Int = 0) {
         self.id = id
         self.title = title
         self.closedAt = closedAt
         self.messageCount = messageCount
+        self.byteSize = byteSize
+    }
+
+    /// Tolerant decoding: legacy persisted records lack `byteSize`; default it
+    /// to 0 instead of failing the decode during registry migration.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        closedAt = try c.decode(Date.self, forKey: .closedAt)
+        messageCount = try c.decodeIfPresent(Int.self, forKey: .messageCount) ?? 0
+        byteSize = try c.decodeIfPresent(Int.self, forKey: .byteSize) ?? 0
     }
 }
 

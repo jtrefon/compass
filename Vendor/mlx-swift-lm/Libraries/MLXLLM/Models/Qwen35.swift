@@ -377,6 +377,57 @@ final class Qwen35Attention: Module {
 
         return oProj(sigmoidMultiply(output, gate))
     }
+
+    /// Attention computation for the compiled decode path. Instead of using
+    /// the cache object (which has Swift-side offset state and pre-allocated
+    /// buffers), this takes the valid cached K/V as direct inputs and returns
+    /// the updated K/V (old + new concatenated) as outputs. The caller
+    /// maintains the K/V arrays and offset outside the compiled graph.
+    ///
+    /// This enables `MLX.compile(shapeless: true)` to trace the entire
+    /// attention layer once and reuse the compiled graph every token,
+    /// eliminating per-token graph construction for Q/K/V projections,
+    /// norms, RoPE, SDPA, and the output projection.
+    func compiledAttention(
+        _ x: MLXArray,
+        offset: MLXArray,
+        cachedKeys: MLXArray,
+        cachedValues: MLXArray
+    ) -> (output: MLXArray, keys: MLXArray, values: MLXArray) {
+        let B = x.dim(0)
+        let L = x.dim(1)
+
+        let qProjOutput = qProj(x)
+        let qSplit = qProjOutput.reshaped(B, L, attentionHeads, -1).split(parts: 2, axis: -1)
+        let queries = qSplit[0]
+        let gate = qSplit[1].reshaped(B, L, -1)
+
+        let keys = kProj(x)
+        let values = vProj(x)
+
+        let queriesNormed = qNorm(queries).transposed(0, 2, 1, 3)
+        let keysNormed = kNorm(keys.reshaped(B, L, kvHeads, -1)).transposed(0, 2, 1, 3)
+        let valuesTransposed = values.reshaped(B, L, kvHeads, -1).transposed(0, 2, 1, 3)
+
+        let queriesRope = applyRotaryPosition(rope, to: queriesNormed, offset: .batch(offset))
+        let keysRope = applyRotaryPosition(rope, to: keysNormed, offset: .batch(offset))
+
+        let allKeys = concatenated([cachedKeys, keysRope], axis: 2)
+        let allValues = concatenated([cachedValues, valuesTransposed], axis: 2)
+
+        let output = MLXFast.scaledDotProductAttention(
+            queries: queriesRope,
+            keys: allKeys,
+            values: allValues,
+            scale: scale,
+            mask: .none
+        )
+        .transposed(0, 2, 1, 3)
+        .reshaped(B, L, -1)
+
+        let result = oProj(sigmoidMultiply(output, gate))
+        return (result, allKeys, allValues)
+    }
 }
 
 // MARK: - SparseMoeBlock
@@ -492,6 +543,31 @@ final class Qwen35DecoderLayer: Module {
         let h = x + r
         return h + (mlp as! UnaryLayer)(postAttentionLayerNorm(h))
     }
+
+    /// Compiled-decode entry point for full-attention layers.
+    ///
+    /// Instead of dispatching through `selfAttn` (which mutates the
+    /// `KVCache` object's Swift-side state and pre-allocated buffers),
+    /// this routes through `Qwen35Attention.compiledAttention`, which
+    /// treats the cached K/V as direct inputs and returns the updated
+    /// K/V as outputs. The caller maintains the K/V arrays and the
+    /// monotonic offset outside the compiled graph.
+    ///
+    /// The MLP, residual, and norm work are pure tensor ops and safe
+    /// to include in the compiled closure.
+    func compiledAttentionCall(
+        _ x: MLXArray,
+        offset: MLXArray,
+        cachedKeys: MLXArray,
+        cachedValues: MLXArray
+    ) -> (hidden: MLXArray, keys: MLXArray, values: MLXArray) {
+        let normed = inputLayerNorm(x)
+        let (attnOut, keys, values) = selfAttn!.compiledAttention(
+            normed, offset: offset, cachedKeys: cachedKeys, cachedValues: cachedValues)
+        let h = x + attnOut
+        let hidden = h + (mlp as! UnaryLayer)(postAttentionLayerNorm(h))
+        return (hidden, keys, values)
+    }
 }
 
 // MARK: - Text Model
@@ -579,6 +655,13 @@ public class Qwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
         return out
     }
 
+    public func prefillStep(_ input: LMInput.Text, cache: [KVCache]?, state: LMOutput.State?)
+        -> LMOutput.State?
+    {
+        _ = model(input.tokens, cache: cache)
+        return nil
+    }
+
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
         let attentionCache = Qwen35TextModel.makeAttentionCache(parameters: parameters)
         return model.layers.map { layer in
@@ -593,19 +676,20 @@ public class Qwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     /// ``GenerateParameters`` memory controls. The GatedDelta (linear) recurrent
     /// states are not windowed or quantized — they are fixed-size per-token states.
     ///
-    /// Quantization wins over windowing when both are set: the quantized cache
-    /// is unbounded, awarding back the full context, and 4-bit KV at a capped
-    /// context window is small. The rotating-window cache is used when no
-    /// quantization applies (``RotatingKVCache.toQuantized()`` is not
-    /// implemented upstream, so a windowed cache cannot later be quantized).
+    /// When both quantization and a window are requested, a bounded
+    /// ``QuantizedKVCache`` is used (memory-efficient with a capped window).
+    /// Quantization without a window is unbounded. Without quantization, a
+    /// ``RotatingKVCache`` is used when a window is set.
     private static func makeAttentionCache(parameters: GenerateParameters?) -> any KVCache {
+        let maxKVSize = parameters?.maxKVSize
+
         if let (bits, groupSize) = resolveAttentionCacheQuantization(parameters),
             parameters?.quantizedKVStart == 0
         {
-            return QuantizedKVCache(groupSize: groupSize, bits: bits)
+            return QuantizedKVCache(groupSize: groupSize, bits: bits, maxSize: maxKVSize)
         }
 
-        if let maxKVSize = parameters?.maxKVSize {
+        if let maxKVSize {
             return RotatingKVCache(maxSize: maxKVSize, keep: 4)
         }
 
@@ -688,6 +772,12 @@ public class Qwen35Model: Module, LLMModel, KVCacheDimensionProvider {
         languageModel(inputs, cache: cache)
     }
 
+    public func prefillStep(_ input: LMInput.Text, cache: [KVCache]?, state: LMOutput.State?)
+        -> LMOutput.State?
+    {
+        languageModel.prefillStep(input, cache: cache, state: state)
+    }
+
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
         languageModel.newCache(parameters: parameters)
     }
@@ -716,5 +806,159 @@ public class Qwen35Model: Module, LLMModel, KVCacheDimensionProvider {
 extension Qwen35Model: LoRAModel {
     public var loraLayers: [Module] {
         languageModel.model.layers
+    }
+}
+
+// MARK: - Compiled decode (SSM + attention blocks)
+
+extension Qwen35TextModel: CompiledDecodeProviding {
+    /// Builds a compiled single-token decode step bound to the given cache
+    /// (which must already hold the prefilled prompt).
+    ///
+    /// Both SSM (GatedDeltaNet) blocks AND full-attention blocks are compiled.
+    ///
+    /// SSM blocks: grouped runs of consecutive linear layers. Their state
+    /// (conv + recurrent) is constant-shape and offset-free, so the compiled
+    /// graph never needs a re-trace. State is managed via the ``compile``
+    /// Updatable mechanism.
+    ///
+    /// Attention blocks: each full-attention layer is compiled with
+    /// `shapeless: true`. The cached K/V arrays are passed as direct inputs
+    /// (not through the cache object), and the updated K/V (old + new
+    /// concatenated) are returned as outputs. The caller maintains the K/V
+    /// arrays in Swift and writes them back to the cache object after each
+    /// step so cache reuse, trimming, and persistence remain exact.
+    ///
+    /// The attention compiled path is only used when:
+    /// - The cache is NOT quantized (`KVCacheSimple` or `RotatingKVCache`)
+    /// - The cache has not wrapped (`offset < maxSize` for `RotatingKVCache`)
+    ///
+    /// For quantized caches or wrapped rotating caches, attention layers
+    /// fall back to the uncompiled path.
+    public func makeCompiledDecodeStep(cache: [KVCache]) -> CompiledDecodeStep? {
+        let layers = model.layers
+        guard cache.count == layers.count else { return nil }
+        guard layers.contains(where: \.isLinear) else { return nil }
+
+        // ---- SSM groups (consecutive linear layers) ----
+        var groups: [(start: Int, end: Int)] = []
+        var i = 0
+        while i < layers.count {
+            if layers[i].isLinear {
+                let start = i
+                while i < layers.count && layers[i].isLinear { i += 1 }
+                groups.append((start, i))
+            } else {
+                i += 1
+            }
+        }
+
+        let mambaIndices = layers.indices.filter { layers[$0].isLinear }
+        let mambaCaches = mambaIndices.map { cache[$0] as! MambaCache }
+        let offsetsBeforeTrace = mambaCaches.map { $0.offset }
+
+        var compiledFns: [Int: @Sendable ([MLXArray]) -> [MLXArray]] = [:]
+        var groupEnds: [Int: Int] = [:]
+        for group in groups {
+            let groupLayers = Array(layers[group.start ..< group.end])
+            let groupCaches = groupLayers.indices.map { cache[group.start + $0] as! MambaCache }
+            let updatables = groupCaches.map { KVCacheUpdatable($0) }
+            let fn = MLX.compile(
+                inputs: updatables,
+                outputs: updatables,
+                shapeless: false
+            ) { args in
+                var h = args[0]
+                for (layer, c) in zip(groupLayers, groupCaches) {
+                    h = layer(h, attentionMask: .none, ssmMask: nil, cache: c)
+                }
+                return [h]
+            }
+            compiledFns[group.start] = fn
+            groupEnds[group.start] = group.end
+        }
+
+        for (c, offset) in zip(mambaCaches, offsetsBeforeTrace) {
+            c.offset = offset
+        }
+
+        // ---- Attention compilation ----
+        // For each full-attention layer with a non-quantized cache, build a
+        // shapeless compiled function that takes [hidden, offset, cachedK,
+        // cachedV] and returns [hidden, keys, values]. The K/V arrays are
+        // maintained outside the compiled graph and written back to the cache
+        // after each step.
+        let attentionIndices = layers.indices.filter { !layers[$0].isLinear }
+
+        var attnKV: [Int: (keys: MLXArray, values: MLXArray)] = [:]
+        var attnCompiled: [Int: @Sendable ([MLXArray]) -> [MLXArray]] = [:]
+        var attnMaxSize: [Int: Int] = [:]
+
+        for idx in attentionIndices {
+            let c = cache[idx]
+            if c is QuantizedKVCacheProtocol { continue }
+            let state = c.state
+            guard state.count >= 2 else { continue }
+            attnKV[idx] = (state[0], state[1])
+            if let maxSize = c.maxSize { attnMaxSize[idx] = maxSize }
+
+            let layer = layers[idx]
+            let fn = MLX.compile(
+                inputs: [], outputs: [], shapeless: true
+            ) { args in
+                let (h, keys, values) = layer.compiledAttentionCall(
+                    args[0], offset: args[1],
+                    cachedKeys: args[2], cachedValues: args[3]
+                )
+                return [h, keys, values]
+            }
+            attnCompiled[idx] = fn
+        }
+
+        let inner = model
+        let head = lmHead
+        var cacheMut = cache
+        let step = CompiledDecodeStep { tokens in
+            var h = inner.embedTokens(tokens)
+            var idx = 0
+            while idx < layers.count {
+                if let fn = compiledFns[idx], let end = groupEnds[idx] {
+                    h = fn([h])[0]
+                    idx = end
+                } else if let fn = attnCompiled[idx], var kv = attnKV[idx] {
+                    let offset = cacheMut[idx].offset
+                    if let maxSize = attnMaxSize[idx], offset >= maxSize {
+                        attnCompiled[idx] = nil
+                        h = layers[idx](h, attentionMask: .none, ssmMask: nil, cache: cacheMut[idx])
+                        idx += 1
+                        continue
+                    }
+                    let offsetArr = MLXArray(Int32(offset))
+                    let results = fn([h, offsetArr, kv.keys, kv.values])
+                    h = results[0]
+                    kv.keys = results[1]
+                    kv.values = results[2]
+                    attnKV[idx] = kv
+                    cacheMut[idx].state = [kv.keys, kv.values]
+                    (cacheMut[idx] as! BaseKVCache).offset = offset + 1
+                    idx += 1
+                } else {
+                    h = layers[idx](h, attentionMask: .none, ssmMask: nil, cache: cacheMut[idx])
+                    idx += 1
+                }
+            }
+            h = inner.norm(h)
+            let logits: MLXArray
+            if let head {
+                logits = head(h)
+            } else {
+                logits = inner.embedTokens.asLinear(h)
+            }
+            for c in mambaCaches {
+                c.advance(1)
+            }
+            return logits
+        }
+        return step
     }
 }

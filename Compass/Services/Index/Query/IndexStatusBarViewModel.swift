@@ -27,6 +27,7 @@ final class IndexStatusBarViewModel: ObservableObject {
     @Published private(set) var isDownloadingFIM: Bool = false
     @Published private(set) var fimDownloadFraction: Double = 0
     @Published private(set) var isFIMAvailable: Bool = false
+    @Published private(set) var isFIMWarm: Bool = false
     @Published private(set) var fimCompletionStatus: InlineCompletionStatus = .idle
 
     private let codebaseIndexProvider: () -> CodebaseIndexProtocol?
@@ -105,6 +106,10 @@ final class IndexStatusBarViewModel: ObservableObject {
 
     var acStatusText: String {
         guard isFIMAvailable else { return "AC -" }
+        // "Warm" = the model is actually LOADED in memory (the lifecycle
+        // controller unloads it when the cursor leaves source code / a chat
+        // run starts). An installed-but-unloaded model must NOT show OK.
+        guard isFIMWarm else { return "AC idle" }
         switch fimCompletionStatus {
         case .generating: return "AC WIP"
         case .idle, .noSuggestion: return "AC OK"
@@ -147,6 +152,7 @@ final class IndexStatusBarViewModel: ObservableObject {
     /// Auto-complete state label for the icon strip (short).
     var acShortText: String {
         guard isFIMAvailable else { return "–" }
+        guard isFIMWarm else { return "idle" }
         switch fimCompletionStatus {
         case .generating: return "WIP"
         case .idle, .noSuggestion: return "OK"
@@ -225,30 +231,27 @@ final class IndexStatusBarViewModel: ObservableObject {
 
         eventBus.subscribe(to: StreamingContextUsageEvent.self) { [weak self] event in
             guard let self else { return }
-            if event.isFinal {
-                if !self.usageSeenForCurrentRun {
-                    self.accumulatedPromptTokens = event.estimatedPromptTokens
-                }
-                self.streamingPromptEstimate = 0
-            } else {
-                if event.runId != self.lastUsageRunId {
-                    self.lastUsageRunId = event.runId
-                    self.usageSeenForCurrentRun = false
-                    // Don't reset accumulated — it holds the previous run's
-                    // authoritative total. Streaming estimate is per-run, but
-                    // the display is total = accumulated + streaming, so a new
-                    // run's streaming should start from 0 and grow, not reset
-                    // the whole gauge to the new run's prompt alone. The old
-                    // total remains visible until the new run's first chunk.
-                    // To avoid the 100→21k→900 jump, keep streaming monotonic.
-                    self.streamingPromptEstimate = event.estimatedPromptTokens
-                } else {
-                    // Monotonic: never let live estimate go down (handles reordered
-                    // or small estimates from a new iteration's initial 100-token probe)
-                    self.streamingPromptEstimate = max(self.streamingPromptEstimate, event.estimatedPromptTokens)
-                }
+            self.handleStreamingContextUsage(
+                runId: event.runId,
+                estimatedPromptTokens: event.estimatedPromptTokens,
+                isFinal: event.isFinal
+            )
+        }
+        .store(in: &cancellables)
+
+        // Folded context estimate from local model streaming chunks —
+        // avoids a separate Task { @MainActor in ... } per flush in the
+        // decode loop (the generator publishes estimatedTokens on the
+        // chunk event itself instead of dispatching StreamingContextUsageEvent).
+        eventBus.subscribe(to: LocalModelStreamingChunkEvent.self) { [weak self] event in
+            guard let self else { return }
+            if let estimate = event.estimatedTokens {
+                self.handleStreamingContextUsage(
+                    runId: event.runId,
+                    estimatedPromptTokens: estimate,
+                    isFinal: false
+                )
             }
-            self.updateContextDisplay()
         }
         .store(in: &cancellables)
 
@@ -348,6 +351,17 @@ final class IndexStatusBarViewModel: ObservableObject {
                 self?.fimCompletionStatus = status
             }
         }
+
+        NotificationCenter.default.addObserver(
+            forName: FIMLifecycleController.stateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let isWarm = (note.userInfo?["isWarm"] as? Bool) ?? false
+            Task { @MainActor [self] in
+                self?.isFIMWarm = isWarm
+            }
+        }
     }
 
     private func refreshFIMAvailability() {
@@ -400,9 +414,52 @@ final class IndexStatusBarViewModel: ObservableObject {
         return String(format: "%.1fM", k / 1000.0)
     }
 
+    /// Shared handler for streaming context usage updates — called from both
+    /// StreamingContextUsageEvent (cloud path, final marker) and the folded
+    /// estimatedTokens on LocalModelStreamingChunkEvent (local decode loop,
+    /// avoids a separate Task { @MainActor } per flush).
+    private func handleStreamingContextUsage(
+        runId: String,
+        estimatedPromptTokens: Int,
+        isFinal: Bool
+    ) {
+        if isFinal {
+            if !usageSeenForCurrentRun {
+                accumulatedPromptTokens = estimatedPromptTokens
+            }
+            streamingPromptEstimate = 0
+        } else {
+            if runId != lastUsageRunId {
+                lastUsageRunId = runId
+                usageSeenForCurrentRun = false
+                // Don't reset accumulated — it holds the previous run's
+                // authoritative total. Streaming estimate is per-run, but
+                // the display is total = accumulated + streaming, so a new
+                // run's streaming should start from 0 and grow, not reset
+                // the whole gauge to the new run's prompt alone. The old
+                // total remains visible until the new run's first chunk.
+                // To avoid the 100→21k→900 jump, keep streaming monotonic.
+                streamingPromptEstimate = estimatedPromptTokens
+            } else {
+                // Monotonic: never let live estimate go down (handles reordered
+                // or small estimates from a new iteration's initial 100-token probe)
+                streamingPromptEstimate = max(streamingPromptEstimate, estimatedPromptTokens)
+            }
+        }
+        updateContextDisplay()
+    }
+
     /// Update the context display with the current accumulated + streaming estimate
     private func updateContextDisplay() {
-        let total = accumulatedPromptTokens + accumulatedCompletionTokens + streamingPromptEstimate
+        // Both estimates are ABSOLUTE full-context counts (local: full prompt +
+        // generated; cloud: chars/4 of all messages, then the provider's real
+        // usage). Summing them double-counted: final (18.5k) + next run's
+        // initial (18.4k) displayed 36.9k, then dropped back — the gauge's
+        // bidirectional 8→19→38k jumps. Max keeps it monotonic per run.
+        let total = max(
+            accumulatedPromptTokens + accumulatedCompletionTokens,
+            streamingPromptEstimate
+        )
         // For local, use the last known local window (from ConversationContextEvent, 130k slider)
         // not the cloud 262k fallback. observedLocalWindowTokens is set via ConversationContextEvent.
         let windowTokens: Int
@@ -510,9 +567,9 @@ final class TokenRateTracker {
     }
 
     var tokensPerSecond: Double {
-        guard samples.count >= 2 else { return 0 }
-        let first = samples.first!
-        let last = samples.last!
+        guard samples.count >= 2,
+              let first = samples.first,
+              let last = samples.last else { return 0 }
         let elapsed = last.timestamp.timeIntervalSince(first.timestamp)
         guard elapsed > 0 else { return 0 }
         let totalTokens = last.tokenCount - first.tokenCount

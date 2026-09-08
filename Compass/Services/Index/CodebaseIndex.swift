@@ -162,7 +162,8 @@ public class CodebaseIndex: CodebaseIndexProtocol, @unchecked Sendable {
         )
 
         let tempDatabase: DatabaseManager = (try? DatabaseManager(path: dbPath))
-            ?? (try! DatabaseManager(path: NSTemporaryDirectory() + "codebase-index-\(UUID().uuidString).db"))
+            ?? ((try? DatabaseManager(path: NSTemporaryDirectory() + "codebase-index-\(UUID().uuidString).db"))
+                ?? { fatalError("Cannot create temporary database at \(NSTemporaryDirectory())") }())
 
         let index = CodebaseIndex(
             eventBus: eventBus,

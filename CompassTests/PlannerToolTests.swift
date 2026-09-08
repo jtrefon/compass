@@ -12,26 +12,44 @@ final class PlannerToolTests: XCTestCase {
         await store.setProjectRoot(tempDir)
 
         let conversationId = "planner-update-replace"
-        let originalPlan = """
-        # Implementation Plan
+        let originalPlan = TaskPlan(
+            id: conversationId,
+            goal: "Test goal",
+            value: "Test value",
+            domain: .implementation,
+            mode: .coder,
+            items: [
+                PlanItem(id: "1", description: "Step one", purpose: "P", context: [], doneCriteria: "C", status: .pending),
+                PlanItem(id: "2", description: "Step two", purpose: "P", context: [], doneCriteria: "C", status: .pending),
+            ],
+            createdAt: Date(),
+            completedAt: nil,
+            currentIndex: 0
+        )
+        let updatedPlan = TaskPlan(
+            id: conversationId,
+            goal: "Test goal",
+            value: "Test value",
+            domain: .implementation,
+            mode: .coder,
+            items: [
+                PlanItem(id: "1", description: "Step one", purpose: "P", context: [], doneCriteria: "C", status: .completed, summary: "Done"),
+                PlanItem(id: "2", description: "Step two", purpose: "P", context: [], doneCriteria: "C", status: .pending),
+            ],
+            createdAt: Date(),
+            completedAt: nil,
+            currentIndex: 0
+        )
 
-        - [ ] Step one
-        - [ ] Step two
-        """
-        let updatedPlan = """
-        # Implementation Plan
+        await store.setPlan(conversationId: conversationId, plan: originalPlan)
+        await store.setPlan(conversationId: conversationId, plan: updatedPlan)
 
-        - [x] Step one
-        - [ ] Step two
-        """
+        let storedPlan = await store.getPlan(conversationId: conversationId)
 
-        await store.set(conversationId: conversationId, plan: originalPlan)
-        await store.set(conversationId: conversationId, plan: updatedPlan)
-
-        let storedPlan = await store.get(conversationId: conversationId)
-
-        XCTAssertEqual(storedPlan, updatedPlan)
-        XCTAssertFalse(storedPlan?.contains("- [ ] Step one\n- [ ] Step two\n\n# Implementation Plan") ?? false)
+        XCTAssertNotNil(storedPlan)
+        XCTAssertEqual(storedPlan?.items.count, 2)
+        XCTAssertEqual(storedPlan?.items[0].status, .completed)
+        XCTAssertEqual(storedPlan?.items[1].status, .pending)
 
         try? FileManager.default.removeItem(at: tempDir)
     }
@@ -44,20 +62,28 @@ final class PlannerToolTests: XCTestCase {
         await store.setProjectRoot(tempDir)
 
         let conversationId = "planner-update-same"
-        let plan = """
-        # Implementation Plan
+        let plan = TaskPlan(
+            id: conversationId,
+            goal: "Test goal",
+            value: "Test value",
+            domain: .implementation,
+            mode: .coder,
+            items: [
+                PlanItem(id: "1", description: "Step one", purpose: "P", context: [], doneCriteria: "C", status: .pending),
+                PlanItem(id: "2", description: "Step two", purpose: "P", context: [], doneCriteria: "C", status: .pending),
+            ],
+            createdAt: Date(),
+            completedAt: nil,
+            currentIndex: 0
+        )
 
-        - [ ] Step one
-        - [ ] Step two
-        """
+        await store.setPlan(conversationId: conversationId, plan: plan)
+        await store.setPlan(conversationId: conversationId, plan: plan)
 
-        await store.set(conversationId: conversationId, plan: plan)
-        await store.set(conversationId: conversationId, plan: plan)
+        let storedPlan = await store.getPlan(conversationId: conversationId)
 
-        let storedPlan = await store.get(conversationId: conversationId)
-
-        XCTAssertEqual(storedPlan, plan)
-        XCTAssertEqual(storedPlan?.components(separatedBy: "# Implementation Plan").count, 2)
+        XCTAssertNotNil(storedPlan)
+        XCTAssertEqual(storedPlan?.items.count, 2)
 
         try? FileManager.default.removeItem(at: tempDir)
     }

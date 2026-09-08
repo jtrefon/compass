@@ -25,6 +25,9 @@ protocol InlineCompletionProviding: Sendable {
 @MainActor
 final class AIServiceInlineCompletionProvider: InlineCompletionProviding {
     private var fimService: FIMInferenceService?
+    /// Shared in-flight load: warm() and a first keystroke can race — without
+    /// this, both would create a service and load the 1.5B model twice.
+    private var loadingTask: Task<FIMInferenceService, Error>?
 
     init() {
         Task { await InferenceUnloadRegistry.shared.register(label: InferenceUnloadRegistry.fimLabel) { [weak self] in
@@ -65,15 +68,52 @@ final class AIServiceInlineCompletionProvider: InlineCompletionProviding {
         await fimService?.lastGeneratedFirstTokenID
     }
 
+    /// FIM lifecycle (FIMLifecycleController): loads the model so the first
+    /// keystroke after a cursor landing does not pay the 1.2-1.9s cold load.
+    func warm() async {
+        let modelId = LocalModelCatalog.fimModel.id
+        guard let model = LocalModelCatalog.model(id: modelId),
+              LocalModelFileStore.isModelInstalled(model) else { return }
+        _ = try? await resolveFIMService(modelId: modelId)
+    }
+
+    func unload() async {
+        await fimService?.unload()
+        fimService = nil
+    }
+
+    /// Unloads only if warm; returns whether an unload happened (for telemetry).
+    func unloadIfWarm() async -> Bool {
+        guard fimService != nil else { return false }
+        await fimService?.unload()
+        fimService = nil
+        return true
+    }
+
+    var isWarm: Bool { fimService != nil }
+
     private func resolveFIMService(modelId: String) async throws -> FIMInferenceService {
         if let existing = fimService, existing.modelId == modelId {
             return existing
         }
-        // Unload the old model before creating a new one to avoid leaking MLX model weights.
-        await fimService?.unload()
-        let service = try await FIMInferenceService(modelId: modelId)
-        fimService = service
-        return service
+        if let inflight = loadingTask {
+            return try await inflight.value
+        }
+        let task = Task { () -> FIMInferenceService in
+            // Unload the old model before creating a new one to avoid leaking MLX model weights.
+            await fimService?.unload()
+            return try await FIMInferenceService(modelId: modelId)
+        }
+        loadingTask = task
+        do {
+            let service = try await task.value
+            fimService = service
+            loadingTask = nil
+            return service
+        } catch {
+            loadingTask = nil
+            throw error
+        }
     }
 }
 

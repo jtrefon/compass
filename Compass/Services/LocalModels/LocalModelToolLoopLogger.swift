@@ -15,8 +15,7 @@ struct LocalModelToolLoopLogger {
     func logIterationStart(
         iteration: Int,
         stage: AIRequestStage?,
-        messageCount: Int,
-        approximateTokens: Int
+        messageCount: Int
     ) async {
         await AIToolTraceLogger.shared.log(
             type: "local_loop.iteration_start",
@@ -24,7 +23,6 @@ struct LocalModelToolLoopLogger {
                 "iteration": iteration,
                 "stage": stage?.rawValue ?? "nil",
                 "messageCount": messageCount,
-                "approximateTokens": approximateTokens,
             ]
         )
     }
@@ -33,9 +31,7 @@ struct LocalModelToolLoopLogger {
         iteration: Int,
         toolCalls: [AIToolCall],
         toolResults: [ChatMessage],
-        committedCount: Int,
-        promptTokens: Int,
-        generationTokens: Int
+        committedCount: Int
     ) async {
         let toolCallSummary = toolCalls.map { call in
             [
@@ -60,8 +56,6 @@ struct LocalModelToolLoopLogger {
                 "toolCalls": toolCallSummary as [any Sendable],
                 "toolResults": toolResultSummary as [any Sendable],
                 "committedCount": committedCount,
-                "promptTokens": promptTokens,
-                "generationTokens": generationTokens,
             ]
         )
     }
@@ -82,31 +76,6 @@ struct LocalModelToolLoopLogger {
                 "identicalArguments": identicalArguments,
                 "previousToolCallId": previousCall.id,
                 "currentToolCallId": currentCall.id,
-            ]
-        )
-    }
-
-    // MARK: - Raw messages (what the model saw)
-
-    func logRawMessages(
-        iteration: Int,
-        messages: [[String: any Sendable]]
-    ) async {
-        let summary = messages.map { dict -> [String: any Sendable] in
-            [
-                "role": dict["role"] ?? "",
-                "contentLength": (dict["content"] as? String)?.count ?? 0,
-                "hasToolCalls": dict["tool_calls"] != nil,
-                "toolCallId": dict["tool_call_id"] ?? "",
-            ]
-        }
-
-        await AIToolTraceLogger.shared.log(
-            type: "local_loop.raw_messages",
-            data: [
-                "iteration": iteration,
-                "messageCount": messages.count,
-                "messages": summary as [any Sendable],
             ]
         )
     }

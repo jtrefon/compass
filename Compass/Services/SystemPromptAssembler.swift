@@ -62,7 +62,8 @@ struct SystemPromptAssembler {
                     "Tools/v3/web_search",
                     "Tools/v3/web_fetch",
                     "Tools/v3/bash",
-                    "Tools/v3/plan"
+                    "Tools/v3/plan",
+                    "Tools/v3/note"
                 ]
                 var toolPrompts: [String] = []
                 for key in toolPromptKeys {
@@ -87,6 +88,15 @@ struct SystemPromptAssembler {
                 key: mode == .agent ? "System/mode-agent" : mode == .coder ? "System/mode-coder" : "System/mode-chat",
                 projectRoot: input.projectRoot
             ))
+            // Context discipline — only for agentic modes with note tool
+            if mode != .chat {
+                if let discipline = try? PromptRepository.shared.prompt(
+                    key: "System/context-discipline",
+                    projectRoot: input.projectRoot
+                ) {
+                    sections.append(discipline)
+                }
+            }
         }
 
         if let projectRoot = input.projectRoot {
@@ -140,9 +150,8 @@ struct SystemPromptAssembler {
             sections.append(reasoningPrompt)
         }
 
-        // Inject OS context so the agent can use platform-native tools
-        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
-        sections.append("You are running on macOS \(osVersion). For codebase exploration, use the `search` tool first — it queries the pre-built project index and returns instant, structured results. The `bash` tool is available for builds, tests, package management, server processes, and other OS-level operations.")
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        sections.append("You are running on macOS \(os.majorVersion).\(os.minorVersion). For codebase exploration, use the `search` tool first — it queries the pre-built project index and returns instant, structured results. The `bash` tool is available for builds, tests, package management, server processes, and other OS-level operations.")
 
         return sections
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

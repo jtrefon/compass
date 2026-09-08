@@ -38,6 +38,13 @@ If package resolution fails on the first attempt (SwiftJinja/OrderedCollections 
 xcodebuild -resolvePackageDependencies -project Compass.xcodeproj
 ```
 
+## Coding standards
+
+Read [CODING_STANDARDS.md](CODING_STANDARDS.md) before writing code: clean architecture,
+SOLID, TDD (red-green-refactor), DRY/SRP/KISS/YAGNI, and the static-analysis bar. UI work
+must also follow [DESIGN_STANDARDS.md](DESIGN_STANDARDS.md). Anything touching the agent
+engine must respect the live-path rules in [AGENTS.md](AGENTS.md).
+
 ## The harness — read this before touching the agent
 
 Compass ships a headless integration harness (`CompassHarnessTests/`) that instantiates the real

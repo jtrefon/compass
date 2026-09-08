@@ -24,8 +24,10 @@ fileprivate func earlyDiag(_ msg: String) {
             try? data.write(to: tmpLog)
         }
     }
+    #if DEBUG
     Swift.print("[EARLY-DIAG] \(msg)")
     fflush(stdout)
+    #endif
 }
 
 @main

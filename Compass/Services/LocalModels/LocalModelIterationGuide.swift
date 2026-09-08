@@ -68,17 +68,6 @@ struct LocalModelIterationGuide {
             2. Take a DIFFERENT action based on that result
             3. If the result was sufficient, produce a final answer for the user
             """
-        case .similarCall(let name):
-            return """
-            You recently called \(name). Consider whether a different tool \
-            would be more appropriate, or whether you have enough information \
-            to provide a final answer.
-            """
-        case .noProgress:
-            return """
-            Continue from where you left off. Do NOT restart from the beginning. \
-            Summarize progress so far and take the next logical step.
-            """
         }
     }
 
@@ -163,19 +152,11 @@ struct LocalModelIterationGuide {
 
     enum RepetitionKind: Equatable {
         case identicalCall(name: String, arguments: [String: Any]?)
-        case similarCall(name: String)
-        case noProgress
 
         static func == (lhs: RepetitionKind, rhs: RepetitionKind) -> Bool {
             switch (lhs, rhs) {
             case (.identicalCall(let n1, _), .identicalCall(let n2, _)):
                 return n1 == n2
-            case (.similarCall(let n1), .similarCall(let n2)):
-                return n1 == n2
-            case (.noProgress, .noProgress):
-                return true
-            default:
-                return false
             }
         }
     }

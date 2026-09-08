@@ -68,12 +68,31 @@ final class ConversationToolProvider {
         // PlanTool remains for init/breakOut only; per-item loop is driven by GraphRunner
         tools.append(PlanTool())
 
+        // Working Memory — the model's persistent notebook (Mission Control)
+        // Gated by COMPASS_ENABLE_MISSION_CONTROL for safe rollout
+        if Self.isMissionControlEnabled {
+            let compressor: SemanticCompressor? = embedder.map {
+                SemanticCompressor(embedder: $0, vectorStore: vectorStoreService)
+            }
+            tools.append(NoteTool(
+                noteTracker: ToolResultNoteTracker.shared,
+                semanticCompressor: compressor
+            ))
+        }
+
         return tools
     }
 
     private static var isRAGEnabled: Bool {
         let env = ProcessInfo.processInfo.environment
         let raw = env["COMPASS_ENABLE_RAG"] ?? env["TEST_RUNNER_ENV_COMPASS_ENABLE_RAG"]
+        if raw == "1" || raw?.lowercased() == "true" { return true }
+        return false
+    }
+
+    private static var isMissionControlEnabled: Bool {
+        let env = ProcessInfo.processInfo.environment
+        let raw = env["COMPASS_ENABLE_MISSION_CONTROL"] ?? env["TEST_RUNNER_ENV_COMPASS_ENABLE_MISSION_CONTROL"]
         if raw == "1" || raw?.lowercased() == "true" { return true }
         return false
     }

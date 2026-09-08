@@ -95,6 +95,14 @@ exactly one line.
 - Model + KV cache unload after idle timeout or memory pressure (reuses
   `MLXInferenceLock` and the existing pressure-unload path); pre-warm on
   next focus.
+- **Implemented (2026-08-31):** `FIMLifecycleController` — the model is
+  **unloaded by default** and loaded ONLY while the cursor is on source code
+  (600ms debounced, `LineCompletionGate.supportedLanguages` predicate). A chat
+  send evicts FIM for the whole run (`ConversationSendCoordinator.send`) and
+  re-warms afterwards if the cursor is still in source. Every chat generation
+  additionally evicts FIM via the MLX memory gate (independent safety net).
+  Telemetry: `fim.warm` / `fim.unload` (reason: cursor_left_source |
+  chat_run_started).
 
 ## 4. Benchmark ground truth (2026-08-05)
 
@@ -154,8 +162,11 @@ Key pieces (existing or to build):
    longest matching head and publishes the remainder without a model call).
 4. **Stop-at-newline** — ✅ already effective (engine breaks the stream at
    `\n`; `onTermination` cancels generation).
-5. **Pre-warm on file focus** — ❌ NOT BUILT (next; needs an editor-focus hook
-   + a prefill-only entry on FIMInferenceService).
+5. **Pre-warm on file focus** — ✅ DONE (2026-08-31): `FIMLifecycleController`
+   warms the model when the cursor lands on source code (debounced 600ms) and
+   unloads it when the cursor leaves source or a chat run starts. The
+   completion path stays lazy (`resolveFIMService` on demand) as the safety
+   net.
 6. **Streaming ghost** — already exists (`generateStream`).
 
 ## 6. Current implementation map (pre-cleanup)

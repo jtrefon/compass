@@ -17,6 +17,7 @@ final class ConversationManagerTests: XCTestCase {
     var mockErrorManager: MockErrorManager!
     var mockActivityCoordinator: AgentActivityCoordinator!
     var eventBus: EventBus!
+    var tempProjectRoot: URL!
     let historyKey = "AIChatHistory"
 
     override func setUp() async throws {
@@ -30,6 +31,11 @@ final class ConversationManagerTests: XCTestCase {
         defaults.removeObject(forKey: "SessionManager.sessionOrder")
         defaults.removeObject(forKey: "SessionManager.selectedId")
         defaults.removeObject(forKey: "SessionManager.closedRegistry")
+        // Unique project root per test so the session manifest/snapshots can't
+        // leak between runs (the old fixed `/tmp` root shared state forever).
+        tempProjectRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("conversation-manager-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempProjectRoot, withIntermediateDirectories: true)
         mockAIService = MockAIService()
         mockErrorManager = MockErrorManager()
         mockActivityCoordinator = AgentActivityCoordinator(powerManagementService: MockPowerManagementService())
@@ -52,7 +58,7 @@ final class ConversationManagerTests: XCTestCase {
                 environment: ConversationManager.EnvironmentDependencies(
                     workspaceService: workspaceService,
                     eventBus: eventBus,
-                    projectRoot: URL(fileURLWithPath: "/tmp"),
+                    projectRoot: tempProjectRoot,
                     codebaseIndex: nil
                 )
             )
@@ -65,10 +71,12 @@ final class ConversationManagerTests: XCTestCase {
         defaults.removeObject(forKey: "SessionManager.sessionOrder")
         defaults.removeObject(forKey: "SessionManager.selectedId")
         defaults.removeObject(forKey: "SessionManager.closedRegistry")
+        try? FileManager.default.removeItem(at: tempProjectRoot)
         manager = nil
         mockAIService = nil
         mockErrorManager = nil
         eventBus = nil
+        tempProjectRoot = nil
         try await super.tearDown()
     }
 

@@ -65,13 +65,30 @@ final class AIInteractionCoordinator {
     ) async -> Result<AIServiceResponse, AppError> {
         let isUnitTestRun = isRunningUnitTests()
         let modelID = settingsStore.load(includeApiKey: false).model
-        let sanitizedMessages = await PipelineProcessor.prepareForRequest(
-            messages: request.messages,
-            modelID: modelID,
-            preservesCache: request.preservesCache,
-            runId: request.runId,
-            stage: request.stage
-        )
+
+        // Use note-aware eviction when Mission Control is enabled; fall back
+        // to the standard prepareForRequest otherwise.
+        let mcEnabled = ProcessInfo.processInfo.environment["COMPASS_ENABLE_MISSION_CONTROL"] == "1"
+        let sanitizedMessages: [ChatMessage]
+        if mcEnabled, let conversationId = request.conversationId {
+            sanitizedMessages = await PipelineProcessor.prepareForRequestNoteAware(
+                messages: request.messages,
+                modelID: modelID,
+                conversationId: conversationId,
+                noteTracker: ToolResultNoteTracker.shared,
+                preservesCache: request.preservesCache,
+                runId: request.runId,
+                stage: request.stage
+            )
+        } else {
+            sanitizedMessages = await PipelineProcessor.prepareForRequest(
+                messages: request.messages,
+                modelID: modelID,
+                preservesCache: request.preservesCache,
+                runId: request.runId,
+                stage: request.stage
+            )
+        }
         let filteredTools = conversationPolicy.allowedTools(
             for: request.stage,
             mode: request.mode,
@@ -176,10 +193,13 @@ final class AIInteractionCoordinator {
             } else if attempt > 1 {
                 let retryReason = lastError?.localizedDescription ?? "previous attempt failed"
                 let isEmptyResponseError = retryReason.contains("Empty response")
+                let isTruncatedToolCallError = retryReason.contains("Truncated tool call")
                 let isMalformedToolCallError = retryReason.contains("Malformed tool call")
                 let promptKey: String
                 if isEmptyResponseError {
                     promptKey = "ConversationFlow/Corrections/empty_response_correction"
+                } else if isTruncatedToolCallError {
+                    promptKey = "ConversationFlow/Corrections/truncated_tool_call_correction"
                 } else if isMalformedToolCallError {
                     promptKey = "ConversationFlow/Corrections/malformed_tool_call_correction"
                 } else {
@@ -276,7 +296,32 @@ final class AIInteractionCoordinator {
                 // Malformed/truncated tool-call markup must NOT terminate the
                 // run — retry with a correction so the agent keeps working
                 // (previously treated as a valid answer, breaking the agentic
-                // loop mid-task).
+                // loop mid-task). TRUNCATED (hit the output cap mid-call, e.g.
+                // a whole-file edit at maxOutput 1024) gets a dedicated
+                // correction steering to short anchors / line-range edits —
+                // the generic malformed correction ("emit a COMPLETE call")
+                // is unsatisfiable when the call simply cannot fit.
+                if Self.isTruncatedToolCallResponse(response),
+                   !filteredTools.isEmpty, attempt < maxAttempts {
+                    lastError = .aiServiceError(Self.truncatedToolCallReason)
+                    await AIToolTraceLogger.shared.log(type: "chat.truncated_tool_call_retry", data: [
+                        "runId": request.runId ?? "unknown",
+                        "attempt": attempt,
+                        "stage": request.stage?.rawValue ?? "unknown",
+                        "contentLength": response.content?.count ?? 0,
+                        "malformedCount": response.malformedToolCalls?.count ?? 0,
+                    ])
+                    let waitSeconds = retryDelayNanoseconds(
+                        forAttempt: attempt,
+                        stage: request.stage,
+                        isRateLimitError: false,
+                        isRunningUnitTests: isUnitTestRun
+                    )
+                    guard await sleepRespectingCancellation(nanoseconds: waitSeconds) else {
+                        return .failure(.aiServiceError("Request cancelled"))
+                    }
+                    continue
+                }
                 if Self.isMalformedToolCallResponse(response),
                    !filteredTools.isEmpty, attempt < maxAttempts {
                     lastError = .aiServiceError(Self.malformedToolCallReason)
@@ -325,6 +370,36 @@ final class AIInteractionCoordinator {
     // selects the correction prompt by matching these substrings.
     static let emptyResponseReason = "Empty response: model returned no visible content"
     static let malformedToolCallReason = "Malformed tool call: model emitted tool-call markup that could not be parsed"
+    static let truncatedToolCallReason = "Truncated tool call: model hit the output limit mid-call and the tool-call markup is unterminated"
+
+    /// A response whose tool-call markup is UNTERMINATED — the model hit its
+    /// output cap mid-call (measured: whole-file `old_string` edits at
+    /// maxOutput 1024 end without `</tool_call>`/`</function>` and with
+    /// unbalanced braces). The call can never parse, and the generic
+    /// malformed correction ("emit a COMPLETE call") is unsatisfiable — the
+    /// model needs to be told to make the call SHORTER instead.
+    private static func isTruncatedToolCallResponse(_ response: AIServiceResponse) -> Bool {
+        guard let content = response.content else { return false }
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strong signals: opened but never closed tool-call envelopes.
+        if trimmed.contains("<tool_call") && !trimmed.contains("</tool_call>") { return true }
+        if trimmed.contains("<function=") && !trimmed.contains("</function>") { return true }
+        if trimmed.contains("<parameter=") && !trimmed.contains("</parameter>") { return true }
+        // Weak signal: an unbalanced JSON object at the end (a complete call
+        // would be balanced; prose with stray braces is rare enough to
+        // accept a bounded retry).
+        var depth = 0
+        var inString = false
+        for character in trimmed {
+            if character == "\"" {
+                inString.toggle()
+            } else if !inString {
+                if character == "{" { depth += 1 }
+                else if character == "}" { depth -= 1 }
+            }
+        }
+        return depth > 0
+    }
 
     /// A response that carries tool-call MARKUP but zero recoverable calls is
     /// a parsing failure — treating it as a valid answer broke the agentic

@@ -88,17 +88,8 @@ public final class TreeSitterHighlightService {
         do {
             let config: LanguageConfiguration
 
-            if let parentQueryURL = codeLanguage.parentQueryURL {
-                let parentDir = parentQueryURL.deletingLastPathComponent()
-                if parentDir != queriesDir {
-                    let merged = try Self.loadMergedQueries(for: swiftLanguage, from: [queriesDir, parentDir])
-                    config = LanguageConfiguration(swiftLanguage, name: codeLanguage.tsName, queries: merged)
-                } else {
-                    config = try LanguageConfiguration(swiftLanguage, name: codeLanguage.tsName, queriesURL: queriesDir)
-                }
-            } else {
-                config = try LanguageConfiguration(swiftLanguage, name: codeLanguage.tsName, queriesURL: queriesDir)
-            }
+            let merged = try Self.loadMergedQueries(for: swiftLanguage, from: [queriesDir])
+            config = LanguageConfiguration(swiftLanguage, name: codeLanguage.tsName, queries: merged)
 
             languageConfigCache[cacheKey] = config
             return config

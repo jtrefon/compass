@@ -1,0 +1,8 @@
+{"event":"session_start","session":"1788530328657","ts":1788530328657}
+{"content":"hi","event":"user","model":"gpt-4o-mini","session":"1788530328657","ts":1788530328657}
+{"attempt":1,"error":"curl error: Couldn't connect to server","event":"chat_error","session":"1788530328657","stage":"generation","ts":1788530328660}
+{"attempt":2,"error":"curl error: Couldn't connect to server","event":"chat_error","session":"1788530328657","stage":"generation","ts":1788530329696}
+{"attempt":3,"error":"curl error: Couldn't connect to server","event":"chat_error","session":"1788530328657","stage":"generation","ts":1788530331764}
+{"attempt":1,"error":"curl error: Couldn't connect to server","event":"chat_error","session":"1788530328657","stage":"probe","ts":1788530331765}
+{"attempt":2,"error":"curl error: Couldn't connect to server","event":"chat_error","session":"1788530328657","stage":"probe","ts":1788530332797}
+{"attempt":3,"error":"curl error: Couldn't connect to server","event":"chat_error","session":"1788530328657","stage":"probe","ts":1788530334866}

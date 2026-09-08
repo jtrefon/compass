@@ -53,8 +53,9 @@ public enum AIMode: String, Codable, CaseIterable, Identifiable, Sendable {
     public func allowedTools(from allTools: [AITool]) -> [AITool] {
         switch self {
         case .chat:
-            // Chat can use everything EXCEPT mutation tools (no writes to your project)
-            let blocked = ToolTaxonomy.mutation.union(ToolTaxonomy.terminal)
+            // Chat can use everything EXCEPT mutation, terminal, and memory tools
+            // (no writes, no terminal, no persistent working memory — chat is Q&A)
+            let blocked = ToolTaxonomy.mutation.union(ToolTaxonomy.terminal).union(ToolTaxonomy.memory).union(ToolTaxonomy.planning)
             return allTools.filter { !blocked.contains($0.name) }
         case .coder, .agent:
             // Coder and Agent have FULL tool access — same tools, different behavior

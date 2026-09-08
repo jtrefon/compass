@@ -25,6 +25,7 @@ struct AgentLoop {
     private let projectRoot: URL
     private let request: SendRequest
     private let classification: RequestComplexity
+    private let missionControlBuilder: MissionControlBuilder?
 
     static let maxTransitions = 128
     static let maxEmptyRecoveries = 2
@@ -37,7 +38,8 @@ struct AgentLoop {
         toolExecutor: ToolExecutionCoordinator,
         projectRoot: URL,
         request: SendRequest,
-        classification: RequestComplexity
+        classification: RequestComplexity,
+        missionControlBuilder: MissionControlBuilder? = nil
     ) {
         self.aiCoordinator = aiCoordinator
         self.historyCoordinator = historyCoordinator
@@ -45,6 +47,7 @@ struct AgentLoop {
         self.projectRoot = projectRoot
         self.request = request
         self.classification = classification
+        self.missionControlBuilder = missionControlBuilder
     }
 
     /// Run one send to completion. The final assistant content is returned
@@ -263,9 +266,55 @@ struct AgentLoop {
         stage: AIRequestStage?,
         messages: [ChatMessage]? = nil
     ) async throws -> AIServiceResponse {
-        try await aiCoordinator.sendMessageWithRetry(
+        var finalMessages = messages ?? historyCoordinator.requestMessages
+
+        // Inject Mission Control as the last user message (cloud path).
+        // On the cloud path, Mission Control is appended to the request-time
+        // message list (not committed to history) to avoid polluting the
+        // permanent history with repeated Mission Control blocks.
+        if let mcBuilder = missionControlBuilder {
+            let contextLength = PipelineProcessor.requestTokenBudget()
+            let budget = mcBuilder.computeBudgetApproximate(
+                messages: finalMessages,
+                contextLength: contextLength
+            )
+
+            // Controlled reset: when context usage exceeds 75%, replace
+            // committed history with a fresh seed. The cloud path is stateless
+            // (PipelineProcessor truncates every request), but the committed
+            // history still grows — this reset prevents that accumulation.
+            if budget.percentUsed >= 75 {
+                let missionControl = await mcBuilder.build(
+                    conversationId: request.conversationId,
+                    contextLength: contextLength,
+                    usedTokens: 0
+                )
+                let resetNotice = ChatMessage(
+                    role: .user,
+                    content: "## Context Reset\nContext was reset to free space. Your notes and plan survive in Mission Control below — continue working from them."
+                )
+                let mcMessage = ChatMessage(role: .user, content: missionControl)
+
+                let systemMessages = finalMessages.filter { $0.role == .system }
+                let resetMessages = systemMessages + [resetNotice, mcMessage]
+
+                await historyCoordinator.replaceWithReset(resetMessages)
+                finalMessages = resetMessages
+
+                await WorkingMemoryStore.shared.markReset(conversationId: request.conversationId)
+            } else {
+                let missionControl = await mcBuilder.build(
+                    conversationId: request.conversationId,
+                    contextLength: contextLength,
+                    usedTokens: budget.usedTokens
+                )
+                finalMessages.append(ChatMessage(role: .user, content: missionControl))
+            }
+        }
+
+        return try await aiCoordinator.sendMessageWithRetry(
             .init(
-                messages: messages ?? historyCoordinator.requestMessages,
+                messages: finalMessages,
                 tools: tools,
                 mode: request.mode,
                 projectRoot: projectRoot,
@@ -295,7 +344,16 @@ struct AgentLoop {
             toolCalls, availableTools: tools,
             conversationId: request.conversationId
         ) { _ in }
-        for msg in results { await historyCoordinator.append(msg) }
+        for msg in results {
+            await historyCoordinator.append(msg)
+            // Record tool results in the note tracker (Mission Control)
+            if let toolCallId = msg.toolCallId {
+                ToolResultNoteTracker.shared.recordToolResult(
+                    toolCallId: toolCallId,
+                    conversationId: request.conversationId
+                )
+            }
+        }
         return results
     }
 

@@ -13,7 +13,6 @@ import Foundation
 actor InferenceUnloadRegistry {
     static let shared = InferenceUnloadRegistry()
 
-    static let chatLabel = "chat"
     static let fimLabel = "fim"
 
     private struct Handler {

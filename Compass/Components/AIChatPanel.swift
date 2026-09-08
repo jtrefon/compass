@@ -418,6 +418,12 @@ struct AIChatPanel: View {
         return formatter
     }()
 
+    private static let historySizeFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter
+    }()
+
     @ViewBuilder
     private var closedConversationsPopover: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -514,9 +520,11 @@ struct AIChatPanel: View {
                         Text(closed.title)
                             .font(.body)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                             .foregroundStyle(.primary)
                         Text(AIChatPanel.historyDateFormatter.string(from: closed.closedAt)
-                             + (closed.messageCount > 0 ? " · \(closed.messageCount) messages" : ""))
+                             + (closed.byteSize > 0 ? " · \(AIChatPanel.historySizeFormatter.string(fromByteCount: Int64(closed.byteSize)))" : "")
+                             + (closed.messageCount > 0 ? " · \(closed.messageCount) msgs" : ""))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

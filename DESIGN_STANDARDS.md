@@ -3,6 +3,10 @@
 Authoritative UI/UX rules for **Compass**. The goal is a consistent, Apple macOS‑native
 appearance across every surface (chat panel, settings, overlays, status bars, dialogs).
 
+> Engineering standards (architecture, SOLID, TDD, DRY/SRP/KISS/YAGNI, static analysis)
+> live in [CODING_STANDARDS.md](./CODING_STANDARDS.md). Engine live-path invariants live in
+> [AGENTS.md](./AGENTS.md). This document covers UI/UX only.
+
 ## Design direction: quiet workspace chrome
 
 The editor is the primary surface. Do not add a persistent in-content top bar or a ribbon

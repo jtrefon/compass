@@ -47,10 +47,12 @@ final class TestLineInferenceService: CompletionInferring {
 final class CapturedLineSuggestions: @unchecked Sendable {
     private(set) var lastSuggestion: String?
     private(set) var lastPresentation: InlineSuggestionPresentation?
+    var onSet: (() -> Void)?
 
     func set(_ presentation: InlineSuggestionPresentation?) {
         lastPresentation = presentation
         lastSuggestion = presentation?.suggestionText
+        onSet?()
     }
 
     func reset() {

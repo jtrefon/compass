@@ -27,6 +27,8 @@ final class LocalModelToolLoop {
     private let toolExecutionCoordinator: ToolExecutionCoordinator
     private let logger: LocalModelToolLoopLogger
     private let guide: LocalModelIterationGuide
+    private let missionControlBuilder: MissionControlBuilder?
+    private let contextLength: Int
 
     struct Configuration {
         let maxIterations: Int
@@ -42,7 +44,7 @@ final class LocalModelToolLoop {
             runId: String
         ) -> Configuration {
             Configuration(
-                maxIterations: 8,
+                maxIterations: 30,
                 mode: mode,
                 projectRoot: projectRoot,
                 conversationId: conversationId,
@@ -56,13 +58,17 @@ final class LocalModelToolLoop {
         aiInteractionCoordinator: AIInteractionCoordinator,
         toolExecutionCoordinator: ToolExecutionCoordinator,
         logger: LocalModelToolLoopLogger = LocalModelToolLoopLogger(),
-        guide: LocalModelIterationGuide = LocalModelIterationGuide()
+        guide: LocalModelIterationGuide = LocalModelIterationGuide(),
+        missionControlBuilder: MissionControlBuilder? = nil,
+        contextLength: Int = 30_000
     ) {
         self.history = history
         self.aiInteractionCoordinator = aiInteractionCoordinator
         self.toolExecutionCoordinator = toolExecutionCoordinator
         self.logger = logger
         self.guide = guide
+        self.missionControlBuilder = missionControlBuilder
+        self.contextLength = contextLength
     }
 
     // MARK: - Main entry point
@@ -86,15 +92,67 @@ final class LocalModelToolLoop {
             await logger.logIterationStart(
                 iteration: iteration,
                 stage: stage,
-                messageCount: history.requestMessages.count,
-                approximateTokens: 0
+                messageCount: history.requestMessages.count
             )
 
+            // Inject Mission Control as the last user message before each model call.
+            // This gives the model persistent access to its goal, plan, working memory,
+            // key excerpts, and context budget — without invalidating the KV cache prefix
+            // (Mission Control is the last user message, not part of the system prompt).
+            //
+            // CRITICAL: Mission Control is NOT committed to history. It is appended
+            // to a request-time copy only. Committing it would accumulate MC blocks
+            // in permanent history every iteration, causing unbounded context growth
+            // and eventual OOM.
+            var requestMessages = history.requestMessages
+
+            if let mcBuilder = missionControlBuilder {
+                let budget = mcBuilder.computeBudgetApproximate(
+                    messages: requestMessages,
+                    contextLength: contextLength
+                )
+
+                // Controlled reset: when context usage exceeds 75%, replace
+                // history with a fresh seed (system + reset notice + Mission Control).
+                // This frees context space without truncating the system prompt.
+                // The KV cache is intentionally flushed — the fresh context is
+                // prefilled from scratch.
+                if budget.percentUsed >= 75 {
+                    let missionControl = await mcBuilder.build(
+                        conversationId: configuration.conversationId,
+                        contextLength: contextLength,
+                        usedTokens: 0
+                    )
+                    let resetNotice = ChatMessage(
+                        role: .user,
+                        content: "## Context Reset\nContext was reset to free space. Your notes and plan survive in Mission Control below — continue working from them."
+                    )
+                    let mcMessage = ChatMessage(role: .user, content: missionControl)
+
+                    // Keep only system messages + reset notice + Mission Control
+                    let systemMessages = requestMessages.filter { $0.role == .system }
+                    let resetMessages = systemMessages + [resetNotice, mcMessage]
+
+                    await history.replaceWithReset(resetMessages)
+                    requestMessages = resetMessages
+
+                    await WorkingMemoryStore.shared.markReset(conversationId: configuration.conversationId)
+                } else {
+                    let missionControl = await mcBuilder.build(
+                        conversationId: configuration.conversationId,
+                        contextLength: contextLength,
+                        usedTokens: budget.usedTokens
+                    )
+                    requestMessages.append(ChatMessage(role: .user, content: missionControl))
+                }
+            }
+
             let response = try await aiInteractionCoordinator.sendMessageWithRetry(
-                .init(messages: history.requestMessages, tools: tools,
+                .init(messages: requestMessages, tools: tools,
                       mode: configuration.mode, projectRoot: configuration.projectRoot,
                       runId: configuration.runId, stage: stage,
-                      conversationId: configuration.conversationId, usesLocalModel: true)
+                      conversationId: configuration.conversationId, usesLocalModel: true,
+                      preservesCache: true)
             ).get()
 
             guard let toolCalls = response.toolCalls, !toolCalls.isEmpty else {
@@ -141,7 +199,7 @@ final class LocalModelToolLoop {
                         totalToolCalls: allToolCalls.count
                     )
                 ))
-                return try await finalResponse(configuration: configuration)
+                return try await finalResponse(configuration: configuration, tools: tools)
             }
 
             // Commit assistant tool-call message FIRST so the request builder
@@ -165,7 +223,7 @@ final class LocalModelToolLoop {
                         totalToolCalls: allToolCalls.count
                     )
                 ))
-                return try await finalResponse(configuration: configuration)
+                return try await finalResponse(configuration: configuration, tools: tools)
             }
 
             let toolResults = await toolExecutionCoordinator.executeToolCalls(
@@ -180,13 +238,22 @@ final class LocalModelToolLoop {
                 }
             }
 
+            // Record tool results in the note tracker so the model can
+            // associate notes with them (Mission Control note-aware eviction).
+            for result in toolResults {
+                if let toolCallId = result.toolCallId {
+                    ToolResultNoteTracker.shared.recordToolResult(
+                        toolCallId: toolCallId,
+                        conversationId: configuration.conversationId
+                    )
+                }
+            }
+
             await logger.logIterationComplete(
                 iteration: iteration,
                 toolCalls: toolCalls,
                 toolResults: toolResults,
-                committedCount: history.requestMessages.count,
-                promptTokens: 0,
-                generationTokens: 0
+                committedCount: history.requestMessages.count
             )
 
             // Inject guidance AFTER results so the next pass sees result +
@@ -210,13 +277,34 @@ final class LocalModelToolLoop {
         } while true
     }
 
-    /// The forced no-tools send that terminates the loop.
-    private func finalResponse(configuration: Configuration) async throws -> AIServiceResponse {
-        try await aiInteractionCoordinator.sendMessageWithRetry(
-            .init(messages: history.requestMessages, tools: [],
+    /// The forced final-response send that terminates the loop.
+    /// Passes the full tool set so the prefix-cache hash stays stable
+    /// (tools:[] produces a different system content → hash churn →
+    /// full re-prefill). The model is instructed to produce a text
+    /// summary; any tool calls it emits are caught by the caller.
+    private func finalResponse(configuration: Configuration, tools: [AITool]) async throws -> AIServiceResponse {
+        // Include Mission Control in the final response request (request-time only,
+        // not committed to history — same pattern as the main loop).
+        var requestMessages = history.requestMessages
+        if let mcBuilder = missionControlBuilder {
+            let budget = mcBuilder.computeBudgetApproximate(
+                messages: requestMessages,
+                contextLength: contextLength
+            )
+            let missionControl = await mcBuilder.build(
+                conversationId: configuration.conversationId,
+                contextLength: contextLength,
+                usedTokens: budget.usedTokens
+            )
+            requestMessages.append(ChatMessage(role: .user, content: missionControl))
+        }
+
+        return try await aiInteractionCoordinator.sendMessageWithRetry(
+            .init(messages: requestMessages, tools: tools,
                   mode: configuration.mode, projectRoot: configuration.projectRoot,
                   runId: configuration.runId, stage: .tool_loop,
-                  conversationId: configuration.conversationId, usesLocalModel: true)
+                  conversationId: configuration.conversationId, usesLocalModel: true,
+                  preservesCache: true)
         ).get()
     }
 }

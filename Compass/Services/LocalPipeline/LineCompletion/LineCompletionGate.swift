@@ -5,7 +5,9 @@ import Foundation
 /// place). Decides whether the current typing event warrants a model request.
 @MainActor
 struct LineCompletionGate {
-    private let supportedLanguages: Set<String> = [
+    /// Languages eligible for inline completion — doubles as the FIM
+    /// warm-lifecycle predicate ("cursor is on source code").
+    static let supportedLanguages: Set<String> = [
         "swift", "objective-c", "objective-cpp", "c", "cpp", "c#", "csharp",
         "typescript", "tsx", "javascript", "jsx",
         "python", "rust", "go", "golang",
@@ -36,7 +38,7 @@ struct LineCompletionGate {
         guard snapshot.triggerReason == .manual || !snapshot.isComposingText else { return false }
         guard !snapshot.buffer.isEmpty else { return false }
         let normalizedLanguage = snapshot.language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard snapshot.triggerReason == .manual || supportedLanguages.contains(normalizedLanguage) else { return false }
+        guard snapshot.triggerReason == .manual || Self.supportedLanguages.contains(normalizedLanguage) else { return false }
         if let char = typedChar {
             if triggerSet.contains(char) { return true }
             if rejectSet.contains(char) { return false }

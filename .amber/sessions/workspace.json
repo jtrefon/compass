@@ -1,0 +1,35 @@
+{
+  "active": 1,
+  "version": 1,
+  "windows": [
+    {
+      "prompt_history": [
+        "hi"
+      ],
+      "session_id": "",
+      "title": "amber"
+    },
+    {
+      "prompt_history": [
+        "/exit",
+        "/quit",
+        "please review the application, provide overview and feedback",
+        "can you try again?",
+        "hi",
+        "/set provider kilocode",
+        "hi",
+        "/set provider kilocode",
+        "hi",
+        "can you review our agentic loop implementation? identify issues, technical debt, areas for improvement",
+        "/set reasoning high",
+        "can you do it again? there has been solid refactoring done",
+        "continue",
+        "no, lets keep on reviewing the app, are there any weaknesses, dead code aka AI slop, bad design patterns used poor architecture implementation and/or general technical debt anywhere in our app?",
+        "/compress",
+        "dont jump into fixing just yet, i want to understand these issues bit more"
+      ],
+      "session_id": "1788530334886-0",
+      "title": "hi"
+    }
+  ]
+}

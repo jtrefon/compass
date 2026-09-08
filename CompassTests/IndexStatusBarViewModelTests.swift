@@ -106,7 +106,7 @@ final class IndexStatusBarViewModelTests: XCTestCase {
         XCTAssertEqual(breakdown?.variableCount, 56)
         XCTAssertEqual(breakdown?.symbolCount, 90)
         XCTAssertEqual(viewModel.indexFilesText, "10/100")
-        XCTAssertTrue(["OK", "WIP", "–"].contains(viewModel.acShortText),
+        XCTAssertTrue(["OK", "WIP", "idle", "–"].contains(viewModel.acShortText),
                       "AC label must be one of the compact states")
     }
 }

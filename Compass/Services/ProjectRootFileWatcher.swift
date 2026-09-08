@@ -175,7 +175,6 @@ actor ProjectRootFileWatcherActor {
         var actualModifications = Set<String>()
         for path in pendingModified {
             if Self.isIDEConfigPath(path) {
-                eventBus.publish(IDEFileModifiedEvent(url: URL(fileURLWithPath: path)))
                 continue
             }
             let url = URL(fileURLWithPath: path)
@@ -189,7 +188,6 @@ actor ProjectRootFileWatcherActor {
         var nonIDEStructural = Set<String>()
         for path in pendingCreated {
             if Self.isIDEConfigPath(path) {
-                eventBus.publish(IDEFileCreatedEvent(url: URL(fileURLWithPath: path)))
             } else {
                 eventBus.publish(FileCreatedEvent(url: URL(fileURLWithPath: path)))
                 nonIDEStructural.insert(path)
@@ -203,7 +201,6 @@ actor ProjectRootFileWatcherActor {
         }
         for path in pendingDeleted {
             if Self.isIDEConfigPath(path) {
-                eventBus.publish(IDEFileDeletedEvent(url: URL(fileURLWithPath: path)))
             } else {
                 eventBus.publish(FileDeletedEvent(url: URL(fileURLWithPath: path)))
                 nonIDEStructural.insert(path)

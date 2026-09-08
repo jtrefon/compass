@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import MLX
+import os
 
 /// Abstracts process RSS and MLX memory observations so `NativeMLXGenerator` can be
 /// tested without touching `mach_task_basic_info` or `Memory.snapshot`.
@@ -10,6 +11,21 @@ import MLX
 ///   + `Memory`), tests inject `MockMemoryMonitor`.
 /// - All methods are non-throwing except `throwIfExceeded`, which preserves the
 ///   original `AppError` throw site at `NativeMLXGenerator.throwIfProcessRSSExceeded`.
+struct VMStatSnapshot: Sendable {
+    let freePages: Int
+    let activePages: Int
+    let inactivePages: Int
+    let wiredPages: Int
+    let speculativePages: Int
+    let purgeablePages: Int
+    let compressorPages: Int
+    let compressorOccupiedPages: Int
+    let pageins: UInt64
+    let pageouts: UInt64
+    let compressions: UInt64
+    let decompressions: UInt64
+}
+
 protocol EngineMemoryMonitoring: Sendable {
     func currentRSSMB() -> Int
     func resolvedLimitMB() -> Int
@@ -17,6 +33,8 @@ protocol EngineMemoryMonitoring: Sendable {
     func logDeviceInfo() async
     func logSnapshot(generationCount: Int)
     func shouldUnloadAfterGeneration() -> Bool
+    func currentVMStat() -> VMStatSnapshot?
+    func currentThermalState() -> Int
 }
 
 /// Production implementation — reads real process RSS and MLX allocator state.
@@ -59,18 +77,78 @@ struct ProcessMemoryMonitor: EngineMemoryMonitoring {
         await NativeMLXGenerator.logDeviceAndMemoryInfo()
     }
 
+    func currentVMStat() -> VMStatSnapshot? {
+        var vmStat = vm_statistics64()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &vmStat) { p in
+            p.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rp in
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, rp, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return VMStatSnapshot(
+            freePages: Int(vmStat.free_count),
+            activePages: Int(vmStat.active_count),
+            inactivePages: Int(vmStat.inactive_count),
+            wiredPages: Int(vmStat.wire_count),
+            speculativePages: Int(vmStat.speculative_count),
+            purgeablePages: Int(vmStat.purgeable_count),
+            compressorPages: Int(vmStat.compressor_page_count),
+            compressorOccupiedPages: Int(vmStat.compressor_page_count) > 0 ? Int(vmStat.compressor_page_count) : 0,
+            pageins: UInt64(vmStat.pageins),
+            pageouts: UInt64(vmStat.pageouts),
+            compressions: 0,
+            decompressions: 0
+        )
+    }
+
+    func currentThermalState() -> Int {
+        ProcessInfo.processInfo.thermalState.rawValue
+    }
+
     func logSnapshot(generationCount: Int) {
         let snapshot = Memory.snapshot()
         let activeMB = snapshot.activeMemory / (1024 * 1024)
         let cacheMB = snapshot.cacheMemory / (1024 * 1024)
         let peakMB = snapshot.peakMemory / (1024 * 1024)
+        let rssMB = currentRSSMB()
+        let vm = currentVMStat()
+        let thermal = currentThermalState()
         Task {
+            // genPeakMB: allocator HIGH-WATER since last generation reset —
+            // transients (prefill attention) spike it then free. NOT resident.
+            // activeMB/cacheMB are the "how much is held" metrics.
             await AIToolTraceLogger.shared.log(type: "mlx.memory_snapshot", data: [
                 "generationCount": generationCount,
                 "activeMB": activeMB,
                 "cacheMB": cacheMB,
-                "peakMB": peakMB
+                "genPeakMB": peakMB,
+                "rssMB": rssMB,
+                "thermalState": thermal,
+                "vmFreePages": vm?.freePages ?? 0,
+                "vmActivePages": vm?.activePages ?? 0,
+                "vmInactivePages": vm?.inactivePages ?? 0,
+                "vmWiredPages": vm?.wiredPages ?? 0,
+                "vmCompressorPages": vm?.compressorPages ?? 0,
+                "vmPageins": vm.map { Int64($0.pageins) } ?? 0,
+                "vmPageouts": vm.map { Int64($0.pageouts) } ?? 0
             ])
+            if let vm {
+                await AIToolTraceLogger.shared.log(type: "mlx.vm_stat", data: [
+                    "generationCount": generationCount,
+                    "freePages": vm.freePages,
+                    "activePages": vm.activePages,
+                    "inactivePages": vm.inactivePages,
+                    "wiredPages": vm.wiredPages,
+                    "speculativePages": vm.speculativePages,
+                    "purgeablePages": vm.purgeablePages,
+                    "compressorPages": vm.compressorPages,
+                    "pageins": Int64(vm.pageins),
+                    "pageouts": Int64(vm.pageouts),
+                    "rssMB": rssMB,
+                    "thermalState": thermal
+                ])
+            }
         }
     }
 
@@ -109,5 +187,7 @@ final class MockMemoryMonitor: EngineMemoryMonitoring, @unchecked Sendable {
     func logDeviceInfo() async {}
     func logSnapshot(generationCount: Int) { logSnapshotCalls += 1 }
     func shouldUnloadAfterGeneration() -> Bool { stubShouldUnload }
+    func currentVMStat() -> VMStatSnapshot? { nil }
+    func currentThermalState() -> Int { 0 }
 }
 #endif

@@ -248,6 +248,11 @@ public protocol LanguageModel: BaseLanguageModel {
     func callAsFunction(_ input: LMInput.Text, cache: [KVCache]?, state: LMOutput.State?)
         -> LMOutput
 
+    /// Process a prefill chunk to update cache without generating output logits.
+    /// Default implementation forwards to callAsFunction and extracts state.
+    func prefillStep(_ input: LMInput.Text, cache: [KVCache]?, state: LMOutput.State?)
+        -> LMOutput.State?
+
     /// Models may implement this simplified interface if they do not produce any ``LMOutput/State``
     func callAsFunction(_ inputs: MLXArray, cache: [KVCache]?) -> MLXArray
 
@@ -262,6 +267,13 @@ extension LanguageModel {
     {
         let logits = callAsFunction(input.tokens, cache: cache)
         return .init(logits: logits)
+    }
+
+    public func prefillStep(_ input: LMInput.Text, cache: [KVCache]?, state: LMOutput.State?)
+        -> LMOutput.State?
+    {
+        let output = callAsFunction(input, cache: cache, state: state)
+        return output.state
     }
 
     public func callAsFunction(_ inputs: MLXArray, cache: [KVCache]?) -> MLXArray {

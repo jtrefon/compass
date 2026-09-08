@@ -72,6 +72,16 @@ extension TextViewRepresentable {
                 parent.selectedRange = range
                 updateSelectionContext(from: textView)
 
+                if !isProgrammatic {
+                    // FIM lifecycle: the cursor landed on / left source code.
+                    let language = currentLanguageIdentifier
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+                    FIMLifecycleController.shared.notifyCursorActivity(
+                        inSourceCode: LineCompletionGate.supportedLanguages.contains(language)
+                    )
+                }
+
                 guard !isProgrammatic else { return }
 
                 if text == lastKnownBufferText {

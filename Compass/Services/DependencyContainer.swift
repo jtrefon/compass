@@ -117,7 +117,13 @@ class DependencyContainer: ObservableObject {
                 environment: ConversationManager.EnvironmentDependencies(
                     workspaceService: _workspaceService,
                     eventBus: _eventBus,
-                    projectRoot: nil,
+                    // Boot the session registry against the real workspace so
+                    // tabs/archive/selection hydrate from disk on launch. Test
+                    // hosts (unit/harness/UI) must never point at the user's
+                    // last project — they get the temp bootstrap root instead
+                    // and rebind via updateProjectRoot (harness) or stay
+                    // isolated (unit tests).
+                    projectRoot: launchContext.mode == .app ? _workspaceService.currentDirectory : nil,
                     codebaseIndex: nil
                 )
             )

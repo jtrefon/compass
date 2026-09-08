@@ -133,7 +133,9 @@ enum AIServicesFactory {
     static func makeLineCompletionEngine(
         aiServices: AIServiceBundle
     ) -> LineCompletionEngine {
-        let provider = AIServiceInlineCompletionProvider()
+        // Single provider owned by the lifecycle controller — the engine and
+        // variant pool share the same warm/unloaded service.
+        let provider = FIMLifecycleController.shared.provider
         let inferenceService = CompletionInferenceService(provider: provider)
         let variantPoolService = VariantPoolService(provider: provider)
         return LineCompletionEngine(

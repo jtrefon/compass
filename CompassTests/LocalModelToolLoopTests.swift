@@ -40,22 +40,18 @@ final class InMemoryConversationHistory: ConversationHistoryProviding {
 
     func clearStreamingBuffer() {}
 
+    func replaceWithReset(_ messages: [ChatMessage]) async {
+        self.messages = messages
+        draft = nil
+        liveToolMessages = [:]
+    }
+
     // MARK: - Test helpers
 
     func reset() {
         messages = []
         draft = nil
         liveToolMessages = [:]
-    }
-}
-
-// MARK: - LocalModelToolLoopLogger Tests
-
-@MainActor
-final class LocalModelToolLoopLoggerTests: XCTestCase {
-    func testLoggerInitializesWithoutError() {
-        let logger = LocalModelToolLoopLogger()
-        XCTAssertNotNil(logger)
     }
 }
 
@@ -186,7 +182,7 @@ final class LocalModelToolLoopConfigurationTests: XCTestCase {
             conversationId: "test",
             runId: "run-1"
         )
-        XCTAssertEqual(config.maxIterations, 8)
+        XCTAssertEqual(config.maxIterations, 30)
         XCTAssertEqual(config.mode, .coder)
     }
 }
@@ -236,5 +232,36 @@ final class InMemoryConversationHistoryTests: XCTestCase {
         history.setLiveToolMessage(msg)
         history.clearLiveToolMessage("call-1")
         XCTAssertNoThrow(history.clearLiveToolMessage("nonexistent"))
+    }
+}
+
+extension LocalModelIterationGuideTests {
+    /// The exact user-reported scenario: two `edit` calls on the SAME file with
+    /// the SAME old_string but DIFFERENT new_content. This is a legitimate
+    /// sequential edit (fix header, then fix body) and must NOT be flagged.
+    func testEditSameFileDifferentContentNotRepetition() {
+        let previous = AIToolCall(id: "1", name: "edit", arguments: [
+            "path": "wp-content/plugins/career-register/readme.txt",
+            "old_string": "== Old Header ==",
+            "new_content": "== Copyright ==\n\nTags: career\n\nFirst paragraph content here.",
+        ])
+        let current = AIToolCall(id: "2", name: "edit", arguments: [
+            "path": "wp-content/plugins/career-register/readme.txt",
+            "old_string": "== Old Header ==",
+            "new_content": "== Copyright ==\n\nTags: career, jobs, applications, recruitment\n\nCompletely DIFFERENT body content.",
+        ])
+        let result = guide.detectRepetition(current: current, previousToolCalls: [previous])
+        XCTAssertNil(result, "Different new_content on same file must not be flagged as repetition")
+    }
+
+    /// Same edit, truly identical content — must be flagged.
+    func testEditSameFileIdenticalContentIsRepetition() {
+        let previous = AIToolCall(id: "1", name: "edit", arguments: [
+            "path": "a.txt", "old_string": "x", "new_content": "y",
+        ])
+        let current = AIToolCall(id: "2", name: "edit", arguments: [
+            "path": "a.txt", "old_string": "x", "new_content": "y",
+        ])
+        XCTAssertNotNil(guide.detectRepetition(current: current, previousToolCalls: [previous]))
     }
 }

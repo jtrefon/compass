@@ -1,0 +1,4 @@
+{"event":"session_start","session":"1788859283251","ts":1788859283252}
+{"content":"can you do it again? there has been solid refactoring done","event":"user","model":"kilo-auto/free","session":"1788859283251","ts":1788859283252}
+{"attempt":1,"error":"HTTP 400 from LLM server: {\"error\":{\"message\":\"Invalid discriminator value. Expected 'function' | 'custom'\",\"type\":\"invalid_request_error\",\"param\":\"messages.7.tool_calls.0.type\",\"code\":\"invalid_request_error\"}}","event":"chat_error","session":"1788859283251","stage":"generation","ts":1788859284324}
+{"attempt":1,"error":"HTTP 400 from LLM server: {\"error\":{\"message\":\"Invalid discriminator value. Expected 'function' | 'custom'\",\"type\":\"invalid_request_error\",\"param\":\"messages.7.tool_calls.0.type\",\"code\":\"invalid_request_error\"}}","event":"chat_error","session":"1788859283251","stage":"probe","ts":1788859285435}

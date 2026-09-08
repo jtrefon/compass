@@ -147,9 +147,11 @@ struct IndexStatusBarView: View {
         return AppConstants.Color.statusIdle
     }
 
-    /// Auto-complete state color: orange generating, green ready, gray not installed.
+    /// Auto-complete state color: orange generating, green ready (warm),
+    /// gray not installed / unloaded (idle).
     private var acStateColor: Color {
         if !viewModel.isFIMAvailable { return AppConstants.Color.statusIdle }
+        if !viewModel.isFIMWarm { return AppConstants.Color.statusIdle }
         return viewModel.fimCompletionStatus == .generating
             ? AppConstants.Color.statusWarning
             : AppConstants.Color.statusSuccess

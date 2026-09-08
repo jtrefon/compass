@@ -1,6 +1,17 @@
 import Foundation
 
 extension AIToolExecutor {
+    /// Locate-and-replace anchor cap: whole-file old_text copies make a tool
+    /// call cost thousands of tokens (live: 4,132-token edit = 337s decode).
+    /// Above this, the model is told to use line-range mode.
+    private static let maxLocateReplaceChars = 4_000
+
+    struct ToolArgumentsExceededError: LocalizedError, Sendable {
+        let toolName: String
+        let message: String
+        var errorDescription: String? { "\(toolName): \(message)" }
+    }
+
     struct ToolExecutionCancelledError: LocalizedError, Sendable {
         var errorDescription: String? { "Tool execution cancelled." }
     }
@@ -554,6 +565,17 @@ extension AIToolExecutor {
                   !oldText.isEmpty,
                   !newText.isEmpty else {
                 throw MalformedMutationArgumentsError(toolName: toolCall.name)
+            }
+            // Engine-side argument bound: a whole-file old_string (measured
+            // ~2-4k tokens per side) makes the call un-closable within any
+            // sane output budget and costs minutes of decode per attempt
+            // (live: 4,132-token edit call = 337s). Force line-range edits
+            // for large regions — the model retries with start_line/end_line.
+            if oldText.count > Self.maxLocateReplaceChars {
+                throw ToolArgumentsExceededError(
+                    toolName: toolCall.name,
+                    message: "old_text is \(oldText.count) chars (max \(Self.maxLocateReplaceChars)). Use start_line/end_line + new_content instead, or a smaller anchor."
+                )
             }
         case "write_files":
             guard let files = mergedArguments["files"] as? [[String: Any]], !files.isEmpty else {

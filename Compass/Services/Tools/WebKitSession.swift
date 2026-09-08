@@ -41,7 +41,7 @@ final class WebKitSession: NSObject, WKNavigationDelegate, WKScriptMessageHandle
         let userContent = WKUserContentController()
         config.userContentController = userContent
 
-        webView = WKWebView(frame: window.contentView!.bounds, configuration: config)
+        webView = WKWebView(frame: window.contentView?.bounds ?? .zero, configuration: config)
         webView.autoresizingMask = [.width, .height]
         window.contentView?.addSubview(webView)
 

@@ -128,6 +128,9 @@ final class MemoryEmbeddingGeneratorFactoryTests: XCTestCase {
 }
 
 final class CoreMLTextEmbeddingGeneratorIntegrationTests: XCTestCase {
+    private var modelURL: URL!
+    private var vocabURL: URL!
+
     override func setUp() async throws {
         try await super.setUp()
         guard let resourcesURL = Bundle(for: Self.self).resourceURL?
@@ -140,13 +143,11 @@ final class CoreMLTextEmbeddingGeneratorIntegrationTests: XCTestCase {
               FileManager.default.fileExists(atPath: vocabURL.path) else {
             throw XCTSkip("bge-small model not available — run ./run.sh build first")
         }
+        self.modelURL = modelURL
+        self.vocabURL = vocabURL
     }
 
     func test_loadBgeSmall() async throws {
-        let resourcesURL = Bundle(for: Self.self).resourceURL!.appendingPathComponent("EmbeddingModels")
-        let modelURL = resourcesURL.appendingPathComponent("bge-small-en-v1.5.mlmodelc")
-        let vocabURL = resourcesURL.appendingPathComponent("bge-small-en-v1.5.vocab.txt")
-
         let generator = try CoreMLTextEmbeddingGenerator(
             modelName: "bge-small-en-v1.5",
             modelURL: modelURL,
@@ -162,10 +163,6 @@ final class CoreMLTextEmbeddingGeneratorIntegrationTests: XCTestCase {
     }
 
     func test_embeddingsAreSimilarForSimilarTexts() async throws {
-        let resourcesURL = Bundle(for: Self.self).resourceURL!.appendingPathComponent("EmbeddingModels")
-        let modelURL = resourcesURL.appendingPathComponent("bge-small-en-v1.5.mlmodelc")
-        let vocabURL = resourcesURL.appendingPathComponent("bge-small-en-v1.5.vocab.txt")
-
         let generator = try CoreMLTextEmbeddingGenerator(
             modelName: "bge-small-en-v1.5",
             modelURL: modelURL,

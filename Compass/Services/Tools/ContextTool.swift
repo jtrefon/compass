@@ -53,11 +53,12 @@ struct ContextTool: AITool {
         var orientationLines: [String] = []
 
         if let conversationId {
-            let planMarkdown = await ConversationPlanStore.shared.get(conversationId: conversationId)
-            if let planMarkdown {
-                let progress = PlanChecklistTracker.progress(in: planMarkdown)
-                if progress.total > 0 {
-                    orientationLines.append("  plan tasks: \(progress.completed)/\(progress.total) complete")
+            let plan = await ConversationPlanStore.shared.getPlan(conversationId: conversationId)
+            if let plan {
+                let completed = plan.items.filter { $0.status == .completed || $0.status == .blocked }.count
+                let total = plan.items.count
+                if total > 0 {
+                    orientationLines.append("  plan tasks: \(completed)/\(total) complete")
                 }
             }
 

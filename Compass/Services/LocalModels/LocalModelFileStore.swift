@@ -370,7 +370,22 @@ public enum LocalModelFileStore {
         return Data(qwen35JSONOnlyChatTemplate.utf8)
     }
 
-    private static let qwen35JSONOnlyChatTemplate = #"""
+    /// Runtime chat template for Qwen3.5 (JSON-only tool calls).
+    ///
+    /// **Render invariance is a hard requirement:** the rendered token stream
+    /// for a message prefix MUST NOT depend on what comes after it (message
+    /// roles, conversation position). The upstream Qwen3 template replayed
+    /// `<think>` reasoning only for assistant messages after the last real
+    /// user message — appending a user message (finalize prompt, user reply)
+    /// re-rendered every prior assistant message and diverged the KV-cache
+    /// prefix, forcing full 40K+ token re-prefills at every turn boundary
+    /// (measured 274s in live telemetry). This template renders assistant
+    /// reasoning unconditionally, which is position-invariant AND maximally
+    /// overlaps the raw generated tokens already held in the KV cache.
+    ///
+    /// Guard test: `ChatTemplateRenderInvarianceTests`.
+    /// Internal (not private) so the invariance guard test can render it.
+    static let qwen35JSONOnlyChatTemplate = #"""
 {%- set image_count = namespace(value=0) %}
 {%- set video_count = namespace(value=0) %}
 {%- macro render_content(content, do_vision_count, is_system_content=false) %}
@@ -437,17 +452,6 @@ public enum LocalModelFileStore {
         {{- '<|im_start|>system\n' + content + '<|im_end|>\n' }}
     {%- endif %}
 {%- endif %}
-{%- set ns = namespace(last_query_index=messages|length - 1) %}
-{%- for message in messages[::-1] %}
-    {%- set index = (messages|length - 1) - loop.index0 %}
-    {%- if message.role == "user" %}
-        {%- set content = render_content(message.content, false)|trim %}
-        {%- if not(content.startswith('<tool_result>') and content.endswith('</tool_result>')) %}
-            {%- set ns.last_query_index = index %}
-            {%- break %}
-        {%- endif %}
-    {%- endif %}
-{%- endfor %}
 {%- for message in messages %}
     {%- set content = render_content(message.content, true)|trim %}
     {%- if message.role == "system" %}
@@ -467,11 +471,7 @@ public enum LocalModelFileStore {
             {%- endif %}
         {%- endif %}
         {%- set reasoning_content = reasoning_content|trim %}
-        {%- if loop.index0 > ns.last_query_index %}
-            {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content + '\n</think>\n\n' + content }}
-        {%- else %}
-            {{- '<|im_start|>' + message.role + '\n' + content }}
-        {%- endif %}
+        {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content + '\n</think>\n\n' + content }}
         {%- if message.tool_calls and message.tool_calls is iterable and message.tool_calls is not mapping %}
             {%- for tool_call in message.tool_calls %}
                 {%- if tool_call.function is defined %}

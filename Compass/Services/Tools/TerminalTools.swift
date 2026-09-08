@@ -459,6 +459,10 @@ struct RunCommandTool: AITool {
                     "type": "number",
                     "description": "How long to wait for output or completion before returning control. Defaults: start uses the CLI setting (15s fallback), wait/send_input use 30s."
                 ],
+                "limit": [
+                    "type": "integer",
+                    "description": "Max output lines to return (default 50, 0 = unlimited). Footer shows total and pagination hint."
+                ],
                 "timeout_seconds": [
                     "type": "number",
                     "description": "Deprecated alias for wait_seconds."
@@ -487,6 +491,10 @@ struct RunCommandTool: AITool {
     ) async throws -> String {
         let request = try resolveRequest(arguments: arguments)
         let environment = ProcessInfo.processInfo.environment
+        let outputLimit: Int = {
+            if let v = arguments["limit"] as? Int { return max(0, v) }
+            return 50
+        }()
 
         switch request.action {
         case .start:
@@ -507,7 +515,7 @@ struct RunCommandTool: AITool {
                 reasonWhenWaitingExpires: "wait_elapsed",
                 onProgress: onProgress
             )
-            return encodeObservation(observation)
+            return encodeObservation(observation, limit: outputLimit)
 
         case .wait:
             guard let sessionId = request.sessionId else {
@@ -519,7 +527,7 @@ struct RunCommandTool: AITool {
                 reasonWhenWaitingExpires: "wait_elapsed",
                 onProgress: onProgress
             )
-            return encodeObservation(observation)
+            return encodeObservation(observation, limit: outputLimit)
 
         case .sendInput:
             guard let sessionId = request.sessionId else {
@@ -533,7 +541,7 @@ struct RunCommandTool: AITool {
                 waitSeconds: request.waitSeconds,
                 onProgress: onProgress
             )
-            return encodeObservation(observation)
+            return encodeObservation(observation, limit: outputLimit)
 
         case .stop:
             guard let sessionId = request.sessionId else {
@@ -544,7 +552,7 @@ struct RunCommandTool: AITool {
                 sessionId: sessionId,
                 signal: signal?.isEmpty == false ? signal : nil
             )
-            return encodeObservation(observation)
+            return encodeObservation(observation, limit: outputLimit)
         }
     }
 
@@ -612,19 +620,65 @@ struct RunCommandTool: AITool {
         }.joined(separator: "\n")
     }
 
-    private func encodeObservation(_ observation: RunCommandSessionStore.Observation) -> String {
+    private func encodeObservation(_ observation: RunCommandSessionStore.Observation, limit: Int = 50) -> String {
         var lines: [String] = []
         lines.append("Command: \(observation.command)")
         lines.append("Status: \(observation.status)")
         if let exitCode = observation.exitCode {
             lines.append("Exit code: \(exitCode)")
         }
+
+        let outputSection: String
+        let outputLabel: String
         if observation.status == "running" {
-            lines.append("")
-            if !observation.outputTail.isEmpty {
-                lines.append("[output so far]")
-                lines.append(sanitizeBashOutput(observation.outputTail))
+            outputSection = sanitizeBashOutput(observation.outputTail)
+            outputLabel = "output so far"
+        } else {
+            let delta = sanitizeBashOutput(observation.outputDelta)
+            let tail = sanitizeBashOutput(observation.outputTail)
+            if !delta.isEmpty, !tail.isEmpty {
+                lines.append("")
+                lines.append("[new output]")
+                lines.append(delta)
             }
+            outputSection = tail
+            outputLabel = "full output"
+        }
+
+        if outputSection.isEmpty {
+            // No output body to add — just append guidance if running
+            if observation.status == "running" {
+                if let suggestedWait = observation.suggestedWaitSeconds, suggestedWait > 0 {
+                    lines.append("")
+                    lines.append("Use action=wait session_id=\(observation.sessionId ?? "") wait_seconds=\(suggestedWait) to see more output.")
+                } else if let sessionId = observation.sessionId {
+                    lines.append("")
+                    lines.append("Use action=wait session_id=\(sessionId) to poll for more output.")
+                }
+            } else if observation.reason != "exited" {
+                lines.append("")
+                lines.append("Reason: \(observation.reason)")
+            }
+            return lines.joined(separator: "\n")
+        }
+
+        let outputLines = outputSection.split(separator: "\n", omittingEmptySubsequences: false)
+        let totalLines = outputLines.count
+
+        if limit > 0, totalLines > limit {
+            let capLines = outputLines.prefix(limit)
+            lines.append("")
+            lines.append("[\(outputLabel)]")
+            lines.append(capLines.joined(separator: "\n"))
+            lines.append("")
+            lines.append("[Output capped at \(limit) lines of \(totalLines). Use limit=0 for full output or limit=N offset=M for pagination.]")
+        } else {
+            lines.append("")
+            lines.append("[\(outputLabel)]")
+            lines.append(outputSection)
+        }
+
+        if observation.status == "running" {
             if let suggestedWait = observation.suggestedWaitSeconds, suggestedWait > 0 {
                 lines.append("")
                 lines.append("Use action=wait session_id=\(observation.sessionId ?? "") wait_seconds=\(suggestedWait) to see more output.")
@@ -632,22 +686,11 @@ struct RunCommandTool: AITool {
                 lines.append("")
                 lines.append("Use action=wait session_id=\(sessionId) to poll for more output.")
             }
-        } else {
-            if !observation.outputDelta.isEmpty {
-                lines.append("")
-                lines.append("[new output]")
-                lines.append(sanitizeBashOutput(observation.outputDelta))
-            }
-            if !observation.outputTail.isEmpty {
-                lines.append("")
-                lines.append("[full output]")
-                lines.append(sanitizeBashOutput(observation.outputTail))
-            }
-            if observation.reason != "exited" {
-                lines.append("")
-                lines.append("Reason: \(observation.reason)")
-            }
+        } else if observation.reason != "exited" {
+            lines.append("")
+            lines.append("Reason: \(observation.reason)")
         }
+
         return lines.joined(separator: "\n")
     }
 }

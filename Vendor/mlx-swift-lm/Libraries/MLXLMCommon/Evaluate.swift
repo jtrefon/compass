@@ -286,16 +286,32 @@ public struct TopPSampler: LogitSampler {
     }
 
     /// Keep tokens whose cumulative probability exceeds `1 - topP` (nucleus sampling).
-    /// Matches `apply_top_p` from `mlx_lm/sample_utils.py`.
+    /// Matches `apply_top_p` from `mlx_lm/sample_utils.py` with fast candidate partitioning for large vocabs.
     private func applyTopP(_ logprobs: MLXArray, topP: MLXArray) -> MLXArray {
-        let sortedIndices = argSort(logprobs, axis: -1)
-        let sortedLogprobs = takeAlong(logprobs, sortedIndices, axis: -1)
-        let sortedProbs = exp(sortedLogprobs)
-        let cumulativeProbs = cumsum(sortedProbs, axis: -1)
+        let vocabSize = logprobs.dim(-1)
+        let candidateK = min(vocabSize, 512)
+        if vocabSize > 1024 {
+            let partitionIndices = argPartition(-logprobs, kth: candidateK - 1, axis: -1)[0..., ..<candidateK]
+            let candidateLogprobs = takeAlong(logprobs, partitionIndices, axis: -1)
+            let sortedIndices = argSort(candidateLogprobs, axis: -1)
+            let sortedLogprobs = takeAlong(candidateLogprobs, sortedIndices, axis: -1)
+            let sortedProbs = exp(sortedLogprobs)
+            let cumulativeProbs = cumsum(sortedProbs, axis: -1)
 
-        // Mask low-probability tail in sorted order, scatter back to original vocab order.
-        let filtered = MLX.where(cumulativeProbs .> (1 - topP), sortedLogprobs, negInf)
-        return putAlong(logprobs, sortedIndices, values: filtered, axis: -1)
+            let filtered = MLX.where(cumulativeProbs .> (1 - topP), sortedLogprobs, negInf)
+            let mappedOriginalIndices = takeAlong(partitionIndices, sortedIndices, axis: -1)
+            let result = MLXArray.full(logprobs.shape, values: negInf, dtype: logprobs.dtype)
+            return putAlong(result, mappedOriginalIndices, values: filtered, axis: -1)
+        } else {
+            let sortedIndices = argSort(logprobs, axis: -1)
+            let sortedLogprobs = takeAlong(logprobs, sortedIndices, axis: -1)
+            let sortedProbs = exp(sortedLogprobs)
+            let cumulativeProbs = cumsum(sortedProbs, axis: -1)
+
+            // Mask low-probability tail in sorted order, scatter back to original vocab order.
+            let filtered = MLX.where(cumulativeProbs .> (1 - topP), sortedLogprobs, negInf)
+            return putAlong(logprobs, sortedIndices, values: filtered, axis: -1)
+        }
     }
 
     /// Keep tokens with probability >= maxProb * minP.
@@ -571,6 +587,9 @@ public struct TokenIterator: TokenIteratorProtocol {
     public var tokenCount = 0
     public let maxTokens: Int?
 
+    /// Compiled single-token decode step (nil unless the model provides one).
+    private var compiledDecodeStep: CompiledDecodeStep?
+
     // Cache quantization parameters
     let kvBits: Int?
     let kvGroupSize: Int
@@ -655,10 +674,18 @@ public struct TokenIterator: TokenIteratorProtocol {
     ///   - sampler: the logit sampler
     ///   - prefillStepSize: optional prefill step size
     ///   - maxTokens: maximum number of tokens to generate
+    ///   - kvBits: optional bits for KV quantization
+    ///   - kvGroupSize: group size for KV quantization
+    ///   - quantizedKVStart: token offset to begin KV quantization
+    ///   - kvScheme: optional quantization scheme name
     public init(
         input: LMInput, model: any LanguageModel, cache: [KVCache]? = nil,
         processor: LogitProcessor?, sampler: LogitSampler, prefillStepSize: Int = 512,
-        maxTokens: Int? = nil
+        maxTokens: Int? = nil,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0,
+        kvScheme: String? = nil
     ) throws {
         self.model = model
         self.y = input.text
@@ -668,14 +695,22 @@ public struct TokenIterator: TokenIteratorProtocol {
         self.sampler = sampler
         self.maxTokens = maxTokens
 
-        // No cache quantization for this direct initialization
-        self.kvBits = nil
-        self.kvGroupSize = 64
-        self.quantizedKVStart = 0
-        self.kvScheme = nil
+        self.kvBits = kvBits
+        self.kvGroupSize = kvGroupSize
+        self.quantizedKVStart = quantizedKVStart
+        self.kvScheme = kvScheme
 
         self.promptPrefillTime = try measure {
             try prepare(input: input, windowSize: prefillStepSize)
+        }
+
+        // Compiled decode for supported hybrid models (SSM blocks only — the
+        // attention layers keep the uncompiled path). Built after the prefill
+        // so the caches hold the prompt prefix. COMPASS_COMPILED_DECODE=0
+        // disables the compiled path.
+        if ProcessInfo.processInfo.environment["COMPASS_COMPILED_DECODE"] != "0",
+           let provider = model as? any CompiledDecodeProviding {
+            self.compiledDecodeStep = provider.makeCompiledDecodeStep(cache: self.cache)
         }
     }
 
@@ -714,6 +749,11 @@ public struct TokenIterator: TokenIteratorProtocol {
 
     /// Evaluate the next token and return the new token (y), updating cache state
     mutating func step(previous: LMInput.Text) -> MLXArray {
+        if let compiledDecodeStep, !cache.isEmpty, previous.tokens.dim(1) == 1 {
+            let logits = compiledDecodeStep.step(previous[text: .newAxis].tokens)
+            return convertToToken(logits: logits)
+        }
+
         let result = withPreparedCache(cache, lengths: previous.sequenceLengths) {
             model(previous[text: .newAxis], cache: cache.isEmpty ? nil : cache, state: state)
         }

@@ -21,5 +21,6 @@ struct LoggingContainer: Sendable {
         await OrchestrationRunStore.shared.setProjectRoot(root)
         await DiagnosticsLogger.shared.setup(projectRoot: root)
         await UIRenderDiagnostics.shared.setup(projectRoot: root)
+        await WorkingMemoryStore.shared.setProjectRoot(root)
     }
 }

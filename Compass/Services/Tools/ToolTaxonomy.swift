@@ -27,9 +27,12 @@ enum ToolTaxonomy {
 
     static let planning: Set<String> = ["plan"]
 
+    /// Working memory — the model's persistent notebook (Mission Control)
+    static let memory: Set<String> = ["note"]
+
     // Retired — kept empty for compatibility checks until call sites migrated
     static let pinnedRules: Set<String> = []
 
     /// Everything the agent may execute in the tool loop
-    static let execution: Set<String> = readOnly.union(mutation).union(terminal).union(["context", "plan"])
+    static let execution: Set<String> = readOnly.union(mutation).union(terminal).union(["context", "plan", "note"])
 }

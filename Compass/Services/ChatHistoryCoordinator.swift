@@ -133,7 +133,7 @@ final class ChatHistoryCoordinator: ObservableObject {
 
     // MARK: - Session management
 
-    func switchConversation(to conversationId: String, projectRoot: URL?) {
+    func switchConversation(to conversationId: String) {
         envelope = ConversationEnvelope(id: UUID(uuidString: conversationId) ?? UUID())
     }
 
@@ -262,6 +262,18 @@ extension ChatHistoryCoordinator {
         _committed.insert(message, at: safeIndex)
         evictIfNeeded()
         envelope.updatedAt = Date()
+        recompose()
+    }
+
+    /// Replace the entire committed history with a fresh set.
+    /// This is the ONLY non-append-only operation — used exclusively
+    /// by controlled context resets (Mission Control). The KV cache is
+    /// intentionally flushed; the fresh context is prefilled from scratch.
+    func replaceWithReset(_ messages: [ChatMessage]) async {
+        _committed = messages
+        draft = nil
+        liveToolStatus = [:]
+        liveToolMessages = [:]
         recompose()
     }
 }

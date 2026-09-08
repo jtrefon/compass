@@ -1,11 +1,8 @@
 import XCTest
 @testable import Compass
 
-/// Tests the LineCompletionEngine request lifecycle, cancellation, and acceptance.
 @MainActor
 final class LineCompletionEngineTests: XCTestCase {
-
-    // MARK: - Single request lifecycle
 
     func test_engine_immediateRequest_returnsSuggestion() async throws {
         let inference = TestLineInferenceService()
@@ -15,9 +12,12 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
+        let exp = expectation(description: "suggestion received")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".foo {\n    colo", cursor: 14), gapMs: 200, typedChar: "o")
 
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "color: red;")
     }
 
@@ -29,13 +29,14 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
+        let exp = expectation(description: "suggestion received")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "foo", cursor: 3), gapMs: 200, typedChar: "o")
 
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertNil(captured.lastSuggestion)
     }
-
-    // MARK: - Sequential requests
 
     func test_engine_threeSequentialRequests_allSucceed() async throws {
         let inference = TestLineInferenceService()
@@ -49,31 +50,33 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
-        // Request 1
+        var exp = expectation(description: "suggestion 1")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".a {\n    font-fam", cursor: 16), gapMs: 200, typedChar: "m")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "font-family: serif;", "First request should succeed")
 
-        // Accept
         engine.markAccepted(on: .primary, suggestionText: captured.lastSuggestion)
 
-        // Request 2
         captured.reset()
+        exp = expectation(description: "suggestion 2")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".a {\n    font-family: serif;\n    colo", cursor: 40), gapMs: 200, typedChar: "o")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "color: blue;", "Second request after accept should succeed")
 
-        // Accept
         engine.markAccepted(on: .primary, suggestionText: captured.lastSuggestion)
 
-        // Request 3
         captured.reset()
+        exp = expectation(description: "suggestion 3")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".a {\n    font-family: serif;\n    color: blue;\n    backg", cursor: 63), gapMs: 200, typedChar: "g")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "background: white;", "Third request after two accepts should succeed")
     }
-
-    // MARK: - Out-of-order (later request completes first)
 
     func test_engine_lateRequestWins_overEarlySlowRequest() async throws {
         let inference = TestLineInferenceService()
@@ -86,15 +89,16 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
+        let exp = expectation(description: "suggestion received")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "first", cursor: 5), gapMs: 200, typedChar: "t")
         engine.requestCompletion(for: snapshot(buffer: "second", cursor: 6), gapMs: 200, typedChar: "d")
 
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await fulfillment(of: [exp], timeout: 2)
 
         XCTAssertEqual(captured.lastSuggestion, "new", "Later request result should win")
     }
-
-    // MARK: - Contextual filter suppresses low-value requests
 
     func test_engine_contextualFilter_suppressesClosingParen() async throws {
         let inference = TestLineInferenceService()
@@ -104,13 +108,14 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
+        let exp = expectation(description: "suggestion received")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "foo)", cursor: 4), gapMs: 0, typedChar: ")")
 
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertNil(captured.lastSuggestion, "Contextual filter should suppress on )")
     }
-
-    // MARK: - Adaptive token budget (FIM_Spec.md §5)
 
     func test_engine_adaptiveBudget_scalesWithTypingGap() async throws {
         let inference = TestLineInferenceService()
@@ -120,28 +125,37 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
-        // Pause → full budget.
+        var exp = expectation(description: "suggestion 1")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "foo", cursor: 3), gapMs: 400, typedChar: "o")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(inference.lastRequestMaxTokens, 64, "pause should get the full budget")
 
-        // Mid-speed → 16.
+        captured.reset()
+        exp = expectation(description: "suggestion 2")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "foo1", cursor: 4), gapMs: 250, typedChar: "1")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(inference.lastRequestMaxTokens, 16, "250ms gap should get 16 tokens")
 
-        // Faster → 8.
+        captured.reset()
+        exp = expectation(description: "suggestion 3")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "foo12", cursor: 5), gapMs: 150, typedChar: "2")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(inference.lastRequestMaxTokens, 8, "150ms gap should get 8 tokens")
 
-        // Burst → 4 (trigger char passes the fast-typing gate).
+        captured.reset()
+        exp = expectation(description: "suggestion 4")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "foo{", cursor: 4), gapMs: 50, typedChar: "{")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(inference.lastRequestMaxTokens, 4, "burst should get the minimum budget")
     }
-
-    // MARK: - Accept-verify consumes the suggestion head without a model call
 
     func test_engine_acceptVerify_consumesTypedHeadWithoutModelCall() async throws {
         let inference = TestLineInferenceService()
@@ -151,32 +165,33 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
-        // First request produces the suggestion "lor: red;".
+        var exp = expectation(description: "suggestion 1")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".foo { c", cursor: 8), gapMs: 400, typedChar: "c")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "lor: red;")
         XCTAssertEqual(inference.capturedRequests.count, 1)
 
-        // User types "l" — matches the head → remainder "or: red;" published,
-        // no second model call.
         captured.reset()
+        exp = expectation(description: "suggestion 2")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".foo { cl", cursor: 9), gapMs: 150, typedChar: "l")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "or: red;", "suggestion head should be consumed")
         XCTAssertEqual(inference.capturedRequests.count, 1, "accept-verify must not call the model")
 
-        // User deviates ("x") — model is called again with a small budget.
         captured.reset()
+        exp = expectation(description: "suggestion 3")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".foo { clx", cursor: 10), gapMs: 150, typedChar: "x")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(inference.capturedRequests.count, 2, "deviation should trigger a new model call")
         XCTAssertEqual(inference.lastRequestMaxTokens, 8, "deviation during 150ms gap should use the mid budget")
     }
 
-    // MARK: - Variant pool integration (FIM_VariantPools_Arch.md §5)
-
-    /// Deviation seeds the pool; subsequent head-consumption serves the pool
-    /// without any model call.
     func test_engine_deviationSeedsPoolAndPoolHitSkipsInference() async throws {
         let provider = MockVariantProvider()
         let poolService = VariantPoolService(provider: provider)
@@ -189,44 +204,53 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
-        // Step 1: fresh context → inference, no chain (no suggestion context yet).
+        var exp = expectation(description: "suggestion 1")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "x", cursor: 1), gapMs: 400, typedChar: "x")
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "ab")
         XCTAssertEqual(inference.capturedRequests.count, 1)
 
-        // Step 2: typed "a" extends the suggestion head → consumed, no inference.
         captured.reset()
+        exp = expectation(description: "suggestion 2")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "xa", cursor: 2), gapMs: 200, typedChar: "a")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "b", "suggestion head should be consumed")
         XCTAssertEqual(inference.capturedRequests.count, 1, "no model call on head consumption")
 
-        // Step 3: typed "b" → fully consumed → dismissed, no inference.
         captured.reset()
+        exp = expectation(description: "suggestion 3")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "xab", cursor: 3), gapMs: 200, typedChar: "b")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertNil(captured.lastSuggestion)
         XCTAssertEqual(inference.capturedRequests.count, 1)
 
-        // Step 4: typed "c" → deviation → fresh inference + pool seeded.
         captured.reset()
+        exp = expectation(description: "suggestion 4")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "xabc", cursor: 4), gapMs: 200, typedChar: "c")
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "de")
         XCTAssertEqual(inference.capturedRequests.count, 2, "deviation should re-infer")
         let variants = await poolService.variants(paneID: .primary)
         XCTAssertEqual(variants.map(\.text), ["de"], "deviation prediction should seed the pool")
 
-        // Step 5: typed "d" — pool head consumption, no model call.
         captured.reset()
+        exp = expectation(description: "suggestion 5")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "xabcd", cursor: 5), gapMs: 200, typedChar: "d")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "e", "pool variant head should be consumed")
         XCTAssertEqual(inference.capturedRequests.count, 2, "pool hit must not call the model")
     }
 
-    /// The chain fills the seeded pool with variants from the provider.
     func test_engine_chainFillsSeededPool() async throws {
         let provider = MockVariantProvider()
         provider.texts = ["alt1", "alt2", "alt3"]
@@ -242,10 +266,18 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
+        var exp = expectation(description: "suggestion 1")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "x", cursor: 1), gapMs: 400, typedChar: "x")
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await fulfillment(of: [exp], timeout: 2)
+
+        captured.reset()
+        exp = expectation(description: "suggestion 2")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: "xabc", cursor: 4), gapMs: 200, typedChar: "c")
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await fulfillment(of: [exp], timeout: 2)
 
         let deadline = Date().addingTimeInterval(5)
         var variants: [InlineCompletionVariant] = []
@@ -258,9 +290,6 @@ final class LineCompletionEngineTests: XCTestCase {
         XCTAssertEqual(provider.bansSeen.first ?? [], [100], "chained variants must ban the seed's first token")
     }
 
-    /// Consumption must happen BEFORE the gate: even during fast typing
-    /// (gapMs below the fast-typing threshold) the suggestion head is served
-    /// without a model call — the gate must never clear the ghost first.
     func test_engine_fastTypingStillConsumesSuggestionHead() async throws {
         let inference = TestLineInferenceService()
         inference.responses = [.immediate("lor: red;")]
@@ -268,22 +297,24 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
+        var exp = expectation(description: "suggestion 1")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".foo { c", cursor: 8), gapMs: 400, typedChar: "c")
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "lor: red;")
         XCTAssertEqual(inference.capturedRequests.count, 1)
 
-        // Fast keystroke extending the head — must consume, not gate-reject.
         captured.reset()
+        exp = expectation(description: "suggestion 2")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".foo { cl", cursor: 9), gapMs: 50, typedChar: "l")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "or: red;", "fast typing must still consume the head")
         XCTAssertEqual(inference.capturedRequests.count, 1, "no model call on consumption")
     }
 
-    /// Consumption has no time window — only the newline rule. Even a gap far
-    /// beyond the old 500ms accept-verify window must consume without a model
-    /// call (real typing cadence is 2-4s, which the old window never survived).
     func test_engine_consumptionWorksAfterLongGap() async throws {
         let inference = TestLineInferenceService()
         inference.responses = [.immediate("lor: red;")]
@@ -291,17 +322,21 @@ final class LineCompletionEngineTests: XCTestCase {
         let captured = CapturedLineSuggestions()
         engine.registerSuggestionHandler(for: .primary) { captured.set($0) }
 
+        var exp = expectation(description: "suggestion 1")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".foo { c", cursor: 8), gapMs: 400, typedChar: "c")
-        try await Task.sleep(nanoseconds: 700_000_000)
+        await fulfillment(of: [exp], timeout: 2)
 
         captured.reset()
+        exp = expectation(description: "suggestion 2")
+        captured.onSet = { exp.fulfill() }
+
         engine.requestCompletion(for: snapshot(buffer: ".foo { cl", cursor: 9), gapMs: 400, typedChar: "l")
-        try await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [exp], timeout: 2)
         XCTAssertEqual(captured.lastSuggestion, "or: red;", "consumption must work regardless of elapsed time")
         XCTAssertEqual(inference.capturedRequests.count, 1, "no model call on consumption")
     }
-
-    // MARK: - Helpers
 
     private func makeEngine(
         inference: TestLineInferenceService

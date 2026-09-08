@@ -111,6 +111,8 @@ struct LocalModelPromptBuilder {
             }
             return []
         }()
+        // Stage-invariant for KV stability: tool_loop vs other must not change system prefix (live 17398→8281)
+        let stableStage: AIRequestStage? = nil
         let systemPrompt = try SystemPromptAssembler().assemble(
             input: .init(
                 systemPromptOverride: settings.systemPrompt,
@@ -119,106 +121,105 @@ struct LocalModelPromptBuilder {
                 mode: mode,
                 projectRoot: projectRoot,
                 reasoningMode: settings.reasoningMode,
-                stage: stage,
-                includeModelReasoning: settings.reasoningMode.includesModelReasoning && stage != .tool_loop,
+                stage: stableStage,
+                includeModelReasoning: settings.reasoningMode.includesModelReasoning,
                 pinnedRules: pinnedRules,
                 repoMap: nil
             )
         )
         var prompt = systemPrompt
-        if settings.reasoningMode.includesModelReasoning && stage != .tool_loop {
+        // Stage-invariant: the reasoning directive must be byte-identical
+        // across iterations (tool_loop included) or the KV prefix hash
+        // changes mid-run and forces a full re-prefill. It also guarantees
+        // MAX reasoning applies to tool loops, not just the final response.
+        if settings.reasoningMode.includesModelReasoning {
             prompt += "\n\n" + ReasoningIntensity.current.systemPromptDirective
         }
         return prompt + "\n\n" + localModelResponseGuidance(mode: mode, stage: stage)
     }
 
+    /// Immutable-context budget: messages are NEVER dropped. If the total
+    /// prompt exceeds the context window, system content is truncated to make
+    /// room. This preserves the append-only KV cache prefix — the same
+    /// messages always produce the same token stream.
+    ///
+    /// Returns the computed `messageTokens` total so callers (telemetry) never
+    /// need to re-encode the history — full-history BPE encode is seconds of
+    /// CPU at 50K context and was previously run 3x per send.
+    ///
+    /// NOTE: With Mission Control, this truncation path is superseded by
+    /// controlled resets (see 05-eviction-and-reset.md). The system prompt
+    /// is never truncated — instead, a controlled reset fires at 75% context
+    /// usage and rebuilds the context from Mission Control + protected reads.
+    /// This method is kept for backward compatibility until the migration is
+    /// complete.
     func budgetMessages(
         _ messages: [ChatMessage],
         explicitContext: String?,
         systemContent: String,
         inferenceConfiguration: LocalModelInferenceConfiguration,
         approximateTokenCount: (String) -> Int
-    ) -> [ChatMessage] {
-        guard !messages.isEmpty else { return messages }
+    ) -> (messages: [ChatMessage], adjustedSystemContent: String, messageTokens: Int) {
+        guard !messages.isEmpty else { return (messages, systemContent, 0) }
 
         let reservedOutputTokens = inferenceConfiguration.maxOutputTokens
-        let systemTokens = approximateTokenCount(systemContent)
-        let explicitContextTokens = approximateTokenCount(explicitContext ?? "")
         let overheadTokens = 256
-        let availableHistoryBudget = max(
+        let availableBudget = max(
             256,
-            inferenceConfiguration.contextLength - reservedOutputTokens - systemTokens - explicitContextTokens - overheadTokens
+            inferenceConfiguration.contextLength - reservedOutputTokens - overheadTokens
         )
 
-        var selected: [ChatMessage] = []
-        var consumedTokens = 0
-
-        // Keep the trailing tool exchange INTACT: an assistant tool-call
-        // message followed by its tool results must not be split — the model
-        // would re-issue calls it already executed (or see orphaned results).
-        var pendingToolResults: [ChatMessage] = []
-        var pendingToolCall: ChatMessage?
-        for message in messages.reversed() {
-            if message.role == .tool {
-                pendingToolResults.append(message)
-                continue
-            }
-            if message.role == .assistant, message.toolCalls != nil {
-                pendingToolCall = message
-                continue
-            }
-            if message.role == .assistant, pendingToolCall != nil {
-                // previous iteration already captured a tool-call message
-                // without its results — flush as-is below.
-            }
-
-            // Non-tool message: flush the captured exchange group first.
-            var group: [ChatMessage] = []
-            if let captured = pendingToolCall {
-                group.append(captured)
-                pendingToolCall = nil
-            }
-            group.append(contentsOf: pendingToolResults.reversed())
-            pendingToolResults.removeAll()
-
-            var groupTokens = 0
-            for gm in group {
-                groupTokens += approximateTokenCount(gm.content) + 16
-            }
-            let messageTokens = approximateTokenCount(message.content) + 16
-            if consumedTokens + groupTokens + messageTokens <= availableHistoryBudget {
-                // Keep the exchange group as a unit when it fits.
-                // Because `selected` accumulates in reverse chronological order
-                // (newest to oldest), append the newer `group` (in reverse)
-                // before the older `message`.
-                for gm in group.reversed() {
-                    selected.append(gm)
-                }
-                selected.append(message)
-                consumedTokens += groupTokens + messageTokens
-                continue
-            }
-
-            // Group doesn't fit — preserve the newest user message. If that
-            // one message itself exceeds the envelope, native preflight
-            // rejects it rather than silently truncating user input.
-            if selected.isEmpty, message.role == .user {
-                selected.append(message)
-                consumedTokens += messageTokens
-            }
+        func renderedContent(_ message: ChatMessage) -> String {
+            message.role == .tool ? replayToolMessageContent(from: message) : message.content
         }
 
-        // Flush any trailing exchange captured at the loop end (newest to oldest).
-        var trailingGroup: [ChatMessage] = []
-        if let pendingToolCall {
-            trailingGroup.append(pendingToolCall)
-        }
-        trailingGroup.append(contentsOf: pendingToolResults.reversed())
-        for gm in trailingGroup.reversed() {
-            selected.append(gm)
+        // Count all message tokens — messages are immutable, never dropped
+        var messageTokens = 0
+        for message in messages {
+            messageTokens += approximateTokenCount(renderedContent(message)) + 16
         }
 
-        return selected.reversed()
+        let systemTokens = approximateTokenCount(systemContent) + approximateTokenCount(explicitContext ?? "")
+        let totalTokens = messageTokens + systemTokens
+
+        // Everything fits — no truncation needed
+        if totalTokens <= availableBudget {
+            return (messages, systemContent, messageTokens)
+        }
+
+        // Messages don't fit — truncate system content to make room.
+        let systemBudget = max(256, availableBudget - messageTokens)
+        let truncatedSystem = truncateToTokenBudget(systemContent, tokenBudget: systemBudget, approximateTokenCount: approximateTokenCount)
+
+        return (messages, truncatedSystem, messageTokens)
+    }
+
+    /// Truncate a string to fit within a token budget, cutting at paragraph
+    /// boundaries when possible.
+    private func truncateToTokenBudget(
+        _ text: String,
+        tokenBudget: Int,
+        approximateTokenCount: (String) -> Int
+    ) -> String {
+        let currentTokens = approximateTokenCount(text)
+        if currentTokens <= tokenBudget { return text }
+
+        // Try cutting at paragraph boundaries
+        let paragraphs = text.components(separatedBy: "\n\n")
+        var result = ""
+        for paragraph in paragraphs {
+            let candidate = result.isEmpty ? paragraph : result + "\n\n" + paragraph
+            if approximateTokenCount(candidate) > tokenBudget {
+                break
+            }
+            result = candidate
+        }
+        if !result.isEmpty { return result }
+
+        // Hard cut at character boundary
+        let charsPerToken = Double(text.count) / max(1, Double(currentTokens))
+        let targetChars = Int(Double(tokenBudget) * charsPerToken * 0.9)
+        return String(text.prefix(max(1, targetChars)))
     }
 
     func replayToolMessageContent(from message: ChatMessage) -> String {
@@ -237,7 +238,7 @@ struct LocalModelPromptBuilder {
     func convertToToolSpec(_ tools: [AITool]?) -> [[String: any Sendable]]? {
         guard let tools, !tools.isEmpty else { return nil }
 
-        return tools.map { tool in
+        return tools.sorted { $0.name < $1.name }.map { tool in
             let sendableParameters = convertToSendable(tool.parameters)
 
             return [
@@ -256,9 +257,7 @@ struct LocalModelPromptBuilder {
         settings: OpenRouterSettings,
         stage: AIRequestStage?
     ) -> [String: any Sendable]? {
-        // The single fixed chat model (Qwen3.5-4B) supports native
-        // thinking via `enable_thinking` — unconditional.
-        let enableThinking = settings.reasoningMode.includesModelReasoning && stage != .tool_loop
+        let enableThinking = settings.reasoningMode.includesModelReasoning
         return ["enable_thinking": enableThinking]
     }
 
@@ -277,7 +276,7 @@ struct LocalModelPromptBuilder {
             "- When the user asks for brevity, match it exactly and stop.",
             "- For coding help, prioritize code, edits, and direct conclusions over exposition."
         ]
-        if mode == .agent || mode == .coder || stage == .tool_loop {
+        if mode == .agent || mode == .coder {
             lines.append("- During agent/tool work, keep status text condensed and action-oriented.")
         }
         return lines.joined(separator: "\n")

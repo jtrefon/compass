@@ -703,7 +703,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         let tokenizer = context.tokenizer
         let stopStrings = context.configuration.effectiveStopStrings
         let toolCallFormat = context.configuration.toolCallFormat ?? .json
-        var detokenizer = NaiveStreamingDetokenizer(tokenizer: tokenizer)
+        var detokenizer = IncrementalStreamingDetokenizer(tokenizer: tokenizer)
         var stopFilter = DirectStopStringFilter(stopStrings: stopStrings)
         let toolCallProcessor = ToolCallProcessor(format: toolCallFormat, tools: nil)
 
@@ -724,7 +724,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         var lastChunkTiming = chunkTimingStart
         var chunkTimingLogCount = 0
         var streamingChunkBuffer = ""
-        var lastChunkFlush = chunkTimingStart
+        var tokensSinceLastFlush = 0
 
         var genStartTime = Date.timeIntervalSinceReferenceDate
         var promptTime: TimeInterval = 0
@@ -813,7 +813,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
                         text, toolCallProcessor: toolCallProcessor,
                         result: &result, runId: runId, eventBus: eventBus,
                         streamingChunkBuffer: &streamingChunkBuffer,
-                        lastChunkFlush: &lastChunkFlush,
+                        tokensSinceLastFlush: &tokensSinceLastFlush,
                         fullPromptTokenCount: fullPromptTokenCount,
                         recorder: recorder
                     )
@@ -841,7 +841,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
                 text, toolCallProcessor: toolCallProcessor,
                 result: &result, runId: runId, eventBus: eventBus,
                 streamingChunkBuffer: &streamingChunkBuffer,
-                lastChunkFlush: &lastChunkFlush,
+                tokensSinceLastFlush: &tokensSinceLastFlush,
                 fullPromptTokenCount: fullPromptTokenCount,
                 recorder: recorder
             )
@@ -864,7 +864,10 @@ actor NativeMLXGenerator: LocalModelGenerating {
 
         // Flush any remaining buffered streaming text.
         if let runId, !streamingChunkBuffer.isEmpty {
-            eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: streamingChunkBuffer))
+            let estimate = fullPromptTokenCount + recorder.tokenCount
+            eventBus.publish(LocalModelStreamingChunkEvent(
+                runId: runId, chunk: streamingChunkBuffer, estimatedTokens: estimate
+            ))
             streamingChunkBuffer = ""
         }
 
@@ -899,7 +902,7 @@ actor NativeMLXGenerator: LocalModelGenerating {
         runId: String?,
         eventBus: EventBusProtocol,
         streamingChunkBuffer: inout String,
-        lastChunkFlush: inout ContinuousClock.Instant,
+        tokensSinceLastFlush: inout Int,
         fullPromptTokenCount: Int,
         recorder: TokenIDRecorder
     ) {
@@ -908,17 +911,19 @@ actor NativeMLXGenerator: LocalModelGenerating {
             result.output.append(textToYield)
             if let runId, !textToYield.isEmpty {
                 streamingChunkBuffer.append(textToYield)
-                let now = ContinuousClock.now
-                let sinceLastFlushMs = Self.milliseconds(lastChunkFlush.duration(to: now))
-                if sinceLastFlushMs >= Self.streamingFlushIntervalMs {
+                tokensSinceLastFlush += 1
+                // Token-counter-based flush: at ~30 t/s, flushing every 10
+                // tokens gives ~3 flushes/sec — smooth for the UI without
+                // the per-token ContinuousClock.now cost (2 clock reads +
+                // Duration math per token, eliminated).
+                if tokensSinceLastFlush >= Self.streamingFlushTokenInterval {
                     let batch = streamingChunkBuffer
                     streamingChunkBuffer = ""
-                    lastChunkFlush = now
-                    eventBus.publish(LocalModelStreamingChunkEvent(runId: runId, chunk: batch))
+                    tokensSinceLastFlush = 0
                     let estimate = fullPromptTokenCount + recorder.tokenCount
-                    Task { @MainActor in
-                        eventBus.publish(StreamingContextUsageEvent(runId: runId, estimatedPromptTokens: estimate))
-                    }
+                    eventBus.publish(LocalModelStreamingChunkEvent(
+                        runId: runId, chunk: batch, estimatedTokens: estimate
+                    ))
                 }
             }
         }
@@ -1038,10 +1043,11 @@ actor NativeMLXGenerator: LocalModelGenerating {
     /// 95k within ~2.5s of eviction; 200ms is the minimum useful pause.
     nonisolated private static let fimEvictionDrainMs = 200
 
-    /// Streaming chunk flush interval: accumulate text and publish to the
-    /// event bus at most every ~33ms (30fps). Reduces per-token main-thread
-    /// dispatches from N/sec to ~30/sec while keeping the UI smooth.
-    nonisolated private static let streamingFlushIntervalMs = 33
+    /// Streaming chunk flush interval: flush after this many tokens instead
+    /// of every ~33ms. At ~30 t/s, 10 tokens ≈ 3 flushes/sec — smooth for
+    /// the UI. Token-counting avoids the per-token ContinuousClock.now cost
+    /// (2 clock reads + Duration math per token, eliminated).
+    nonisolated private static let streamingFlushTokenInterval = 10
 
     nonisolated private static func throwIfProcessRSSExceeded(limitMB: Int, phase: String) throws {
         let rssMB = currentProcessRSSMB()

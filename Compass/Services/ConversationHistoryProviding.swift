@@ -38,4 +38,10 @@ protocol ConversationHistoryProviding: Sendable {
     /// Clear the streaming text buffer (outputBuffer) so the next generation
     /// starts fresh and doesn't append to the previous content.
     func clearStreamingBuffer()
+
+    /// Replace the entire committed history with a fresh set.
+    /// Used exclusively by controlled context resets (Mission Control).
+    /// The KV cache is intentionally flushed; the fresh context is prefilled
+    /// from scratch.
+    func replaceWithReset(_ messages: [ChatMessage]) async
 }

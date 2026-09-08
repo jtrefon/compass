@@ -1,39 +1,40 @@
-//
-//  ReadFileTool.swift
-//  Compass
-//
-//  Created by AI Assistant on 11/01/2026.
-//
-
 import Foundation
 
-/// Read content of a file
 struct ReadFileTool: AITool {
     let name = "read"
-    let description = "Read a file at path. Large files: use start_line/end_line (numbered, paginated). Minified files: use char_offset/char_limit."
+    let description = "Read a file at path. Use limit=N to cap lines shown (default 50). Use start_line/end_line for line ranges, char_offset/char_limit for minified files."
+
     var parameters: [String: Any] {
         [
             "type": "object",
             "properties": [
                 "path": [
                     "type": "string",
-                    "description": "Project-root-relative path to a FILE (not a directory). Use `ls` to list directory contents."
+                    "description": "Project-root-relative path to a FILE (not a directory)."
+                ],
+                "limit": [
+                    "type": "integer",
+                    "description": "Max lines to return (default 50, 0 = unlimited). Use with offset=N for pagination."
+                ],
+                "offset": [
+                    "type": "integer",
+                    "description": "0-based line offset to start from (default 0)."
                 ],
                 "start_line": [
                     "type": "integer",
-                    "description": "Optional 1-based start line to read from (use for ranged reads of large files)."
+                    "description": "1-based start line (legacy, prefer limit/offset)."
                 ],
                 "end_line": [
                     "type": "integer",
-                    "description": "Optional 1-based end line to read through (inclusive)."
+                    "description": "1-based end line (legacy, prefer limit/offset)."
                 ],
                 "char_offset": [
                     "type": "integer",
-                    "description": "Optional 0-based character offset for minified/single-line files (use with char_limit)."
+                    "description": "0-based character offset for minified files."
                 ],
                 "char_limit": [
                     "type": "integer",
-                    "description": "Optional number of characters to return when using char_offset."
+                    "description": "Number of characters to return."
                 ]
             ],
             "required": ["path"]
@@ -52,7 +53,6 @@ struct ReadFileTool: AITool {
         let url = try pathValidator.validateAndResolve(path)
         let relativePath = pathValidator.relativePath(for: url)
 
-        // Check if path is a directory — read only works on files
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
             throw AppError.aiServiceError("Cannot read '\(relativePath)' — it's a directory. Use `ls` to list its contents.")
@@ -74,36 +74,42 @@ struct ReadFileTool: AITool {
             return extractCharRange(from: content, offset: charOffset, limit: charLimit)
         }
 
-        guard startLine != nil || endLine != nil else {
-            return content
+        if startLine != nil || endLine != nil {
+            let totalLines = content.components(separatedBy: .newlines).count
+            return extractLineRange(from: content, startLine: startLine ?? 1, endLine: endLine, totalLines: totalLines)
         }
 
-        let totalLines = content.components(separatedBy: .newlines).count
-        return extractLineRange(
-            from: content,
-            startLine: startLine ?? 1,
-            endLine: endLine,
-            totalLines: totalLines
-        )
+        let limit = parseLineNumber(arguments["limit"]) ?? 50
+        let offset = parseLineNumber(arguments["offset"]) ?? 0
+        return extractPage(from: content, limit: limit, offset: offset)
     }
 
-    private func parseLineNumber(_ value: Any?) -> Int? {
-        switch value {
-        case let number as Int:
-            return number
-        case let number as Int32:
-            return Int(number)
-        case let number as Int64:
-            return Int(number)
-        case let number as Double:
-            return Int(number)
-        case let number as NSNumber:
-            return number.intValue
-        case let string as String:
-            return Int(string)
-        default:
-            return nil
+    private func extractPage(from content: String, limit: Int, offset: Int) -> String {
+        let allLines = content.components(separatedBy: .newlines)
+        let totalLines = allLines.count
+        let safeOffset = max(0, min(offset, totalLines))
+
+        if limit <= 0 {
+            return formatLineRange(allLines, start: 0, end: totalLines - 1, totalLines: totalLines, startLineNum: 1)
         }
+
+        let end = min(safeOffset + limit, totalLines)
+        let body = formatLineRange(allLines, start: safeOffset, end: end - 1, totalLines: totalLines, startLineNum: safeOffset + 1)
+
+        if end >= totalLines {
+            return body
+        }
+
+        return body + "\n\n[Showing lines \(safeOffset + 1)-\(end) of \(totalLines). Use limit=\(limit) offset=\(end) to continue.]"
+    }
+
+    private func formatLineRange(_ allLines: [String], start: Int, end: Int, totalLines: Int, startLineNum: Int) -> String {
+        guard start <= end, start < allLines.count else { return "" }
+        let safeEnd = min(end, allLines.count - 1)
+        let indexedSlice = (startLineNum...(startLineNum + (safeEnd - start))).map { lineNumber in
+            "\(lineNumber): \(allLines[lineNumber - 1])"
+        }
+        return indexedSlice.joined(separator: "\n")
     }
 
     private func extractLineRange(from content: String, startLine: Int, endLine: Int?, totalLines: Int) -> String {
@@ -130,5 +136,17 @@ struct ReadFileTool: AITool {
         let slice = String(content[content.index(content.startIndex, offsetBy: start)..<content.index(content.startIndex, offsetBy: end)])
         let footer = "\n\n(Showing chars \(start)–\(end) of \(content.count). Use char_offset=\(end) to continue.)"
         return slice + footer
+    }
+
+    private func parseLineNumber(_ value: Any?) -> Int? {
+        switch value {
+        case let number as Int: return number
+        case let number as Int32: return Int(number)
+        case let number as Int64: return Int(number)
+        case let number as Double: return Int(number)
+        case let number as NSNumber: return number.intValue
+        case let string as String: return Int(string)
+        default: return nil
+        }
     }
 }

@@ -134,7 +134,7 @@ actor FIMInferenceService {
 
         if let cachedCache, !cachedCache.isEmpty, !cachedTokens.isEmpty, !promptTokenIds.isEmpty,
            promptTokenIds.count <= cachedOffset {
-            let commonLen = Self.commonPrefixLength(cachedTokens, promptTokenIds)
+            let commonLen = NativeMLXGenerator.commonPrefixLength(cachedTokens, promptTokenIds)
 
             if commonLen > 0 {
                 var reuseCache: [KVCache] = []
@@ -189,14 +189,6 @@ actor FIMInferenceService {
             kvCache = context.model.newCache(parameters: parameters)
         }
         return (kvCache, effectiveInput)
-    }
-
-    nonisolated static func commonPrefixLength(_ a: [Int], _ b: [Int]) -> Int {
-        let minLen = min(a.count, b.count)
-        for i in 0..<minLen {
-            if a[i] != b[i] { return i }
-        }
-        return minLen
     }
 
     func generateStream(
@@ -260,7 +252,7 @@ actor FIMInferenceService {
                     let stateBox = GenerationStateBox()
                     if FIMTraceLogger.shared.isEnabled {
                         let tracePromptLen = tokenIds.count
-                        let traceCommon = Self.commonPrefixLength(cachedTokens, tokenIds)
+                        let traceCommon = NativeMLXGenerator.commonPrefixLength(cachedTokens, tokenIds)
                         FIMTraceLogger.shared.log("fim.infer", [
                             "prompt": "\(tracePromptLen)",
                             "cached": "\(cachedTokens.count)",

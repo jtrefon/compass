@@ -8,6 +8,16 @@ SCHEME="Compass"
 DERIVED_DATA_PATH_APP="./.build"
 DERIVED_DATA_PATH_TEST="./.build-tests"
 
+# Build configuration. Debug is the day-to-day default (fast incremental
+# builds, testability); Release (-O, whole-module, no testability) is the
+# shipping/performance configuration. All app/benchmark commands honor this;
+# test/harness/e2e stay Debug (they need ENABLE_TESTABILITY).
+#   COMPASS_CONFIG=Release ./run.sh app
+#   COMPASS_CONFIG=Release ./run.sh benchmark-local
+BUILD_CONFIG="${COMPASS_CONFIG:-Debug}"
+# Lower-cased config for product-path lookups (Build/Products/<Config>).
+PRODUCTS_CONFIG="${BUILD_CONFIG}"
+
 prepare_derived_data_packages() {
     local derived_data_path=$1
     xcodebuild -resolvePackageDependencies \
@@ -190,9 +200,16 @@ run_with_memory_guard() {
 show_help() {
     echo "Usage: ./run.sh [command]"
     echo ""
+    echo "Configuration:"
+    echo "  COMPASS_CONFIG=Release  Build/run the app in Release (-O). Default: Debug."
+    echo "  App commands honor COMPASS_CONFIG; test/harness/e2e stay Debug."
+    echo ""
     echo "Commands:"
-    echo "  app    Build and launch the application"
-    echo "  build  Build the application"
+    echo "  app    Build and launch the application (COMPASS_CONFIG honored)"
+    echo "  app-debug    Build + launch Debug (same as plain 'app')"
+    echo "  app-release  Build + launch Release (-O, optimized — the perf config)"
+    echo "  build  Build the application (COMPASS_CONFIG honored)"
+    echo "  build-release  Build Release only (no launch)"
     echo "  test   Run unit tests [optional suite]"
     echo "         Examples: ./run.sh test | ./run.sh test JSONHighlighterTests | ./run.sh test json"
     echo "  harness Run headless harness tests (separate from CI test)"
@@ -205,6 +222,7 @@ show_help() {
     echo "         Examples: ./run.sh benchmark-offline | ./run.sh benchmark-offline sweep"
     echo "  benchmark-local  Run the local chat KPI benchmark (Qwen3.5-4B)"
     echo "         Example: COMPASS_LOCAL_MODEL_PREFILL_STEP_SIZE=512 ./run.sh benchmark-local"
+    echo "         For the optimized perf readout: COMPASS_CONFIG=Release ./run.sh benchmark-local"
     echo "  benchmark  Run the core benchmark suites (embeddings + metrics); JSON in .build-tests/benchmarks/"
     echo "  lint   Run SwiftLint locally (advisory — see .swiftlint.yml)"
     echo "  check-prompts Verify every prompt file under Prompts/ has a code reference (no orphan prompts)"
@@ -215,7 +233,8 @@ show_help() {
 }
 
 copy_embedding_models() {
-    local dest="$DERIVED_DATA_PATH_APP/Build/Products/Debug/$APP_PRODUCT_NAME.app/Contents/Resources/EmbeddingModels"
+    local config="${1:-$BUILD_CONFIG}"
+    local dest="$DERIVED_DATA_PATH_APP/Build/Products/$config/$APP_PRODUCT_NAME.app/Contents/Resources/EmbeddingModels"
     mkdir -p "$dest"
     local src="$(pwd)/Compass/Resources/EmbeddingModels"
     if [ -d "$src/bge-small-en-v1.5.mlmodelc" ]; then
@@ -227,7 +246,8 @@ copy_embedding_models() {
 }
 
 build_app() {
-    echo "Building $PROJECT_NAME..."
+    local config="${1:-$BUILD_CONFIG}"
+    echo "Building $PROJECT_NAME ($config)..."
     # NOTE: no automatic clean here — incremental builds are much faster.
     # Run `./run.sh clean` manually when stale artifacts are suspected.
     xcodebuild -resolvePackageDependencies \
@@ -237,19 +257,20 @@ build_app() {
         -skipPackagePluginValidation >/dev/null || true
     xcodebuild -quiet -project "$PROJECT_NAME.xcodeproj" \
                -scheme "$SCHEME" \
-               -configuration Debug \
+               -configuration "$config" \
                -derivedDataPath "$DERIVED_DATA_PATH_APP" \
                -skipPackagePluginValidation \
                build
-    copy_embedding_models
+    copy_embedding_models "$config"
 }
 
 launch_app() {
-    # Find the app bundle in derived data
-    APP_PATH=$(find "$DERIVED_DATA_PATH_APP" -name "$APP_PRODUCT_NAME.app" -type d | head -n 1)
-    
-    if [ -z "$APP_PATH" ]; then
-        echo "Error: Could not find built application. Please run './run.sh build' first."
+    # Launch the most recently built app bundle for the target config.
+    local config="${1:-$BUILD_CONFIG}"
+    APP_PATH=$(find "$DERIVED_DATA_PATH_APP/Build/Products/$config" -name "$APP_PRODUCT_NAME.app" -type d 2>/dev/null | head -n 1)
+
+    if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+        echo "Error: No $config build found. Please run './run.sh build' (or './run.sh app-$config') first."
         exit 1
     fi
 
@@ -652,7 +673,12 @@ run_benchmark() {
 
 run_benchmark_local() {
     local explicit_modules="${SWIFT_ENABLE_EXPLICIT_MODULES:-NO}"
-    echo "Running local chat benchmark (LocalBenchmarkHarnessTests)..."
+    # The inference KPI measures throughput — honor COMPASS_CONFIG so it can
+    # run optimized: COMPASS_CONFIG=Release ./run.sh benchmark-local.
+    # (Debug remains the default: it keeps the KPI comparable with the CI
+    # harness runs, which need testability.)
+    local bench_config="${COMPASS_CONFIG:-Debug}"
+    echo "Running local chat benchmark ($bench_config) (LocalBenchmarkHarnessTests)..."
     prepare_derived_data_packages "$DERIVED_DATA_PATH_TEST"
     quarantine_paired_ios_devices
     local harness_memory_limit_gb="${HARNESS_MAX_RSS_GB:-10}"
@@ -689,19 +715,23 @@ run_benchmark_local() {
         echo "LOCAL_BENCH_ITERATIONS=$LOCAL_BENCH_ITERATIONS" >> "$bench_conf"
     fi
     local bench_rc=0
+    # Use the dedicated CompassHarnessBenchmark scheme — it contains only the
+    # CompassHarnessTests target, so the benchmark can build against a Release
+    # app module (CompassTests needs #if DEBUG test hooks and cannot build in
+    # Release). ENABLE_TESTABILITY=YES keeps @testable import working while
+    # the app module stays -O optimized.
     run_with_memory_guard "$harness_memory_limit_gb" \
         env "${runtime_env_args[@]}" xcodebuild -project "$PROJECT_NAME.xcodeproj" \
-              -scheme "$SCHEME" \
-              -configuration Debug \
+              -scheme "CompassHarnessBenchmark" \
+              -configuration "$bench_config" \
               -derivedDataPath "$DERIVED_DATA_PATH_TEST" \
               -destination 'platform=macOS' \
               -parallel-testing-enabled NO \
               ENABLE_PREVIEWS=NO \
+              ENABLE_TESTABILITY=YES \
               SWIFT_ENABLE_EXPLICIT_MODULES="$explicit_modules" \
               test \
-              -only-testing:CompassHarnessTests/LocalBenchmarkHarnessTests \
-              -skip-testing:CompassUITests \
-              -skip-testing:CompassTests
+              -only-testing:CompassHarnessTests/LocalBenchmarkHarnessTests
     bench_rc=$?
     restore_quarantined_ios_devices
     echo "[LOCAL-BENCH] rows: <project>/.ide/logs/local-bench.ndjson"
@@ -784,13 +814,28 @@ check_prompts() {
 
 case "$COMMAND" in
     app)
-        build_app
+        build_app "$BUILD_CONFIG"
         if [ $? -eq 0 ]; then
-            launch_app
+            launch_app "$BUILD_CONFIG"
+        fi
+        ;;
+    app-debug)
+        build_app "Debug"
+        if [ $? -eq 0 ]; then
+            launch_app "Debug"
+        fi
+        ;;
+    app-release)
+        build_app "Release"
+        if [ $? -eq 0 ]; then
+            launch_app "Release"
         fi
         ;;
     build)
-        build_app
+        build_app "$BUILD_CONFIG"
+        ;;
+    build-release)
+        build_app "Release"
         ;;
     test)
         run_tests "$2"

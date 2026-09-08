@@ -44,6 +44,7 @@ final class ConversationSendCoordinator {
     private let aiInteractionCoordinator: AIInteractionCoordinator
     private let toolExecutionCoordinator: ToolExecutionCoordinator
     private let localModelToolLoop: LocalModelToolLoop
+    private let missionControlBuilder: MissionControlBuilder?
     var clearStreamingBuffer: (@MainActor () -> Void)?
 
     init(
@@ -54,14 +55,45 @@ final class ConversationSendCoordinator {
         self.historyCoordinator = historyCoordinator
         self.aiInteractionCoordinator = aiInteractionCoordinator
         self.toolExecutionCoordinator = toolExecutionCoordinator
+
+        // Mission Control — gated by COMPASS_ENABLE_MISSION_CONTROL for safe rollout
+        let mcEnabled = ProcessInfo.processInfo.environment["COMPASS_ENABLE_MISSION_CONTROL"] == "1"
+        let mcBuilder: MissionControlBuilder? = mcEnabled ? MissionControlBuilder() : nil
+        self.missionControlBuilder = mcBuilder
+
         self.localModelToolLoop = LocalModelToolLoop(
             history: historyCoordinator,
             aiInteractionCoordinator: aiInteractionCoordinator,
-            toolExecutionCoordinator: toolExecutionCoordinator
+            toolExecutionCoordinator: toolExecutionCoordinator,
+            missionControlBuilder: mcBuilder,
+            contextLength: Self.resolveLocalContextLength()
         )
     }
 
+    private static func resolveLocalContextLength() -> Int {
+        // 1. Env override (highest priority — used by benchmarks/harness)
+        let env = ProcessInfo.processInfo.environment
+        if let raw = env["COMPASS_LOCAL_MODEL_CONTEXT_LENGTH"], let val = Int(raw), val > 0 {
+            return val
+        }
+
+        // 2. User-configured settings value (from the settings slider)
+        let settingsStore = UserDefaults.standard
+        let stored = settingsStore.integer(forKey: LocalModelSettingsKeys.contextLength)
+        if stored > 0 {
+            return min(stored, LocalModelInferenceOverrides.maxModelContextLength)
+        }
+
+        // 3. Model default (32768 for Qwen3.5-4B)
+        return LocalModelCatalog.chatModel.defaultContextLength
+    }
+
     func send(_ request: SendRequest) async throws {
+        // FIM must yield its ~1GB to the chat model for the whole run
+        // (re-warms afterwards if the cursor is still on source code).
+        FIMLifecycleController.shared.chatRunBegan()
+        defer { FIMLifecycleController.shared.chatRunEnded() }
+
         await AppLogger.shared.debug(
             category: .conversation,
             message: "send.start",
@@ -154,7 +186,8 @@ final class ConversationSendCoordinator {
             toolExecutor: toolExecutionCoordinator,
             projectRoot: request.projectRoot,
             request: request,
-            classification: classification
+            classification: classification,
+            missionControlBuilder: missionControlBuilder
         )
         return try await loop.run()
     }

@@ -1,17 +1,36 @@
 # AGENTS.md
 
+> Engineering standards live in [CODING_STANDARDS.md](CODING_STANDARDS.md) (architecture,
+> SOLID, TDD, DRY/SRP/KISS/YAGNI, static analysis) and [DESIGN_STANDARDS.md](DESIGN_STANDARDS.md)
+> (UI/UX). This file documents the engine's live-path invariants.
+
 ## Commands
 
 ```sh
-./run.sh build            # Full Xcode build
+./run.sh build            # Full Xcode build (Debug by default)
+./run.sh app-release      # Build + launch Release (-O, optimized — the perf config)
+./run.sh build-release    # Release build only
+COMPASS_CONFIG=Release ./run.sh app        # any app command honors the env override
+COMPASS_CONFIG=Release ./run.sh benchmark-local   # inference KPI in Release
 ./run.sh test             # Unit tests (skips UI-heavy suites)
 ./run.sh test SuiteName   # Single suite filter (e.g. LogCoordinatorTests)
 ./run.sh harness          # Headless integration tests
 ./run.sh e2e              # XCUITest suites
 ./run.sh check-prompts    # Guardrail: no orphan prompt files (no code reference)
-./run.sh benchmark-local  # Local chat KPI benchmark (Qwen3.5-4B); knobs via COMPASS_LOCAL_MODEL_*
-./run.sh clean            # rm -rf .build .build-tests + xcodebuild clean
 ```
+
+> **Inference perf depends on build config.** Debug (`-Onone`) costs ~50% decode
+> throughput vs Release (`-O`) — measured 14.1 vs 23.6 t/s on the same
+> benchmark task. Always measure/compare local-model KPIs in Release
+> (`COMPASS_CONFIG=Release ./run.sh benchmark-local`); Debug is for
+> development only. The local-chat benchmark uses the dedicated
+> `CompassHarnessBenchmark` scheme (harness target only) so it can build
+> against a Release app module (CompassTests requires `#if DEBUG` hooks).
+>
+> ```sh
+> ./run.sh benchmark-local  # Local chat KPI benchmark (Qwen3.5-4B); knobs via COMPASS_LOCAL_MODEL_*
+> ./run.sh clean            # rm -rf .build .build-tests + xcodebuild clean
+> ```
 
 Build runs via `xcodebuild`, not `swift build`. Scheme = `Compass`. Derived data: `.build/` for app, `.build-tests/` for tests.
 

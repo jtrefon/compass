@@ -548,6 +548,10 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         currentInput = ""
         sessionCoordinator.clearHistory()
         updateCancelledToolCallIds { $0.removeAll() }
+        // Clean up Mission Control working memory for this conversation
+        let convId = sessionManager.selectedId
+        Task { await WorkingMemoryStore.shared.clear(conversationId: convId) }
+        Task { await ToolResultNoteTracker.shared.clear(conversationId: convId) }
     }
 
     func startNewConversation() {
@@ -556,6 +560,10 @@ final class ConversationManager: ObservableObject, ConversationManagerProtocol {
         saveCurrentSessionSnapshot()
         currentInput = ""
         sessionCoordinator.clearHistory()
+        // Clean up Mission Control working memory for the old conversation
+        let oldConvId = sessionManager.selectedId
+        Task { await WorkingMemoryStore.shared.clear(conversationId: oldConvId) }
+        Task { await ToolResultNoteTracker.shared.clear(conversationId: oldConvId) }
 
         let oldConversationId = sessionManager.selectedId
         let newConversationId = sessionCoordinator.startNew(

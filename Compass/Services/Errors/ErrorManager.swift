@@ -46,7 +46,7 @@ class ErrorManager: ObservableObject, ErrorManagerProtocol {
         logError(error, context: context)
 
         // Auto-dismiss info and warning errors after delay
-        if error.severity == .info || error.severity == .warning {
+        if error.severity == .warning {
             let targetSeverity = error.severity
             pendingAutoDismissTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(AppConstantsTime.errorAutoDismissDelay * 1_000_000_000))

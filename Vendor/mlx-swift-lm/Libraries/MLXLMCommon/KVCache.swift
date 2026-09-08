@@ -838,12 +838,20 @@ public class QuantizedKVCache: BaseKVCache, QuantizedKVCacheProtocol {
     public private(set) var groupSize: Int
     public private(set) var bits: Int
     public let mode: QuantizationMode
+    /// Maximum number of tokens to retain. When the cache exceeds this,
+    /// the oldest tokens are trimmed during `updateQuantized`. nil = unbounded.
+    private var maxCacheSize: Int?
+    private var keepFront: Int
 
-    public init(groupSize: Int = 64, bits: Int = 8, mode: QuantizationMode = .affine) {
+    public override var maxSize: Int? { maxCacheSize }
+
+    public init(groupSize: Int = 64, bits: Int = 8, mode: QuantizationMode = .affine, maxSize: Int? = nil, keep: Int = 4) {
         self.groupSize = groupSize
         self.bits = bits
         self.step = 1024
         self.mode = mode
+        self.maxCacheSize = maxSize
+        self.keepFront = keep
         super.init()
     }
 
@@ -1005,11 +1013,29 @@ public class QuantizedKVCache: BaseKVCache, QuantizedKVCacheProtocol {
         self.keys = currentKeys
         self.values = currentValues
 
+        // Bounded quantized cache: trim oldest tokens when offset exceeds maxSize.
+        // Preserves `keepFront` tokens at the front (RoPE stability) and the
+        // most recent `maxCacheSize - keepFront` tokens, dropping everything in
+        // between. Offset is NOT capped — it grows monotonically so new tokens
+        // get correct RoPE positions from `ropeOffset`.
+        if let maxCacheSize, offset > maxCacheSize {
+            let tailStart = offset - (maxCacheSize - keepFront)
+            if tailStart > keepFront {
+                self.keys = treeMap({ c in concatenated([c[.ellipsis, ..<keepFront, 0...], c[.ellipsis, tailStart ..< offset, 0...]], axis: 2) }, currentKeys)
+                self.values = treeMap({ c in concatenated([c[.ellipsis, ..<keepFront, 0...], c[.ellipsis, tailStart ..< offset, 0...]], axis: 2) }, currentValues)
+            } else {
+                self.keys = treeMap({ $0[.ellipsis, ..<maxCacheSize, 0...] }, currentKeys)
+                self.values = treeMap({ $0[.ellipsis, ..<maxCacheSize, 0...] }, currentValues)
+            }
+        }
+
         cacheDebugLog("QuantizedKVCache.updateQuantized: offset=\(self.offset), kSteps=\(self.keys?.0.dim(-2) ?? -1), vSteps=\(self.values?.0.dim(-2) ?? -1), groupSize=\(self.groupSize), bits=\(self.bits)")
 
-        // Return quantized tuples
-        let trimmedKeys = treeMap({ $0[.ellipsis, ..<offset, 0...] }, currentKeys)
-        let trimmedValues = treeMap({ $0[.ellipsis, ..<offset, 0...] }, currentValues)
+        // Return quantized tuples. When offset exceeds the stored size (bounded
+        // cache after trim), return the full stored array without slicing.
+        let returnLen = min(offset, self.keys!.0.dim(-2))
+        let trimmedKeys = treeMap({ $0[.ellipsis, ..<returnLen, 0...] }, self.keys!)
+        let trimmedValues = treeMap({ $0[.ellipsis, ..<returnLen, 0...] }, self.values!)
 
         return (trimmedKeys, trimmedValues)
     }
@@ -1059,15 +1085,34 @@ public class QuantizedKVCache: BaseKVCache, QuantizedKVCacheProtocol {
     }
 
     public override var metaState: [String] {
-        get { [String(step), String(offset), String(groupSize), String(bits)] }
+        get { [String(step), String(offset), String(groupSize), String(bits), maxCacheSize.map(String.init) ?? "None", String(keepFront)] }
         set {
-            guard newValue.count == 4 else {
-                fatalError("QuantizedKVCache metaState must have exactly 4 values")
+            // Backward-compatible: old format had 4 values [step, offset, groupSize, bits].
+            // New format has 6 values [+ maxCacheSize, + keepFront].
+            if newValue.count == 4 {
+                guard
+                    let offset = Int(newValue[1]),
+                    let groupSize = Int(newValue[2]),
+                    let bits = Int(newValue[3])
+                else {
+                    fatalError("Failed to convert QuantizedKVCache metaState values to integers")
+                }
+                self.offset = offset
+                self.groupSize = groupSize
+                self.bits = bits
+                self.maxCacheSize = nil
+                self.keepFront = 0
+                return
+            }
+
+            guard newValue.count == 6 else {
+                fatalError("QuantizedKVCache metaState must have 4 (legacy) or 6 values, got \(newValue.count)")
             }
             guard
                 let offset = Int(newValue[1]),
                 let groupSize = Int(newValue[2]),
-                let bits = Int(newValue[3])
+                let bits = Int(newValue[3]),
+                let keepFront = Int(newValue[5])
             else {
                 fatalError("Failed to convert QuantizedKVCache metaState values to integers")
             }
@@ -1075,6 +1120,8 @@ public class QuantizedKVCache: BaseKVCache, QuantizedKVCacheProtocol {
             self.offset = offset
             self.groupSize = groupSize
             self.bits = bits
+            self.maxCacheSize = newValue[4] == "None" ? nil : Int(newValue[4])
+            self.keepFront = keepFront
         }
     }
 
@@ -1083,12 +1130,17 @@ public class QuantizedKVCache: BaseKVCache, QuantizedKVCacheProtocol {
     @discardableResult
     public override func trim(_ n: Int) -> Int {
         let trimmed = min(offset, n)
-        offset -= trimmed
+        let newOffset = offset - trimmed
+        if trimmed > 0, let k = keys, let v = values {
+            keys = treeMap({ $0[.ellipsis, trimmed ..< offset, 0...] }, k)
+            values = treeMap({ $0[.ellipsis, trimmed ..< offset, 0...] }, v)
+        }
+        offset = newOffset
         return trimmed
     }
 
     public override func copy() -> any KVCache {
-        let new = QuantizedKVCache(groupSize: groupSize, bits: bits, mode: mode)
+        let new = QuantizedKVCache(groupSize: groupSize, bits: bits, mode: mode, maxSize: maxCacheSize, keep: keepFront)
         let s = self.state
         if !s.isEmpty {
             new.state = s.map { $0[.ellipsis] }

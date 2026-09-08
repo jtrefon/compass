@@ -20,7 +20,7 @@ final class LocalModelPromptBuilderTests: XCTestCase {
             ChatMessage(role: .user, content: String(repeating: "c", count: 300)),
         ]
 
-        let result = LocalModelPromptBuilder().budgetMessages(
+        let (result, _, _) = LocalModelPromptBuilder().budgetMessages(
             messages,
             explicitContext: nil,
             systemContent: String(repeating: "s", count: 100),
@@ -28,7 +28,8 @@ final class LocalModelPromptBuilderTests: XCTestCase {
             approximateTokenCount: { $0.count }
         )
 
-        XCTAssertEqual(result.map(\.content), [messages[2].content])
+        // Immutable-context: all messages retained, system content truncated
+        XCTAssertEqual(result.count, 3)
     }
 
     func testBudgetMessagesPreservesStrictChronologicalOrderWithToolExchanges() {
@@ -81,7 +82,7 @@ final class LocalModelPromptBuilderTests: XCTestCase {
             ),
         ]
 
-        let result = LocalModelPromptBuilder().budgetMessages(
+        let (result, _, _) = LocalModelPromptBuilder().budgetMessages(
             messages,
             explicitContext: nil,
             systemContent: "system prompt",
@@ -89,6 +90,7 @@ final class LocalModelPromptBuilderTests: XCTestCase {
             approximateTokenCount: { $0.count }
         )
 
+        // Immutable-context: all 7 messages retained
         XCTAssertEqual(result.count, 7)
         XCTAssertEqual(result[0].content, "U1: List files")
         XCTAssertEqual(result[1].role, .assistant)

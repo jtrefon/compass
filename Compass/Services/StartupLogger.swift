@@ -34,7 +34,7 @@ enum StartupLogger {
             } else {
                 if let handle = try? FileHandle(forWritingTo: logURL) {
                     _ = try? handle.seekToEnd()
-                    try? handle.write(contentsOf: line.data(using: .utf8)!)
+                    try? handle.write(contentsOf: line.data(using: .utf8) ?? Data())
                     try? handle.close()
                 }
             }

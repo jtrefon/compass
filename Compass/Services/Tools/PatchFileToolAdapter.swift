@@ -37,7 +37,8 @@ struct PatchFileToolAdapter: AITool {
             ],
             "start_line": ["type": "integer", "description": "1-based line where replacement begins (line-range mode)."],
             "end_line": ["type": "integer", "description": "1-based inclusive end line (line-range mode)."],
-            "new_content": ["type": "string", "description": "Replacement content for the line range (line-range mode)."]
+            "new_content": ["type": "string", "description": "Replacement content for the line range (line-range mode)."],
+            "limit": ["type": "integer", "description": "Max diff lines to show (default 30, 0 = unlimited). Footer shows total diff size."]
         ], "required": ["path"]]
     }
 
@@ -50,6 +51,7 @@ struct PatchFileToolAdapter: AITool {
         let startLine = (raw["start_line"] as? Int) ?? 0
         let endLine = (raw["end_line"] as? Int) ?? 0
         let newContent = raw["new_content"] as? String ?? ""
+        let diffLimit = max(0, (raw["limit"] as? Int) ?? 30)
 
         let url: URL
         if path.hasPrefix("/") { url = URL(fileURLWithPath: path) }
@@ -75,7 +77,8 @@ struct PatchFileToolAdapter: AITool {
                 oldString: oldString!,
                 newString: newString!,
                 replaceAll: replaceAll,
-                fm: fm
+                fm: fm,
+                diffLimit: diffLimit
             )
         }
 
@@ -90,7 +93,8 @@ struct PatchFileToolAdapter: AITool {
             startLine: startLine,
             endLine: endLine,
             newContent: newContent,
-            fm: fm
+            fm: fm,
+            diffLimit: diffLimit
         )
     }
 
@@ -103,7 +107,8 @@ struct PatchFileToolAdapter: AITool {
         oldString: String,
         newString: String,
         replaceAll: Bool,
-        fm: FileManager
+        fm: FileManager,
+        diffLimit: Int
     ) throws -> String {
         let matchCount = countOccurrences(in: content, of: oldString)
 
@@ -129,7 +134,7 @@ struct PatchFileToolAdapter: AITool {
             return "status: error\nmessage: Verification failed\nerror_code: VERIFICATION_FAILED\nrecoverable: true"
         }
 
-        let diff = diffPreview(oldText: oldString, newText: newString)
+        let diff = diffPreview(oldText: oldString, newText: newString, limit: diffLimit)
         let matchPhrase = matchCount == 1 ? "1 match" : "\(matchCount) matches"
         return "status: success\nmessage: Patched \(path) (\(matchPhrase), old_string → new_string)\ncontent:\n  \(diff.replacingOccurrences(of: "\n", with: "\n  "))"
     }
@@ -144,10 +149,23 @@ struct PatchFileToolAdapter: AITool {
         return count
     }
 
-    private func diffPreview(oldText: String, newText: String) -> String {
+    private func diffPreview(oldText: String, newText: String, limit: Int) -> String {
         var lines: [String] = ["--- old_string", "+++ new_string"]
-        for l in oldText.components(separatedBy: "\n") { lines.append("-\(l)") }
-        for l in newText.components(separatedBy: "\n") { lines.append("+\(l)") }
+        let oldLines = oldText.components(separatedBy: "\n")
+        let newLines = newText.components(separatedBy: "\n")
+        let totalLines = oldLines.count + newLines.count
+
+        if limit > 0, totalLines > limit {
+            let half = max(1, limit / 2)
+            for l in oldLines.prefix(half) { lines.append("-\(l)") }
+            if oldLines.count > half { lines.append("-... [\(oldLines.count - half) lines truncated]") }
+            for l in newLines.prefix(half) { lines.append("+\(l)") }
+            if newLines.count > half { lines.append("+... [\(newLines.count - half) lines truncated]") }
+            lines.append("[Diff capped at \(limit) lines of \(totalLines). Use limit=0 for full diff.]")
+        } else {
+            for l in oldLines { lines.append("-\(l)") }
+            for l in newLines { lines.append("+\(l)") }
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -160,7 +178,8 @@ struct PatchFileToolAdapter: AITool {
         startLine: Int,
         endLine: Int,
         newContent: String,
-        fm: FileManager
+        fm: FileManager,
+        diffLimit: Int
     ) -> String {
         var lines = content.components(separatedBy: "\n")
         let total = lines.count
@@ -187,8 +206,21 @@ struct PatchFileToolAdapter: AITool {
         }
 
         var diff = "--- a (lines \(startLine)-\(endLine))\n+++ b (lines \(startLine)-\(endLine))\n"
-        for l in oldContent.components(separatedBy: "\n") { diff += "-\(l)\n" }
-        for l in newContent.components(separatedBy: "\n") { diff += "+\(l)\n" }
+        let oldLines = oldContent.components(separatedBy: "\n")
+        let newLines = newContent.components(separatedBy: "\n")
+        let totalDiffLines = oldLines.count + newLines.count
+
+        if diffLimit > 0, totalDiffLines > diffLimit {
+            let half = max(1, diffLimit / 2)
+            for l in oldLines.prefix(half) { diff += "-\(l)\n" }
+            if oldLines.count > half { diff += "-... [\(oldLines.count - half) lines truncated]\n" }
+            for l in newLines.prefix(half) { diff += "+\(l)\n" }
+            if newLines.count > half { diff += "+... [\(newLines.count - half) lines truncated]\n" }
+            diff += "[Diff capped at \(diffLimit) lines of \(totalDiffLines). Use limit=0 for full diff.]\n"
+        } else {
+            for l in oldLines { diff += "-\(l)\n" }
+            for l in newLines { diff += "+\(l)\n" }
+        }
 
         return "status: success\nmessage: Patched \(path) (lines \(startLine)-\(endLine))\ncontent:\n  \(diff.replacingOccurrences(of: "\n", with: "\n  "))"
     }

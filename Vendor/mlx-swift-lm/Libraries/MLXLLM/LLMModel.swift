@@ -31,8 +31,7 @@ extension LLMModel {
             var state: LMOutput.State?
             while y.tokens.size > prefillStepSize {
                 let input = y[.newAxis, ..<prefillStepSize]
-                let output = self(input, cache: cache.isEmpty ? nil : cache, state: state)
-                state = output.state
+                state = prefillStep(input, cache: cache.isEmpty ? nil : cache, state: state)
                 asyncEval(cache)
                 y = y[prefillStepSize...]
             }

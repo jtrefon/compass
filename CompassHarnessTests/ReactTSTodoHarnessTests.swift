@@ -66,7 +66,7 @@ final class ReactTSTodoHarnessTests: XCTestCase {
         5. When everything compiles, summarize exactly what you changed and confirm tsc passes.
         """
 
-        let completed = try await HarnessRuntime.sendAndWait(prompt, manager: manager, timeout: 1200)
+        let completed = try await HarnessRuntime.sendAndWait(prompt, manager: manager, timeout: 600)
         XCTAssertTrue(completed, "Refactor run must complete within the deadline")
 
         logTelemetry(manager, runtime: runtime)

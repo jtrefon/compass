@@ -104,10 +104,16 @@ public final class EventBus: EventBusProtocol, @unchecked Sendable {
 public struct LocalModelStreamingChunkEvent: Event {
     public let runId: String
     public let chunk: String
+    /// Running token estimate (prompt + generated so far). When non-nil,
+    /// the status bar can use this directly instead of requiring a
+    /// separate StreamingContextUsageEvent dispatch — eliminates a
+    /// per-flush `Task { @MainActor in ... }` allocation in the decode loop.
+    public let estimatedTokens: Int?
 
-    public init(runId: String, chunk: String) {
+    public init(runId: String, chunk: String, estimatedTokens: Int? = nil) {
         self.runId = runId
         self.chunk = chunk
+        self.estimatedTokens = estimatedTokens
     }
 }
 

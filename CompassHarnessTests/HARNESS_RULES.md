@@ -41,6 +41,12 @@ private func makeRuntime() async throws -> Runtime {
 }
 ```
 
+## Validation helpers
+
+- `HarnessRuntime.logCheck(_:label:)` — structured check logging (prefixed with `[HARNESS]`)
+- `HarnessRuntime.assertNoRawToolMarkup(_:)` — verifies no tool markup leaked into the final answer
+- `HarnessRuntime.listAllFiles(under:)` — lists all files under a directory
+
 ## When a harness test fails
 
 The APP code is wrong, not the harness. Go fix the app.

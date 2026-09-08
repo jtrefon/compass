@@ -50,7 +50,7 @@ struct ToolTimeoutCenterTests {
     @Test("Explicit cancellation is distinct from expiry")
     func explicitCancelIsDistinct() async {
         let center = ToolTimeoutCenter()
-        center.begin(toolCallId: "call_c", toolName: "bash", targetFile: nil, timeoutSeconds: 600)
+        center.begin(toolCallId: "call_c", toolName: "bash", targetFile: nil, timeoutSeconds: 120)
         center.cancel(toolCallId: "call_c")
         #expect(center.isCancelled(toolCallId: "call_c") == true)
         #expect(center.isExpired(toolCallId: "call_c") == false, "cancelled tools must not surface as timeouts")
@@ -59,7 +59,7 @@ struct ToolTimeoutCenterTests {
     @Test("Finish removes the entry")
     func finishClearsState() async {
         let center = ToolTimeoutCenter()
-        center.begin(toolCallId: "call_f", toolName: "bash", targetFile: nil, timeoutSeconds: 600)
+        center.begin(toolCallId: "call_f", toolName: "bash", targetFile: nil, timeoutSeconds: 120)
         center.finish(toolCallId: "call_f")
         #expect(center.isExpired(toolCallId: "call_f") == false)
         #expect(center.remainingSeconds(toolCallId: "call_f") == nil)
